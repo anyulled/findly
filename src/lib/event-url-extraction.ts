@@ -104,6 +104,8 @@ function eventDateTime(value: unknown): { date: string; time: string } {
   if (typeof value !== "string" || !value.trim()) return { date: "", time: "" };
   const raw = value.trim();
   if (/^\d{4}-\d{2}-\d{2}$/u.test(raw)) return { date: raw, time: "" };
+  const floatingDateTime = /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})(?::\d{2}(?:\.\d+)?)?$/u.exec(raw);
+  if (floatingDateTime) return { date: floatingDateTime[1], time: `${floatingDateTime[2]}:${floatingDateTime[3]}` };
   const instant = new Date(raw);
   if (!Number.isFinite(instant.getTime())) return { date: "", time: "" };
   return formatMadridDateTime(instant);

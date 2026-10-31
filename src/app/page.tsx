@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import styles from "./page.module.css";
 import { validatePost } from "@/lib/social-validation";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
@@ -8,6 +8,7 @@ import { detectTitleLanguage, type PostLanguage } from "@/lib/language";
 import { approvePost, confirmPostMissingFromBuffer, createEvent, generateReviewPosts, loadWorkspace, reconcileScheduledPost, retryFailedPost, saveBufferChannel, updateAccountVoice, updatePostContent, updatePublishingMode, type SourceView } from "./workspace-actions";
 import { SourceSettings } from "./source-settings";
 import Image from "next/image";
+import { sourceForEventUrl } from "@/lib/event-source";
 
 type Range = "Quincena" | "Semana" | "Mes";
 type Status = "review" | "approved" | "scheduling" | "scheduled" | "published" | "failed" | "needs_reconciliation";
@@ -94,9 +95,23 @@ function Dashboard() {
   const [sourceUrl, setSourceUrl] = useState("");
   const [extractingEvent, setExtractingEvent] = useState(false);
   const [extractionMessage, setExtractionMessage] = useState("");
+  const extractionRequestId = useRef(0);
+  const addFormOpen = useRef(false);
   const [hydrated, setHydrated] = useState(false);
   const [feedback, setFeedback] = useState("");
   const persistent = isSupabaseConfigured();
+
+  function openAddForm() {
+    extractionRequestId.current += 1;
+    addFormOpen.current = true;
+    setShowAdd(true);
+  }
+  function closeAddForm() {
+    extractionRequestId.current += 1;
+    addFormOpen.current = false;
+    setExtractingEvent(false);
+    setShowAdd(false);
+  }
 
   // This effect runs once to hydrate browser-only demo state after mount.
   /* eslint-disable react-hooks/set-state-in-effect */
@@ -165,14 +180,14 @@ function Dashboard() {
     if (selected) setSelected({ ...selected, ...changes });
   }
   async function addEvent() {
+    if (extractingEvent) return;
     if (!newEvent.title.trim() || !newEvent.date || !newEvent.time) return;
     let parsedUrl: URL | null = null;
     try {
       const candidate = new URL(sourceUrl.trim());
       if (candidate.protocol === "https:" || candidate.protocol === "http:") parsedUrl = candidate;
     } catch { /* A missing or invalid link falls back to manual event entry. */ }
-    const host = parsedUrl?.hostname ?? "";
-    const source = host === "lu.ma" || host.endsWith(".lu.ma") || host === "luma.com" || host.endsWith(".luma.com") ? "Luma" : host === "meetup.com" || host.endsWith(".meetup.com") ? "Meetup" : "Manual";
+    const source = sourceForEventUrl(parsedUrl?.toString());
     const draftEvent = { ...newEvent, source, url: parsedUrl?.toString() };
     let savedEvent: EventItem | null = null;
     try {
@@ -187,7 +202,7 @@ function Dashboard() {
     } catch (error) {
       if (savedEvent) {
         setFeedback(`El evento quedó guardado, pero no se guardaron todos sus borradores. Puedes reintentarlo desde la ficha del evento. ${error instanceof Error ? error.message : ""}`);
-        setShowAdd(false);
+        closeAddForm();
         setNewEvent({ title: "", date: "", time: "", place: "", description: "", source: "Manual" });
         setSourceUrl("");
         setExtractionMessage("");
@@ -197,7 +212,7 @@ function Dashboard() {
       }
       return;
     }
-    setShowAdd(false);
+    closeAddForm();
     setNewEvent({ title: "", date: "", time: "", place: "", description: "", source: "Manual" });
     setSourceUrl("");
     setExtractionMessage("");
@@ -206,30 +221,34 @@ function Dashboard() {
 
   async function extractEventFromUrl() {
     if (!sourceUrl.trim()) return;
+    const requestId = ++extractionRequestId.current;
+    const requestedUrl = sourceUrl;
     setExtractingEvent(true);
     setExtractionMessage("");
     try {
       const response = await fetch("/api/events/extract", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: sourceUrl }),
+        body: JSON.stringify({ url: requestedUrl }),
       });
       const payload = await response.json() as { event?: typeof newEvent & { url: string }; missingFields?: string[]; error?: string };
       if (!response.ok || !payload.event || !payload.missingFields) throw new Error(payload.error ?? "No se pudieron extraer los datos del evento.");
+      if (requestId !== extractionRequestId.current || !addFormOpen.current) return;
       const result = { event: payload.event, missingFields: payload.missingFields };
       setNewEvent((current) => ({
         ...current,
         ...result.event,
-        source: new URL(result.event.url).hostname.endsWith("meetup.com") ? "Meetup" : "Luma",
+        source: sourceForEventUrl(result.event.url),
       }));
       setSourceUrl(result.event.url);
       setExtractionMessage(result.missingFields.length === 0
         ? "Datos extraídos. Revísalos antes de crear el evento."
         : `Extraje lo disponible; completa estos campos: ${result.missingFields.map((field) => ({ date: "fecha", time: "hora", place: "lugar", description: "descripción" })[field]).join(", ")}.`);
     } catch (error) {
+      if (requestId !== extractionRequestId.current || !addFormOpen.current) return;
       setExtractionMessage(error instanceof Error ? error.message : "No se pudieron extraer los datos del evento.");
     } finally {
-      setExtractingEvent(false);
+      if (requestId === extractionRequestId.current && addFormOpen.current) setExtractingEvent(false);
     }
   }
 
@@ -349,9 +368,9 @@ function Dashboard() {
     </aside>
 
     <section className={styles.main}>
-      <header className={styles.topbar}><div className={styles.breadcrumb}>Workspace <span>/</span> <b>{tab}</b></div><div className={styles.topActions}><span className={styles.tz}>◷ &nbsp;Europe/Madrid</span><button className={styles.helpBtn}>? <span>Ayuda</span></button><button className={styles.addButton} onClick={() => setShowAdd(true)}><span>＋</span> Añadir evento</button></div></header>
+      <header className={styles.topbar}><div className={styles.breadcrumb}>Workspace <span>/</span> <b>{tab}</b></div><div className={styles.topActions}><span className={styles.tz}>◷ &nbsp;Europe/Madrid</span><button className={styles.helpBtn}>? <span>Ayuda</span></button><button className={styles.addButton} onClick={openAddForm}><span>＋</span> Añadir evento</button></div></header>
       <div className={styles.content}>
-        {tab === "Calendario" && <><div className={styles.pageHeading}><div><div className={styles.eyebrow}>TU CONTENIDO, DE UN VISTAZO</div><h1>Calendario</h1><p>Todos tus anuncios, en un solo lugar.</p></div><button className={styles.mobileAdd} onClick={() => setShowAdd(true)}>＋ Evento</button></div>
+        {tab === "Calendario" && <><div className={styles.pageHeading}><div><div className={styles.eyebrow}>TU CONTENIDO, DE UN VISTAZO</div><h1>Calendario</h1><p>Todos tus anuncios, en un solo lugar.</p></div><button className={styles.mobileAdd} onClick={openAddForm}>＋ Evento</button></div>
           {!persistent && <div className={styles.notice}><span className={styles.noticeIcon}>✦</span><div><b>Modo demostración</b><span>Los cambios se guardan en este navegador. Configura Supabase para usar persistencia compartida.</span></div><button onClick={() => setTab("Ajustes")}>Ver configuración <span>→</span></button></div>}
           {persistent && <div className={styles.notice}><span className={styles.noticeIcon}>✓</span><div><b>Datos guardados en Supabase</b><span>Los recordatorios se programan por Buffer al aprobarlos o al generarlos en modo automático. Los resultados inciertos requieren conciliación manual.</span></div><button onClick={() => setTab("Ajustes")}>Ver configuración <span>→</span></button></div>}
           {feedback && <p role="alert" style={{ color: "#a43a32", background: "#fff1f0", borderRadius: 8, padding: "10px 14px" }}>{feedback}</p>}
@@ -366,7 +385,7 @@ function Dashboard() {
           <div className={styles.legend}><span><i className={styles.legendReview}/> Revisión pendiente</span><span><i className={styles.legendApproved}/> Aprobada</span><span><i className={styles.legendScheduled}/> Programada</span><span className={styles.legendCount}>{posts.filter((p) => p.status === "review").length} pendientes de revisión</span></div>
         </>}
 
-        {tab === "Eventos" && <><div className={styles.pageHeading}><div><div className={styles.eyebrow}>EVENTOS DETECTADOS Y MANUALES</div><h1>Eventos</h1><p>Gestiona los eventos y las publicaciones que generan.</p></div><button className={styles.addButton} onClick={() => setShowAdd(true)}>＋ Añadir evento</button></div><div className={styles.eventsList}>{events.map((event) => { const eventPosts = posts.filter((post) => post.eventId === event.id); const expected = expectedPostCount(event, accountList); return <article key={event.id} className={styles.eventCard}><div className={styles.eventDate}><b>{dateAt(event.date).toLocaleDateString("es-ES", { day: "2-digit" })}</b><span>{dateAt(event.date).toLocaleDateString("es-ES", { month: "short" })}</span></div><div className={styles.eventInfo}><div className={styles.eventMeta}><span className={styles.sourceTag}>{event.source}</span><span>{event.time} · {event.place}</span></div><h3>{event.title}</h3><p>{event.description}</p><div className={styles.eventFoot}>{eventPosts.length} publicaciones previstas {persistent && eventPosts.length < expected && expected > 0 && <button className={styles.morePosts} onClick={() => { void retryDrafts(event); }}>Completar recordatorios</button>} <a href={event.url ?? (event.source === "Luma" ? "https://lu.ma" : event.source === "Meetup" ? "https://meetup.com" : "#")} target={event.url ? "_blank" : undefined} rel="noreferrer">{event.source === "Manual" ? "Añadido manualmente" : "Abrir evento ↗"}</a></div></div><button className={styles.iconAction} onClick={() => { setNewEvent({ title: event.title, date: event.date, time: event.time, place: event.place, description: event.description, source: event.source }); setSourceUrl(event.url ?? ""); setShowAdd(true); }}>···</button></article>; })}</div></>}
+        {tab === "Eventos" && <><div className={styles.pageHeading}><div><div className={styles.eyebrow}>EVENTOS DETECTADOS Y MANUALES</div><h1>Eventos</h1><p>Gestiona los eventos y las publicaciones que generan.</p></div><button className={styles.addButton} onClick={openAddForm}>＋ Añadir evento</button></div><div className={styles.eventsList}>{events.map((event) => { const eventPosts = posts.filter((post) => post.eventId === event.id); const expected = expectedPostCount(event, accountList); return <article key={event.id} className={styles.eventCard}><div className={styles.eventDate}><b>{dateAt(event.date).toLocaleDateString("es-ES", { day: "2-digit" })}</b><span>{dateAt(event.date).toLocaleDateString("es-ES", { month: "short" })}</span></div><div className={styles.eventInfo}><div className={styles.eventMeta}><span className={styles.sourceTag}>{event.source}</span><span>{event.time} · {event.place}</span></div><h3>{event.title}</h3><p>{event.description}</p><div className={styles.eventFoot}>{eventPosts.length} publicaciones previstas {persistent && eventPosts.length < expected && expected > 0 && <button className={styles.morePosts} onClick={() => { void retryDrafts(event); }}>Completar recordatorios</button>} <a href={event.url ?? (event.source === "Luma" ? "https://lu.ma" : event.source === "Meetup" ? "https://meetup.com" : "#")} target={event.url ? "_blank" : undefined} rel="noreferrer">{event.source === "Manual" ? "Añadido manualmente" : "Abrir evento ↗"}</a></div></div><button className={styles.iconAction} onClick={() => { setNewEvent({ title: event.title, date: event.date, time: event.time, place: event.place, description: event.description, source: event.source }); setSourceUrl(event.url ?? ""); openAddForm(); }}>···</button></article>; })}</div></>}
 
         {tab === "Cuentas" && <><div className={styles.pageHeading}><div><div className={styles.eyebrow}>CANALES Y VOZ DE MARCA</div><h1>Tus cuentas</h1><p>Cada cuenta tiene una voz propia para tus publicaciones.</p></div></div><div className={styles.accountsGrid}>{accountList.map((account, accountIndex) => <article className={styles.accountCard} key={account.id ?? account.name}><div className={`${styles.accountTop}`}><Image className={styles.accountLogo} src={account.logo} alt={`Logo de ${account.name}`} width={38} height={38}/><div><b>{account.name}</b><small>{account.kind}</small></div><span className={styles.connected}>{persistent ? "● Supabase" : "● Demo"}</span></div><div className={styles.keyStatus}>{account.bufferApiKeyConfigured ? "API key configurada" : `Falta ${account.bufferApiKeyEnv}`}</div><div className={styles.accountNetworks}>{account.networks.map((network) => <span key={network}>{network === "LinkedIn" ? "in" : network === "X" ? "𝕏" : "◉"} &nbsp;{network}</span>)}</div><div className={styles.bufferChannels}><h4>CANALES DE BUFFER</h4><p>Introduce el ID del canal de Buffer conectado a cada red.</p>{account.networks.map((network) => <label key={network}><span>{network}</span><input aria-label={`ID de canal de Buffer ${network} para ${account.name}`} value={account.bufferChannels?.[network] ?? ""} disabled={!persistent} onChange={(event) => setAccountList((all) => all.map((item) => item.id === account.id ? { ...item, bufferChannels: { ...item.bufferChannels, [network]: event.target.value } } : item))} onBlur={(event) => { void changeBufferChannel(account, network, event.currentTarget.value); }} placeholder="ID del canal"/></label>)}</div><label>VOZ Y TONO<textarea value={account.prompt} onChange={(e) => setAccountList((all) => all.map((item, index) => index === accountIndex ? { ...item, prompt: e.target.value } : item))} onBlur={(e) => { void changeVoice(account, e.currentTarget.value); }} rows={3}/></label><div className={styles.exampleBox}><span>✦</span><div><b>{account.styleExampleCount ?? posts.filter((p) => p.account === account.name && p.status === "approved").length} ejemplos aprobados</b><small>Las publicaciones aprobadas ayudan a mantener tu estilo.</small></div></div></article>)}</div></>}
 
@@ -374,19 +393,19 @@ function Dashboard() {
       </div>
     </section>
     {selected && <div className={styles.overlay} onMouseDown={(e) => { if (e.target === e.currentTarget) setSelected(null); }}><section className={styles.detailPanel}><button className={styles.close} onClick={() => setSelected(null)}>×</button><div className={styles.eyebrow}>DETALLE DE PUBLICACIÓN</div><h2>{currentEvent?.title}</h2><div className={styles.detailDate}>◷ &nbsp;{dateAt(selected.date).toLocaleDateString("es-ES", { weekday: "long", day: "numeric", month: "long" })} · {selected.time} · Europe/Madrid</div><div className={styles.channelChip}>{selected.network} <span>·</span> {selected.account}</div><label className={styles.postEditor}>TEXTO DE LA PUBLICACIÓN<textarea value={editing} disabled={!(["review", "approved", "failed"] as Status[]).includes(selected.status)} onChange={(e) => setEditing(e.target.value)} rows={8}/></label><div className={styles.characterCount}>{postValidation?.message} <span>Validación local por red.</span></div>{selected.lastError && <p className={styles.deliveryError}>{selected.lastError}</p>}{["needs_reconciliation", "scheduling"].includes(selected.status) && <div className={styles.reconcileBox}><p>Comprueba la cola de Buffer. Si encuentras la publicación, pega su ID para confirmar el envío.</p><label>ID DEL POST DE BUFFER<input aria-label="ID confirmado del post de Buffer" value={reconciliationId} onChange={(event) => setReconciliationId(event.target.value)}/></label><button className={styles.secondaryButton} disabled={!reconciliationId.trim()} onClick={() => { void confirmReconciledPost(selected); }}>Confirmar que está programada</button><label className={styles.absenceConfirm}><input type="checkbox" checked={absenceConfirmed} onChange={(event) => setAbsenceConfirmed(event.target.checked)}/> He revisado el canal y no aparece ningún post coincidente.</label><button className={styles.secondaryButton} disabled={!absenceConfirmed} onClick={() => { void confirmPostAbsent(selected); }}>Confirmar ausencia y permitir reintento</button></div>}<div className={styles.detailActions}>{(["review", "approved", "failed"] as Status[]).includes(selected.status) && <button className={styles.secondaryButton} onClick={() => { void savePostChanges(selected, { text: editing }); }}>Guardar cambios</button>}{selected.status === "review" && <button className={styles.approveButton} onClick={() => { void savePostChanges(selected, { text: editing, status: "approved" }); }} disabled={!postValidation?.valid}>{persistent ? "✓ Aprobar, programar y guardar ejemplo" : "✓ Aprobar y guardar ejemplo"}</button>}{selected.status === "failed" && <button className={styles.approveButton} onClick={() => { void retryPost(selected); }}>Reintentar envío</button>}</div><p className={styles.autoNote}>{selected.status === "scheduled" ? `Programada en Buffer · ID ${selected.bufferPostId ?? "guardado"}` : selected.status === "scheduling" ? "El envío no tiene confirmación guardada. Comprueba Buffer y registra el ID si ya aparece en la cola." : selected.status === "needs_reconciliation" ? "Estado incierto; conciliación manual necesaria antes de cualquier reintento." : selected.status === "failed" ? "Buffer rechazó el envío o falta configuración. Corrige el problema y vuelve a intentarlo." : selected.status === "review" ? (persistent ? "Al aprobar se programa en Buffer y se guarda el texto final como ejemplo de estilo." : "En la demo, al aprobar se guarda el texto en este navegador como ejemplo local.") : selected.status === "published" ? "La red confirmó la publicación." : "Edita y guarda el texto antes de aprobarlo."}</p></section></div>}
-    {showAdd && <div className={styles.overlay} onMouseDown={(e) => { if (e.target === e.currentTarget) setShowAdd(false); }}><section className={styles.modal}>
-      <button className={styles.close} onClick={() => setShowAdd(false)}>×</button>
+    {showAdd && <div className={styles.overlay} onMouseDown={(e) => { if (e.target === e.currentTarget) closeAddForm(); }}><section className={styles.modal}>
+      <button className={styles.close} onClick={closeAddForm}>×</button>
       <div className={styles.eyebrow}>NUEVO EVENTO</div><h2>Añade un evento</h2>
       <p className={styles.modalDesc}>Pega la URL pública de un evento de Meetup o Luma para extraer los datos. Podrás revisarlos y corregirlos antes de guardar.</p>
-      <label className={styles.formLabel}>ENLACE DEL EVENTO<input aria-label="URL del evento" value={sourceUrl} onChange={(e) => { setSourceUrl(e.target.value); setExtractionMessage(""); }} placeholder="https://lu.ma/tu-evento"/></label>
+      <label className={styles.formLabel}>ENLACE DEL EVENTO<input aria-label="URL del evento" value={sourceUrl} disabled={extractingEvent} onChange={(e) => { setSourceUrl(e.target.value); setExtractionMessage(""); }} placeholder="https://lu.ma/tu-evento"/></label>
       <button className={styles.secondaryButton} onClick={() => { void extractEventFromUrl(); }} disabled={!sourceUrl.trim() || extractingEvent}>{extractingEvent ? "Extrayendo…" : "Extraer datos del evento"}</button>
       {extractionMessage && <p className={styles.extractionMessage} role="status">{extractionMessage}</p>}
       <div className={styles.formDivider}><span>revisa o completa los datos</span></div>
-      <label className={styles.formLabel}>TÍTULO<input value={newEvent.title} onChange={(e) => setNewEvent({ ...newEvent, title: e.target.value })} placeholder="Nombre del evento"/></label>
-      <div className={styles.formGrid}><label className={styles.formLabel}>FECHA<input type="date" value={newEvent.date} onChange={(e) => setNewEvent({ ...newEvent, date: e.target.value })}/></label><label className={styles.formLabel}>HORA<input type="time" value={newEvent.time} onChange={(e) => setNewEvent({ ...newEvent, time: e.target.value })}/></label></div>
-      <label className={styles.formLabel}>LUGAR<input value={newEvent.place} onChange={(e) => setNewEvent({ ...newEvent, place: e.target.value })}/></label>
-      <label className={styles.formLabel}>DESCRIPCIÓN<textarea rows={3} value={newEvent.description} onChange={(e) => setNewEvent({ ...newEvent, description: e.target.value })} placeholder="¿Qué ocurrirá en el evento?"/></label>
-      <div className={styles.modalActions}><button className={styles.secondaryButton} onClick={() => setShowAdd(false)}>Cancelar</button><button className={styles.approveButton} onClick={addEvent} disabled={!newEvent.title.trim() || !newEvent.date || !newEvent.time}>Crear evento</button></div>
+      <label className={styles.formLabel}>TÍTULO<input value={newEvent.title} disabled={extractingEvent} onChange={(e) => setNewEvent({ ...newEvent, title: e.target.value })} placeholder="Nombre del evento"/></label>
+      <div className={styles.formGrid}><label className={styles.formLabel}>FECHA<input type="date" value={newEvent.date} disabled={extractingEvent} onChange={(e) => setNewEvent({ ...newEvent, date: e.target.value })}/></label><label className={styles.formLabel}>HORA<input type="time" value={newEvent.time} disabled={extractingEvent} onChange={(e) => setNewEvent({ ...newEvent, time: e.target.value })}/></label></div>
+      <label className={styles.formLabel}>LUGAR<input value={newEvent.place} disabled={extractingEvent} onChange={(e) => setNewEvent({ ...newEvent, place: e.target.value })}/></label>
+      <label className={styles.formLabel}>DESCRIPCIÓN<textarea rows={3} value={newEvent.description} disabled={extractingEvent} onChange={(e) => setNewEvent({ ...newEvent, description: e.target.value })} placeholder="¿Qué ocurrirá en el evento?"/></label>
+      <div className={styles.modalActions}><button className={styles.secondaryButton} onClick={closeAddForm}>Cancelar</button><button className={styles.approveButton} onClick={addEvent} disabled={extractingEvent || !newEvent.title.trim() || !newEvent.date || !newEvent.time}>Crear evento</button></div>
     </section></div>}
   </main>;
 }

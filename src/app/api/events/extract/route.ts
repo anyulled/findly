@@ -9,7 +9,26 @@ export async function POST(request: Request) {
   }
 
   let body: unknown;
-  try { body = await request.json(); }
+  try {
+    if (!request.body) return NextResponse.json({ error: "La solicitud no contiene JSON válido." }, { status: 400 });
+    const reader = request.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let total = 0;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > 8_192) {
+        await reader.cancel();
+        return NextResponse.json({ error: "La solicitud es demasiado grande." }, { status: 413 });
+      }
+      chunks.push(value);
+    }
+    const bytes = new Uint8Array(total);
+    let offset = 0;
+    for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+    body = JSON.parse(new TextDecoder().decode(bytes));
+  }
   catch { return NextResponse.json({ error: "La solicitud no contiene JSON válido." }, { status: 400 }); }
   if (!body || typeof body !== "object" || typeof (body as { url?: unknown }).url !== "string") {
     return NextResponse.json({ error: "Introduce la URL del evento." }, { status: 400 });

@@ -28,6 +28,12 @@ test("falls back to page metadata and reports fields that still need manual entr
   assert.deepEqual(result.missingFields, ["date", "time", "place"]);
 });
 
+test("preserves a floating ISO datetime as Madrid wall-clock time", () => {
+  const result = parseEventPage('<script type="application/ld+json">{"@type":"Event","name":"Floating date","startDate":"2027-01-15T18:30:00"}</script>', "https://luma.com/floating");
+  assert.equal(result.event.date, "2027-01-15");
+  assert.equal(result.event.time, "18:30");
+});
+
 test("rejects unsupported sources before making a request", async () => {
   let requests = 0;
   await assert.rejects(
