@@ -15,6 +15,7 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 - In the same final stage, rebase onto the latest `origin/main`, resolve conflicts without discarding another workstream’s changes, rerun the applicable checks, and confirm the pull request contains the documentation update. Do not mark a workstream complete while this stage remains unchecked.
 - Use the repository pull request template and complete its documentation and synchronization checklist before merge.
 - The `Documentation and Sync` GitHub Actions check validates that every final-stage checklist item is checked. The `main` branch must require this check and `E2E (Playwright)` before merge.
+- Dependabot and Renovate dependency-update PRs are exempt from the human-authored checklist because those bots do not use the template; they still must pass lint, unit, build, Documentation and Sync, and E2E status checks. Keep this exemption limited to the exact trusted bot accounts in the CI validator.
 - Use Conventional Commits for every commit, for example `feat: add calendar view`, `ci: validate pull requests`, or `docs: document architecture`.
 - Keep workstreams isolated in their own branches/worktrees and pull requests. Avoid editing files owned by another workstream; coordinate shared files before changes.
 - Keep the solution within free tiers where practical. Do not enable paid services or incur costs.
