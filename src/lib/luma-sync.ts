@@ -10,7 +10,7 @@ export type PersistableEvent = {
 };
 export type SyncRepository = {
   listEnabledLumaSources(): Promise<LumaSource[]>;
-  insertEvents(events: PersistableEvent[]): Promise<ImportedLumaEvent[]>;
+  upsertEvents(events: PersistableEvent[]): Promise<{ inserted: ImportedLumaEvent[]; available: ImportedLumaEvent[] }>;
 };
 export type FeedFetcher = (url: string) => Promise<string>;
 export type DraftGenerator = (source: LumaSource, event: ImportedLumaEvent) => Promise<number>;
@@ -48,17 +48,18 @@ export async function syncLumaSources(
       description: event.description, event_url: event.url, detected_language: detectTitleLanguage(event.title),
     }));
     if (!rows.length) continue;
-    let inserted: ImportedLumaEvent[];
+    let persisted: { inserted: ImportedLumaEvent[]; available: ImportedLumaEvent[] };
     try {
-      inserted = await repository.insertEvents(rows);
-      result.eventsInserted += inserted.length;
+      persisted = await repository.upsertEvents(rows);
+      result.eventsInserted += persisted.inserted.length;
     } catch {
       result.issues.push({ sourceId: source.id, code: "database_error" });
       continue;
     }
-    for (const event of inserted) {
+    const newlyInsertedIds = new Set(persisted.inserted.map((event) => event.id));
+    for (const event of persisted.available) {
       if (!generateDrafts) {
-        result.draftEventsSkipped += 1;
+        if (newlyInsertedIds.has(event.id)) result.draftEventsSkipped += 1;
         continue;
       }
       try { result.draftsCreated += await generateDrafts(source, event); }
