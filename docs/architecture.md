@@ -10,6 +10,7 @@ The repository at the start of this workstream contained a Next.js starter and t
 flowchart LR
   owner[Owner in browser] -->|Google sign-in| auth[Supabase Auth]
   owner -->|authenticated UI| app[Next.js application]
+  app -->|Sincronizar ahora · same-origin session| sync
   timer[cron-job.org every six hours] -->|Bearer secret| sync[Authenticated sync endpoint]
   app -->|authenticated server actions| actions[Workspace actions]
   app -->|POST /api/events/extract| extract[Owner-checked event extraction]
@@ -24,7 +25,7 @@ flowchart LR
   auth -. session validation .-> app
 ```
 
-The browser contains no provider secrets. Workspace writes go through Next.js Server Actions, and event extraction goes through `POST /api/events/extract`; both verify the Google-authenticated owner when Supabase is configured. Local demo mode permits extraction without an account for local use. Supabase RLS independently scopes persisted rows to the owner. Approval and style-example insertion use a transactional database function. Persistent event creation and newly imported Luma events use Groq when its server configuration is present; the authenticated cron endpoint imports Luma events and leaves them saved without drafts when Groq is unavailable. Only the exact `POST /api/cron/sync` request bypasses browser-session middleware; the route validates its bearer secret and uses a server-only Supabase service-role key. Meetup polling and Buffer scheduling/publication are not implemented. Manual extraction fetches only public HTTPS event pages on Meetup/Luma, parses available HTML metadata and JSON-LD, caps the response at 1 MB, and leaves missing fields for owner review.
+The browser contains no provider secrets. Workspace writes go through Next.js Server Actions, and event extraction goes through `POST /api/events/extract`; both verify the Google-authenticated owner when Supabase is configured. Local demo mode permits extraction without an account for local use. Supabase RLS independently scopes persisted rows to the owner. Approval and style-example insertion use a transactional database function. Persistent event creation and newly imported Luma events use Groq when its server configuration is present; the sync endpoint imports Luma events and leaves them saved without drafts when Groq is unavailable. `POST /api/cron/sync` accepts either the configured cron bearer secret or a same-origin request from the authenticated owner; both paths use the server-only Supabase service-role key after authorization. Meetup polling and Buffer scheduling/publication are not implemented. Manual extraction fetches only public HTTPS event pages on Meetup/Luma, parses available HTML metadata and JSON-LD, caps the response at 1 MB, and leaves missing fields for owner review.
 
 ## Event-to-publication lifecycle
 

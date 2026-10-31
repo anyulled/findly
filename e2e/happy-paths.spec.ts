@@ -99,7 +99,8 @@ test("stores a Luma iCal source linked to multiple accounts", async ({ page }) =
   const source = page.getByRole("article").filter({ hasText: "BarcelonaJS Luma" });
   await expect(source).toContainText("Luma · iCal");
   await expect(source).toContainText("Personal, Barcelona JUG");
-  await expect(page.getByText("La configuración se guarda, pero la importación y extracción todavía no están conectadas.")).toBeVisible();
+  await expect(page.getByText("La demo guarda las fuentes en este navegador, pero no consulta feeds. Conecta Supabase para importar eventos.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Sincronizar ahora" })).toBeDisabled();
 
   await source.getByRole("checkbox", { name: "Activa" }).uncheck();
   await page.reload();

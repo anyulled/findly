@@ -6,13 +6,31 @@ import { generateLumaEventDrafts, type LumaDraftRepository } from "@/lib/luma-dr
 import type { PostLanguage } from "@/lib/language";
 import type { SocialNetwork } from "@/lib/social-validation";
 import { schedulePostWithSupabase } from "@/lib/post-publishing";
+import { createClient } from "@/lib/supabase/server";
+import { isSameOriginSessionRequest } from "@/lib/sync-request-auth";
 
 const NETWORKS: SocialNetwork[] = ["LinkedIn", "X", "Bluesky"];
 
 export async function POST(request: Request): Promise<Response> {
   const secret = process.env.CRON_SECRET;
-  if (!secret) return Response.json({ error: "sync_not_configured" }, { status: 503 });
-  if (!isAuthorizedCronRequest(request, secret)) return Response.json({ error: "unauthorized" }, { status: 401 });
+  const hasAuthorizationHeader = request.headers.has("authorization");
+  let sessionOwnerId: string | null = null;
+  if (hasAuthorizationHeader) {
+    if (!secret) return Response.json({ error: "sync_not_configured" }, { status: 503 });
+    if (!isAuthorizedCronRequest(request, secret)) return Response.json({ error: "unauthorized" }, { status: 401 });
+  } else {
+    if (!isSameOriginSessionRequest(request)) return Response.json({ error: "unauthorized" }, { status: 401 });
+    const ownerEmail = process.env.OWNER_EMAIL?.trim().toLowerCase();
+    if (!ownerEmail) return Response.json({ error: "sync_not_configured" }, { status: 503 });
+    try {
+      const sessionClient = await createClient();
+      const { data: { user }, error } = await sessionClient.auth.getUser();
+      if (error || !user || user.email?.toLowerCase() !== ownerEmail) return Response.json({ error: "unauthorized" }, { status: 401 });
+      sessionOwnerId = user.id;
+    } catch {
+      return Response.json({ error: "unauthorized" }, { status: 401 });
+    }
+  }
 
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -20,10 +38,13 @@ export async function POST(request: Request): Promise<Response> {
   if (!url || !key || !ownerEmail) return Response.json({ error: "sync_not_configured" }, { status: 503 });
 
   const supabase = createSupabaseClient(url, key, { auth: { autoRefreshToken: false, persistSession: false } });
-  const { data: userData, error: userError } = await supabase.auth.admin.listUsers({ page: 1, perPage: 1000 });
-  if (userError) return Response.json({ error: "sync_unavailable" }, { status: 503 });
-  const owner = userData.users.find((user) => user.email?.toLowerCase() === ownerEmail);
-  if (!owner) return Response.json({ error: "sync_not_configured" }, { status: 503 });
+  let ownerId = sessionOwnerId;
+  if (!ownerId) {
+    const { data: userData, error: userError } = await supabase.auth.admin.listUsers({ page: 1, perPage: 1000 });
+    if (userError) return Response.json({ error: "sync_unavailable" }, { status: 503 });
+    ownerId = userData.users.find((user) => user.email?.toLowerCase() === ownerEmail)?.id ?? null;
+  }
+  if (!ownerId) return Response.json({ error: "sync_not_configured" }, { status: 503 });
 
   const draftRepository: LumaDraftRepository = {
     async getPublishingMode(ownerId) {
@@ -92,7 +113,7 @@ export async function POST(request: Request): Promise<Response> {
   const repository: SyncRepository = {
     async listEnabledLumaSources() {
       const { data, error } = await supabase.from("sources").select("id,owner_id,name,feed_url")
-        .eq("owner_id", owner.id).eq("source_type", "luma_ical").eq("enabled", true);
+        .eq("owner_id", ownerId).eq("source_type", "luma_ical").eq("enabled", true);
       if (error) throw new Error("Unable to read configured sources");
       return (data ?? []).filter((source) => typeof source.feed_url === "string" && source.feed_url.length > 0)
         .map((source) => ({ id: source.id, ownerId: source.owner_id, name: source.name, feedUrl: source.feed_url! }));
