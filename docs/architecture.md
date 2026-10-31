@@ -15,7 +15,7 @@ flowchart LR
   app -->|authenticated server actions| actions[Workspace actions]
   app -->|POST /api/events/extract| extract[Owner-checked event extraction]
   actions --> db[(Supabase Postgres)]
-  extract -->|allowlisted HTTPS fetch| eventPages[Meetup or Luma event page]
+  extract -->|public HTTPS fetch with SSRF guard| eventPages[Public HTTPS event page]
   sync --> db
   sync -->|read calendar feed| luma[Luma iCal]
   app -->|generate per account and channel| groq[Groq API]
@@ -26,7 +26,7 @@ flowchart LR
   auth -. session validation .-> app
 ```
 
-The browser contains no provider secrets. Workspace writes go through Next.js Server Actions, and event extraction goes through `POST /api/events/extract`; both verify the Google-authenticated owner when Supabase is configured. Local demo mode permits extraction without an account for local use. Supabase RLS independently scopes persisted rows to the owner. Approval and style-example insertion use a transactional database function. Persistent event creation and newly imported Luma events use Groq when its server configuration is present; the sync endpoint imports Luma events and leaves them saved without drafts when Groq is unavailable. `POST /api/cron/sync` accepts either the configured cron bearer secret or a same-origin request from the authenticated owner; both paths use the server-only Supabase service-role key after authorization. Meetup polling and confirmation of actual social publication are not implemented. Buffer scheduling is implemented and tested with mocks; provider credentials and channels still require real-world validation. Manual extraction fetches only public HTTPS event pages on Meetup/Luma, parses available HTML metadata and JSON-LD, caps the response at 1 MB, and leaves missing fields for owner review.
+The browser contains no provider secrets. Workspace writes go through Next.js Server Actions, and event extraction goes through `POST /api/events/extract`; both verify the Google-authenticated owner when Supabase is configured. Local demo mode permits extraction without an account for local use. Supabase RLS independently scopes persisted rows to the owner. Approval and style-example insertion use a transactional database function. Persistent event creation and newly imported Luma events use Groq when its server configuration is present; the sync endpoint imports Luma events and leaves them saved without drafts when Groq is unavailable. `POST /api/cron/sync` accepts either the configured cron bearer secret or a same-origin request from the authenticated owner; both paths use the server-only Supabase service-role key after authorization. Meetup polling and confirmation of actual social publication are not implemented. Buffer scheduling is implemented and tested with mocks; provider credentials and channels still require real-world validation. Manual extraction fetches public HTTPS event pages (with SSRF protection against private IP ranges and internal hostnames), parses available schema.org JSON-LD, HTML metadata, and heuristic date/time/location markers, caps the response at 1 MB, and leaves missing fields for owner review.
 
 ## Event-to-publication lifecycle
 
@@ -65,7 +65,7 @@ All event and publication times use `Europe/Madrid` and 13:00 for scheduled remi
 | Groq | Generate candidate copy from account prompt and relevant approved examples | API limits vary by account/model; generation must be bounded and failures kept visible for retry. |
 | Buffer | Schedule and report per-channel posts | API key and connected channels are required. Verify three accounts, permissions, plan and channel-specific constraints before enabling automatic mode. |
 | Luma | Publish event calendars and provide iCal subscription URLs | Test a real feed for field completeness and refresh behavior before treating it as a reliable source. |
-| Meetup event pages | Manual URL extraction for individual events | Best-effort public HTML metadata and JSON-LD parsing only; no recurring sync or API integration. Provider markup can change, and missing fields require owner correction. |
+| Public event pages | Manual URL extraction for individual events | Best-effort public HTML metadata, JSON-LD, and heuristic markup parsing for any public HTTPS event URL with SSRF guards; no recurring sync or proprietary API integration. Provider markup can change, and missing fields require owner correction. |
 | cron-job.org | Invoke the authenticated sync route every six hours | Configure HTTPS endpoint and Bearer secret; account schedule accuracy and service availability should be checked before production reliance. |
 
 ## Cost and hosting decision

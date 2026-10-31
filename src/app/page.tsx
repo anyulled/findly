@@ -446,8 +446,8 @@ function Dashboard() {
     {showAdd && <div className={styles.overlay} onMouseDown={(e) => { if (e.target === e.currentTarget) closeAddForm(); }}><section className={styles.modal}>
       <button className={styles.close} onClick={closeAddForm}>×</button>
       <div className={styles.eyebrow}>NUEVO EVENTO</div><h2>Añade un evento</h2>
-      <p className={styles.modalDesc}>Pega la URL pública de un evento de Meetup o Luma para extraer los datos. Podrás revisarlos y corregirlos antes de guardar.</p>
-      <label className={styles.formLabel}>ENLACE DEL EVENTO<input aria-label="URL del evento" value={sourceUrl} disabled={extractingEvent} onChange={(e) => { setSourceUrl(e.target.value); setExtractionMessage(""); }} placeholder="https://lu.ma/tu-evento"/></label>
+      <p className={styles.modalDesc}>Pega la URL pública de cualquier evento para extraer los datos automáticamente. Podrás revisarlos y corregirlos antes de guardar.</p>
+      <label className={styles.formLabel}>ENLACE DEL EVENTO<input aria-label="URL del evento" value={sourceUrl} disabled={extractingEvent} onChange={(e) => { setSourceUrl(e.target.value); setExtractionMessage(""); }} placeholder="https://ejemplo.com/evento"/></label>
       <button className={styles.secondaryButton} onClick={() => { void extractEventFromUrl(); }} disabled={!sourceUrl.trim() || extractingEvent}>{extractingEvent ? "Extrayendo…" : "Extraer datos del evento"}</button>
       {extractionMessage && <p className={styles.extractionMessage} role="status">{extractionMessage}</p>}
       <div className={styles.formDivider}><span>revisa o completa los datos</span></div>
