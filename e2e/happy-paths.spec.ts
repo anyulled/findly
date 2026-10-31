@@ -110,3 +110,29 @@ test("stores a Luma iCal source linked to multiple accounts", async ({ page }) =
   await restored.getByRole("button", { name: "Eliminar" }).click();
   await expect(page.getByText("Aún no hay fuentes configuradas.")).toBeVisible();
 });
+
+
+test("active sends cannot be confirmed missing, while settled uncertain sends can", async ({ page }) => {
+  await page.evaluate(() => {
+    const state = JSON.parse(localStorage.getItem("findly-state-v1") ?? "{}");
+    const date = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Madrid", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+    state.events = [{ id: "reconcile-event", title: "Reconciliation event", date, time: "19:00", place: "Barcelona", description: "", source: "Manual" }];
+    state.posts = [{ id: "reconcile-post", eventId: "reconcile-event", date, time: "13:00", account: "Personal", network: "LinkedIn", text: "A post", status: "scheduling" }];
+    localStorage.setItem("findly-state-v1", JSON.stringify(state));
+  });
+  await page.reload();
+  await page.getByRole("button", { name: /Reconciliation event/ }).click();
+  await expect(page.getByText(/El envío puede seguir en curso/).first()).toBeVisible();
+  await expect(page.getByRole("button", { name: "Confirmar que está programada" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Confirmar ausencia y permitir reintento" })).toHaveCount(0);
+
+  await page.evaluate(() => {
+    const state = JSON.parse(localStorage.getItem("findly-state-v1") ?? "{}");
+    state.posts[0].status = "needs_reconciliation";
+    localStorage.setItem("findly-state-v1", JSON.stringify(state));
+  });
+  await page.reload();
+  await page.getByRole("button", { name: /Reconciliation event/ }).click();
+  await expect(page.getByRole("checkbox", { name: /He revisado el canal/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Confirmar ausencia y permitir reintento" })).toBeDisabled();
+});

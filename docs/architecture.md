@@ -20,12 +20,13 @@ flowchart LR
   sync -->|read calendar feed| luma[Luma iCal]
   app -->|generate per account and channel| groq[Groq API]
   sync -->|generate drafts when configured| groq
-  app -. future scheduling .-> buffer[Buffer API]
-  buffer -. future publishing .-> social[LinkedIn · X · Bluesky]
+  app -->|schedule and reconcile| buffer[Buffer API]
+  sync -->|schedule automatic drafts| buffer
+  buffer -. external publishing .-> social[LinkedIn · X · Bluesky]
   auth -. session validation .-> app
 ```
 
-The browser contains no provider secrets. Workspace writes go through Next.js Server Actions, and event extraction goes through `POST /api/events/extract`; both verify the Google-authenticated owner when Supabase is configured. Local demo mode permits extraction without an account for local use. Supabase RLS independently scopes persisted rows to the owner. Approval and style-example insertion use a transactional database function. Persistent event creation and newly imported Luma events use Groq when its server configuration is present; the sync endpoint imports Luma events and leaves them saved without drafts when Groq is unavailable. `POST /api/cron/sync` accepts either the configured cron bearer secret or a same-origin request from the authenticated owner; both paths use the server-only Supabase service-role key after authorization. Meetup polling and Buffer scheduling/publication are not implemented. Manual extraction fetches only public HTTPS event pages on Meetup/Luma, parses available HTML metadata and JSON-LD, caps the response at 1 MB, and leaves missing fields for owner review.
+The browser contains no provider secrets. Workspace writes go through Next.js Server Actions, and event extraction goes through `POST /api/events/extract`; both verify the Google-authenticated owner when Supabase is configured. Local demo mode permits extraction without an account for local use. Supabase RLS independently scopes persisted rows to the owner. Approval and style-example insertion use a transactional database function. Persistent event creation and newly imported Luma events use Groq when its server configuration is present; the sync endpoint imports Luma events and leaves them saved without drafts when Groq is unavailable. `POST /api/cron/sync` accepts either the configured cron bearer secret or a same-origin request from the authenticated owner; both paths use the server-only Supabase service-role key after authorization. Meetup polling and confirmation of actual social publication are not implemented. Buffer scheduling is implemented and tested with mocks; provider credentials and channels still require real-world validation. Manual extraction fetches only public HTTPS event pages on Meetup/Luma, parses available HTML metadata and JSON-LD, caps the response at 1 MB, and leaves missing fields for owner review.
 
 ## Event-to-publication lifecycle
 
@@ -50,7 +51,7 @@ flowchart TD
   P --> Q[Reconcile delivery status separately]
 ```
 
-An idempotency key should be based on event identity, Buffer account/channel and reminder offset. Persist an intent before calling Buffer. If a request times out after Buffer may have accepted it, reconcile against Buffer before retrying, since blindly repeating a create request can duplicate a post. Approval stores the final edited text as an example in the same action. Posts generated in automatic mode are not approved examples.
+An idempotency key should be based on event identity, Buffer account/channel and reminder offset. Persist an intent before calling Buffer. If a request times out after Buffer may have accepted it, reconcile against Buffer before retrying, since blindly repeating a create request can duplicate a post. A `scheduling` attempt cannot be marked missing while it may still be active; responses are fenced by a persisted attempt ID. An orphaned `scheduling` claim cannot safely be released solely because time has elapsed. Approval stores the final edited text as an example in the same action. Posts generated in automatic mode are not approved examples.
 
 ## Calendar
 

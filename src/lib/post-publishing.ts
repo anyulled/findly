@@ -13,6 +13,7 @@ type DatabaseResult<T> = { data: T | null; error: DatabaseError | null };
 
 export interface PostToSchedule {
   id: string;
+  attempt_id: string;
   account_id: string;
   network: string;
   due_at: string;
@@ -23,8 +24,8 @@ export interface PostPublishingRepository {
   claim(postId: string): Promise<PostToSchedule | null>;
   accountName(accountId: string): Promise<string | null>;
   bufferChannelId(accountId: string, network: SocialNetwork): Promise<string | null>;
-  markScheduled(postId: string, bufferPostId: string): Promise<void>;
-  markFailure(postId: string, message: string, needsReconciliation: boolean): Promise<void>;
+  markScheduled(postId: string, attemptId: string, bufferPostId: string): Promise<void>;
+  markFailure(postId: string, attemptId: string, message: string, needsReconciliation: boolean): Promise<void>;
 }
 
 export type PostPublishingOutcome =
@@ -103,19 +104,21 @@ export class SupabasePostPublishingRepository implements PostPublishingRepositor
     return data?.name ?? null;
   }
 
-  async markScheduled(postId: string, bufferPostId: string): Promise<void> {
+  async markScheduled(postId: string, attemptId: string, bufferPostId: string): Promise<void> {
     const { error } = await this.supabase.rpc("mark_post_scheduled", {
       p_post_id: postId,
       p_buffer_post_id: bufferPostId,
+      p_attempt_id: attemptId,
       p_owner_id: this.ownerId,
     });
     if (error) throw new Error(`Buffer aceptó la publicación, pero no se pudo guardar su ID: ${error.message}`);
   }
 
-  async markFailure(postId: string, message: string, needsReconciliation: boolean): Promise<void> {
+  async markFailure(postId: string, attemptId: string, message: string, needsReconciliation: boolean): Promise<void> {
     const { error } = await this.supabase.rpc("mark_post_scheduling_failure", {
       p_post_id: postId,
       p_error: message,
+      p_attempt_id: attemptId,
       p_needs_reconciliation: needsReconciliation,
       p_owner_id: this.ownerId,
     });
@@ -134,12 +137,12 @@ export async function schedulePostWithBuffer(
   const network = networkFromDatabase(post.network);
   if (!network) {
     const message = "La red de la publicación no está admitida por Buffer.";
-    await repository.markFailure(post.id, message, false);
+    await repository.markFailure(post.id, post.attempt_id, message, false);
     return { kind: "failed", message };
   }
   const validation = validatePost(network, post.content);
   if (!validation.valid) {
-    await repository.markFailure(post.id, validation.message, false);
+    await repository.markFailure(post.id, post.attempt_id, validation.message, false);
     return { kind: "failed", message: validation.message };
   }
 
@@ -148,24 +151,24 @@ export async function schedulePostWithBuffer(
     channelId = await repository.bufferChannelId(post.account_id, network);
   } catch (error) {
     const message = errorMessage(error);
-    await repository.markFailure(post.id, message, false);
+    await repository.markFailure(post.id, post.attempt_id, message, false);
     return { kind: "failed", message };
   }
   if (!channelId) {
     const message = `Configura el ID del canal de Buffer para ${network} en esta cuenta.`;
-    await repository.markFailure(post.id, message, false);
+    await repository.markFailure(post.id, post.attempt_id, message, false);
     return { kind: "failed", message };
   }
 
   const dueAt = new Date(post.due_at);
   if (!Number.isFinite(dueAt.getTime())) {
     const message = "La fecha de publicación guardada no es válida.";
-    await repository.markFailure(post.id, message, false);
+    await repository.markFailure(post.id, post.attempt_id, message, false);
     return { kind: "failed", message };
   }
   if (dueAt.getTime() <= Date.now()) {
     const message = "La hora programada en Europe/Madrid ya pasó; esta publicación no se enviará.";
-    await repository.markFailure(post.id, message, false);
+    await repository.markFailure(post.id, post.attempt_id, message, false);
     return { kind: "failed", message };
   }
 
@@ -174,7 +177,7 @@ export async function schedulePostWithBuffer(
     client = await createClient(post.account_id);
   } catch (error) {
     const message = errorMessage(error);
-    await repository.markFailure(post.id, message, false);
+    await repository.markFailure(post.id, post.attempt_id, message, false);
     return { kind: "failed", message };
   }
 
@@ -188,19 +191,19 @@ export async function schedulePostWithBuffer(
   } catch (error) {
     const message = errorMessage(error);
     const needsReconciliation = isUncertain(error);
-    await repository.markFailure(post.id, message, needsReconciliation);
+    await repository.markFailure(post.id, post.attempt_id, message, needsReconciliation);
     return { kind: needsReconciliation ? "needs_reconciliation" : "failed", message };
   }
   if (result.kind === "rejected") {
-    await repository.markFailure(post.id, result.error.message, false);
+    await repository.markFailure(post.id, post.attempt_id, result.error.message, false);
     return { kind: "failed", message: result.error.message };
   }
 
   try {
-    await repository.markScheduled(post.id, result.post.id);
+    await repository.markScheduled(post.id, post.attempt_id, result.post.id);
   } catch (error) {
     const message = `Buffer confirmó el envío, pero Findly no pudo guardar su ID: ${errorMessage(error)}`;
-    await repository.markFailure(post.id, message, true);
+    await repository.markFailure(post.id, post.attempt_id, message, true);
     return { kind: "needs_reconciliation", message };
   }
   return { kind: "scheduled", bufferPostId: result.post.id };

@@ -83,6 +83,12 @@ jobs:
       - name: Lint local database schema and functions
         run: supabase db lint --local --fail-on error
 
+      - name: Verify database behavior
+        run: |
+          for test_file in supabase/tests/*.sql; do
+            psql postgresql://postgres:postgres@127.0.0.1:55432/postgres -X -v ON_ERROR_STOP=1 -f "$test_file"
+          done
+
   documentation-sync:
     name: Documentation and Sync
     needs: validate
