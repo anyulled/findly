@@ -42,7 +42,7 @@ test("one bad delivery does not strand other approved posts and concurrent claim
     return { kind: "scheduled", bufferPostId: "remote-id" };
   });
   assert.deepEqual(calls, ["error", "uncertain", "claimed", "ok", "failed"]);
-  assert.deepEqual(result, { selected: 5, scheduled: 1, failed: 1, needsReconciliation: 1, notClaimed: 1, errors: 1 });
+  assert.deepEqual(result, { selected: 5, scheduled: 1, failed: 1, needsReconciliation: 1, notClaimed: 1, errors: 1, deferred: 0 });
 });
 
 test("database lookup failure is returned without attempting a delivery", async () => {
@@ -74,7 +74,7 @@ test("database recovery uses persisted owner and event scope and schedules throu
         if (name === "claim_post_for_scheduling") {
           if (states.get(id) !== "approved") return { data: null, error: null };
           states.set(id, "scheduling");
-          return { data: { id, account_id: "personal", network: "LinkedIn", due_at: "2099-11-07T12:00:00.000Z", content: id }, error: null };
+          return { data: { id, attempt_id: `attempt-${id}`, account_id: "personal", network: "LinkedIn", due_at: "2099-11-07T12:00:00.000Z", content: id }, error: null };
         }
         if (name === "mark_post_scheduled") states.set(id, "scheduled");
         return { data: null, error: null };
@@ -117,7 +117,7 @@ test("overlapping recovery runs make only one Buffer request for an approved pos
   const bothListed = new Promise<void>((resolve) => { releaseLists = resolve; });
   let requests = 0;
   const db = {
-    rpc(name: string, args: Record<string, unknown>) {
+    rpc(name: string) {
       const execute = async () => {
         if (name === "list_approved_posts_for_dispatch") {
           listCalls += 1;
@@ -128,7 +128,7 @@ test("overlapping recovery runs make only one Buffer request for an approved pos
         if (name === "claim_post_for_scheduling") {
           if (state !== "approved") return { data: null, error: null };
           state = "scheduling";
-          return { data: { id: "shared", account_id: "personal", network: "LinkedIn", due_at: "2099-11-07T12:00:00.000Z", content: "hello" }, error: null };
+          return { data: { id: "shared", attempt_id: "attempt-shared", account_id: "personal", network: "LinkedIn", due_at: "2099-11-07T12:00:00.000Z", content: "hello" }, error: null };
         }
         if (name === "mark_post_scheduled") state = "scheduled";
         return { data: null, error: null };
@@ -157,4 +157,23 @@ test("overlapping recovery runs make only one Buffer request for an approved pos
     if (priorKey === undefined) delete process.env.BUFFER_API_KEY_PERSONAL;
     else process.env.BUFFER_API_KEY_PERSONAL = priorKey;
   }
+});
+
+
+test("a slow delivery defers remaining approved posts to the next run", async () => {
+  let clock = 0;
+  const states = new Map([["first", "approved"], ["second", "approved"]]);
+  const list = async () => [...states].filter(([, state]) => state === "approved").map(([id]) => id);
+  const schedule = async (id: string): Promise<PostPublishingOutcome> => {
+    states.set(id, "scheduled");
+    clock += 11_000;
+    return { kind: "scheduled", bufferPostId: `buffer-${id}` };
+  };
+  const first = await dispatchApprovedPosts(list, schedule, { now: () => clock });
+  assert.equal(first.scheduled, 1);
+  assert.equal(first.deferred, 1);
+  assert.equal(states.get("second"), "approved");
+  const second = await dispatchApprovedPosts(list, schedule, { now: () => clock });
+  assert.equal(second.scheduled, 1);
+  assert.equal(second.deferred, 0);
 });

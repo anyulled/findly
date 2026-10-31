@@ -38,3 +38,33 @@ $$;
 
 revoke all on function public.list_approved_posts_for_dispatch(uuid, uuid, integer) from public, anon;
 grant execute on function public.list_approved_posts_for_dispatch(uuid, uuid, integer) to authenticated, service_role;
+
+-- The claim is the authorization point for dispatch. A source association
+-- removed after listing but before the claim must not permit a send. Once a
+-- claim has succeeded, later source edits do not revoke an in-flight request.
+create or replace function public.claim_post_for_scheduling(p_post_id uuid, p_owner_id uuid)
+returns table (id uuid, account_id uuid, network text, due_at timestamptz, content text, attempt_id uuid)
+language sql
+security invoker
+set search_path = ''
+as $$
+  update public.posts as post
+  set status = 'scheduling', last_error = null, scheduling_attempt_id = pg_catalog.gen_random_uuid()
+  where post.id = p_post_id and post.owner_id = p_owner_id
+    and ((select auth.uid()) = p_owner_id or current_user = 'service_role')
+    and post.status in ('approved', 'failed') and post.buffer_post_id is null
+    and exists (
+      select 1 from public.events as event
+      join public.accounts as account
+        on account.owner_id = post.owner_id and account.id = post.account_id
+      where event.owner_id = post.owner_id and event.id = post.event_id
+        and account.enabled = true
+        and (event.source_id is null or exists (
+          select 1 from public.source_accounts as link
+          where link.owner_id = post.owner_id
+            and link.source_id = event.source_id
+            and link.account_id = post.account_id
+        ))
+    )
+  returning post.id, post.account_id, post.network, post.due_at, post.content, post.scheduling_attempt_id;
+$$;
