@@ -12,7 +12,7 @@ La aplicación incluye:
 - Modos globales de revisión y automático en la interfaz. Aprobar un borrador lo guarda también como ejemplo de estilo.
 - Un modo demo que guarda datos en el navegador y una ruta de persistencia con Supabase, autenticación de Google y acceso restringido al correo propietario.
 
-La generación actual usa plantillas locales y no utiliza los prompts de voz ni los ejemplos aprobados. **Groq todavía no redacta publicaciones, Buffer no recibe ni programa contenido y el modo automático no publica.** Los eventos se introducen manualmente; la aplicación no importa calendarios iCal de Luma ni extrae eventos de Meetup. Tampoco hay endpoint de sincronización ni tarea cron configurados.
+La generación actual del dashboard usa plantillas locales y no utiliza los prompts de voz ni los ejemplos aprobados. Hay un adaptador Groq validado con respuestas simuladas, pero todavía no está conectado al flujo de creación de borradores. **Buffer no recibe ni programa contenido y el modo automático no publica.** El parser iCal está probado con fixtures, pero los eventos se introducen manualmente: la aplicación aún no obtiene calendarios Luma ni extrae eventos de Meetup. Tampoco hay endpoint de sincronización ni tarea cron configurados.
 
 El código de autenticación y persistencia está preparado, pero este repositorio no incluye credenciales, configuración de proveedores ni un despliegue de producción. La aplicación no está lista para publicación automática hasta conectar y validar esos servicios. La sincronización de cambios de fecha y cancelaciones queda fuera de la primera fase.
 
@@ -31,9 +31,10 @@ Abre http://localhost:3000. Sin variables de Supabase, la aplicación inicia en 
 
 ```bash
 npm run lint
+npm run test:unit
 npm run build
 npx playwright install chromium
 npm run test:e2e
 ```
 
-Los E2E usan el modo demo local y no verifican integraciones reales con Supabase, Groq, Buffer, Luma ni Meetup. CI ejecuta lint, build y Playwright; el check `E2E (Playwright)` es obligatorio para fusionar en `main`.
+Los tests unitarios usan fixtures y `fetch` simulado; los E2E usan el modo demo local. Ninguno verifica integraciones reales con Supabase, Groq, Buffer, Luma ni Meetup. CI ejecuta lint, tests unitarios, build y Playwright; el check `E2E (Playwright)` es obligatorio para fusionar en `main`.
