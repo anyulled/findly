@@ -156,6 +156,16 @@ test("marks server errors and unreadable success responses as uncertain", async 
     await assert.rejects(client.schedulePost(input), BufferUncertainResultError);
   });
 
+  await t.test("server error with a success-shaped payload", async () => {
+    const client = new BufferClient({
+      apiKey: "test-api-key",
+      fetchImpl: async () => response({
+        data: { createPost: { __typename: "PostActionSuccess", post: { id: "post-1", text: input.text } } },
+      }, 500),
+    });
+    await assert.rejects(client.schedulePost(input), BufferUncertainResultError);
+  });
+
   await t.test("unreadable successful response", async () => {
     const client = new BufferClient({
       apiKey: "test-api-key",

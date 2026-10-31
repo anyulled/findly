@@ -198,6 +198,13 @@ export class BufferClient {
       );
     }
 
+    if (response.status >= 500) {
+      throw new BufferUncertainResultError(
+        "Buffer returned a server error. Reconcile the channel queue before retrying this post.",
+        { httpStatus: response.status },
+      );
+    }
+
     let rawEnvelope: unknown;
     try {
       rawEnvelope = await response.json();
@@ -240,6 +247,14 @@ export class BufferClient {
     const payload = asRecord(asRecord(envelope.data)?.createPost);
 
     if (payload && payload.__typename === "PostActionSuccess") {
+      if (!response.ok) {
+        throw new BufferApiError({
+          message: `Buffer rejected the request with HTTP ${response.status}.`,
+          httpStatus: response.status,
+          outcome: "rejected",
+          errors,
+        });
+      }
       const post = asRecord(payload.post);
       if (!post || typeof post.id !== "string" || typeof post.text !== "string") {
         throw new BufferUncertainResultError(
@@ -269,12 +284,6 @@ export class BufferClient {
     }
 
     if (!response.ok) {
-      if (response.status >= 500) {
-        throw new BufferUncertainResultError(
-          "Buffer returned a server error. Reconcile the channel queue before retrying this post.",
-          { httpStatus: response.status },
-        );
-      }
       throw new BufferApiError({
         message: errors[0]?.message ?? `Buffer rejected the request with HTTP ${response.status}.`,
         code: errors[0]?.code,
