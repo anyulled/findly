@@ -1,0 +1,74 @@
+# Setup and operations
+
+This guide describes the intended setup for the personal event publishing app. It does not mean external credentials or a production deployment have been configured. Follow the application README for the exact commands and environment variable names as implementation lands.
+
+## Local development
+
+1. Install the Node.js version supported by the `package.json` in the repository.
+2. Install dependencies with `npm ci` and start the Next.js development server with `npm run dev`.
+3. Copy the committed environment template when one is available. Put secrets only in an ignored local environment file; never commit it.
+4. Until Supabase credentials are configured, sign-in, database-backed scheduling and provider calls cannot be exercised end to end.
+
+## Provider setup checklist
+
+### Supabase and Google sign-in
+
+1. Create one Supabase project on a plan that meets the availability expectations.
+2. Enable Google as an Auth provider and configure Google OAuth credentials and redirect URLs for local and deployed origins.
+3. Restrict application access to the owner's Google identity. There is one application user; do not add self-service registration for other members.
+4. Apply the checked-in database migrations. Verify access policies before exposing the service to the public internet.
+5. Keep elevated Supabase credentials on the server. A browser may receive only the public/publishable key, protected by row-level security.
+
+Supabase free projects may pause after a week of sufficiently low activity. This is a service availability behavior, not a data deletion guarantee; monitor the project and understand the resume process.
+
+### Buffer
+
+1. Confirm the Buffer API is available on the owner account and create an API key with the intended scope.
+2. Confirm all three Buffer accounts, their connected channels, and the publishing permissions available to the key.
+3. Store the key only in server-side deployment secrets.
+4. Verify how the API handles exact scheduled times, link counts, Unicode and each channel's limits against real connected channels.
+5. Begin in global review mode. Confirm scheduled items appear in Buffer with the correct channel and Madrid time before enabling global automatic mode.
+
+### Groq
+
+1. Create an API key and store it only in server-side secrets.
+2. Configure a production model ID explicitly rather than relying on an implicit default.
+3. Expect account-specific rate limits. A throttled or failed request should leave a visible retryable item and must not create a partial schedule.
+4. Account voice instructions belong to the per-account system prompt. Only final texts approved in review mode are added as style examples; generated text must still pass deterministic length checks.
+
+### Luma and event links
+
+1. Add the iCal subscription URL for each Luma calendar in the application settings.
+2. Verify imported event title, description, start time, link and event timezone on representative examples.
+3. Add Meetup group URLs when available and inspect what can be obtained from a real group or event page. No Meetup feed integration is confirmed yet.
+4. Use the manual event form to correct any fields that could not be extracted. Do not infer a missing start time from page display alone.
+
+### Scheduled sync
+
+1. Deploy the application to an eligible hosting plan and confirm its HTTPS URL.
+2. Configure cron-job.org to call the sync endpoint every six hours over HTTPS.
+3. Send the endpoint's random secret using the configured authorization header, never a query string. Keep the same value in cron-job.org and the server secret store.
+4. Trigger a manual sync first and inspect persisted results. Then enable the recurring job.
+5. Monitor last-success time and failures. The sync operation must be idempotent because external schedulers can retry or overlap requests.
+
+## Secret inventory
+
+Exact names must follow the application implementation. The deployment will need secret values for Supabase server access, Google OAuth (configured in Supabase), Buffer API access, Groq API access and the scheduled endpoint secret. Public Supabase URL and publishable key are configuration values, not secrets, but browser access still depends on database access policies. Never place Buffer/Groq/service-role/cron values in a `NEXT_PUBLIC_` variable.
+
+## Review and automatic modes
+
+- **Review:** the system prepares a draft for each applicable reminder, account and channel. The owner can edit and approve; approval both records the final version as a style example and schedules it.
+- **Automatic:** valid generated posts are scheduled without approval. Invalid copy and incomplete event data should stay visible as blocked work. Automatically scheduled text is not an approved style example.
+- The setting is global across all accounts. Enable automatic mode only after feed, identity, scheduling and character-count behavior have been checked with real provider accounts.
+
+## Calendar and dates
+
+Reminder candidates are 14, 7 and 1 calendar days before the event. Schedule each still-future candidate at 13:00 in `Europe/Madrid`; skip a candidate when that Madrid time is already past. Calendar weeks start Monday. The default range contains the current week and following week; weekly and calendar-month ranges are selectable.
+
+## Operational limits and phase boundaries
+
+- Date changes and cancellations are not synchronized automatically in the first phase. Update or cancel previously scheduled posts manually in Buffer.
+- A successful `createPost` response means Buffer accepted the scheduled post; it does not prove the social network published it. Reconcile provider status separately.
+- On uncertain timeouts, do not blindly retry a create operation. Look up the existing provider post using the persisted correlation data first.
+- Vercel Hobby allows personal or non-commercial usage only under current terms. Confirm that the association use case is eligible or choose a different host/plan before production use.
+- Free-tier quotas and terms change. Review provider dashboards before connecting the live scheduler, and avoid enabling paid upgrades without a deliberate decision.
