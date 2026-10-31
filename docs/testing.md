@@ -19,6 +19,8 @@ The current E2E coverage checks:
 
 Every TypeScript business-logic module directly under `src/lib/` must maintain at least 80% line coverage on its own. The `Coverage (80%)` CI job runs the unit suite with `c8 --all` and checks every matching module per file, including modules that no test imports. This prevents a highly covered module from masking an untested one and prevents new modules from silently escaping the gate.
 
+In addition to line coverage, CI enforces the CRAP (Change Risk Anti-Patterns) metric quality gate (`npm run test:crap`). Every function in `src/lib/*.ts` must respect an absolute threshold of CRAP <= 20 ($\text{CRAP}(m) = CC(m)^2 \times (1 - \text{cov}(m))^3 + CC(m)$). Functions exceeding this threshold represent an unsafe combination of cyclomatic complexity and insufficient coverage and fail the CI check.
+
 The gate measures `src/lib/*.ts`, where deterministic domain and provider logic belongs. UI components and Next.js route wiring are exercised by the Playwright E2E suite; Supabase client construction wrappers are configuration glue rather than domain logic. Keep route handlers thin and move testable rules into `src/lib/` so the coverage gate sees them.
 
 The event URL extractor is covered by fetch-mocked unit cases for JSON-LD, metadata fallback, Madrid time conversion, unsupported hosts, redirects and response bounds. These cases verify parser behavior without requesting live Meetup or Luma pages. The authenticated sync request's same-origin guard has unit coverage; the demo E2E verifies that feed sync stays disabled without Supabase credentials. Source targeting tests exercise the shared account selection rule, missing reminder keys, and the Luma generation and dispatch orchestration with mocked repositories and generators in both review and automatic modes. A source with no associated enabled accounts produces no drafts; manual events select all enabled accounts.
@@ -35,6 +37,7 @@ The browser uses the `Europe/Madrid` time zone. The test server binds to localho
 npm ci
 npm run test:unit
 npm run test:coverage
+npm run test:crap
 npx playwright install chromium
 npm run test:e2e
 supabase db start
