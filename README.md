@@ -6,7 +6,7 @@ Findly es una aplicación personal para preparar anuncios de eventos en varias c
 
 La aplicación incluye:
 
-- Un calendario con vistas quincenal, semanal y mensual.
+- Un calendario con vistas quincenal, semanal y mensual. Cuando hay más de tres publicaciones en un día, el control «+N más» muestra todas con su cuenta, red y estado; cada una abre su detalle sin cambiar el intervalo.
 - Alta manual con datos o pegando la URL pública de Meetup/Luma para extraer los datos disponibles, revisarlos y corregirlos antes de guardar.
 - Borradores para LinkedIn, X y Bluesky, con fechas recordatorio a 14, 7 y 1 día del evento, a las 13:00 de `Europe/Madrid`. Se omiten las fechas cuyo horario ya pasó.
 - Tres cuentas de ejemplo con prompts de voz editables, edición de borradores y validación local del límite de texto por red.

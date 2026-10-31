@@ -18,6 +18,16 @@ type EventItem = { id: string; title: string; date: string; time: string; place:
 type Post = { id: string; eventId: string; date: string; time: string; account: string; accountId?: string; network: Network; text: string; status: Status; leadDays?: 14 | 7 | 1; language?: PostLanguage; lastError?: string | null; bufferPostId?: string | null; };
 type Account = { id?: string; enabled?: boolean; name: string; kind: string; initials: string; color: string; logo: string; bufferApiKeyEnv: string; bufferApiKeyConfigured: boolean; prompt: string; networks: Network[]; bufferChannels: Partial<Record<Network, string>>; styleExampleCount: number; };
 
+const statusLabels: Record<Status, string> = {
+  review: "Pendiente de revisión",
+  approved: "Aprobada",
+  scheduling: "Enviando",
+  scheduled: "Programada",
+  published: "Publicada",
+  failed: "Fallida",
+  needs_reconciliation: "Pendiente de conciliación",
+};
+
 const accounts: Account[] = [
   { name: "Personal", kind: "Cuenta personal", initials: "P", color: "violet", logo: "/account-logos/personal.svg", bufferApiKeyEnv: "BUFFER_API_KEY_PERSONAL", bufferApiKeyConfigured: false, prompt: "Cercano, curioso y directo. Primera persona. Evita sonar promocional.", networks: ["LinkedIn", "X", "Bluesky"], bufferChannels: {}, styleExampleCount: 0 },
   { name: "Barcelona JUG", kind: "Asociación", initials: "J", color: "orange", logo: "/account-logos/barcelona-jug.webp", bufferApiKeyEnv: "BUFFER_API_KEY_BARCELONA_JUG", bufferApiKeyConfigured: false, prompt: "Comunidad tecnológica abierta. Entusiasta, inclusiva y concreta.", networks: ["LinkedIn", "X"], bufferChannels: {}, styleExampleCount: 0 },
@@ -78,6 +88,7 @@ function Dashboard() {
   const [tab, setTab] = useState("Calendario");
   const [range, setRange] = useState<Range>("Quincena");
   const [anchor, setAnchor] = useState(() => new Date());
+  const [expandedDay, setExpandedDay] = useState<string | null>(null);
   const [events, setEvents] = useState(initialEvents);
   const [accountList, setAccountList] = useState(accounts);
   const [sources, setSources] = useState<SourceView[]>([]);
@@ -386,7 +397,22 @@ function Dashboard() {
             <div className={styles.weekdays}>{["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"].map((d) => <div key={d}>{d}</div>)}</div>
             <div className={styles.days} data-testid="calendar-days">{dates.map((date) => {
               const key = dayKey(date); const offMonth = range === "Mes" && date.getMonth() !== anchor.getMonth(); const dayPosts = posts.filter((p) => p.date === key).sort((a, b) => a.time.localeCompare(b.time));
-              return <div key={key} data-testid="calendar-day" className={`${styles.day} ${offMonth ? styles.offMonth : ""} ${key === dayKey(new Date()) ? styles.isToday : ""}`}><div className={styles.dayHeader}><span>{date.getDate()}</span>{dayPosts.length > 0 && <small>{dayPosts.length}</small>}</div><div className={styles.dayPosts}>{dayPosts.slice(0, 3).map((post) => { const event = events.find((e) => e.id === post.eventId); return <button key={post.id} className={`${styles.postPill} ${styles["post" + post.status]}`} onClick={() => { setSelected(post); setEditing(post.text); setReconciliationId(""); setAbsenceConfirmed(false); }} title={event?.title}><span className={styles.networkDot}>{post.network === "LinkedIn" ? "in" : post.network === "X" ? "𝕏" : "b"}</span><span className={styles.pillText}>{event?.title ?? post.text}</span></button>; })}{dayPosts.length > 3 && <button className={styles.morePosts} onClick={() => setTab("Eventos")}>+{dayPosts.length - 3} más</button>}</div></div>;
+              const expanded = expandedDay === key;
+              const visiblePosts = expanded ? dayPosts : dayPosts.slice(0, 3);
+              return <div key={key} data-testid="calendar-day" data-calendar-date={key} className={`${styles.day} ${offMonth ? styles.offMonth : ""} ${key === dayKey(new Date()) ? styles.isToday : ""}`}>
+                <div className={styles.dayHeader}><span>{date.getDate()}</span>{dayPosts.length > 0 && <small>{dayPosts.length}</small>}</div>
+                <div className={styles.dayPosts} id={`posts-${key}`}>
+                  {visiblePosts.map((post) => {
+                    const event = events.find((e) => e.id === post.eventId);
+                    const title = event?.title ?? "Publicación";
+                    return <button key={post.id} className={`${styles.postPill} ${styles["post" + post.status]}`} onClick={() => { setSelected(post); setEditing(post.text); setReconciliationId(""); setAbsenceConfirmed(false); }} aria-label={`${title} · ${post.account} · ${post.network} · ${statusLabels[post.status]}`} title={title}>
+                      <span className={styles.networkDot}>{post.network === "LinkedIn" ? "in" : post.network === "X" ? "𝕏" : "b"}</span>
+                      <span className={styles.postDescription}><span className={styles.pillText}>{title}</span>{expanded && <span className={styles.postMeta}>{post.account} · {post.network} · {statusLabels[post.status]}</span>}</span>
+                    </button>;
+                  })}
+                </div>
+                {dayPosts.length > 3 && <button className={styles.morePosts} aria-controls={`posts-${key}`} aria-expanded={expanded} aria-label={expanded ? `Mostrar menos publicaciones del ${key}` : `Mostrar ${dayPosts.length - 3} publicaciones más del ${key}`} onClick={() => setExpandedDay(expanded ? null : key)}>{expanded ? "Mostrar menos" : `+${dayPosts.length - 3} más`}</button>}
+              </div>;
             })}</div>
           </div>
           <div className={styles.legend}><span><i className={styles.legendReview}/> Revisión pendiente</span><span><i className={styles.legendApproved}/> Aprobada</span><span><i className={styles.legendScheduled}/> Programada</span><span className={styles.legendCount}>{posts.filter((p) => p.status === "review").length} pendientes de revisión</span></div>
