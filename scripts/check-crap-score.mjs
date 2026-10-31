@@ -122,18 +122,47 @@ export function analyzeCrapMetrics({
 
         const cc = calculateCyclomaticComplexity(node);
 
+        // Collect inner nested function ranges so statements inside callbacks/closures
+        // are attributed to the inner function, not the enclosing function.
+        const innerFunctionRanges = [];
+        function findInnerFunctions(child) {
+          if (
+            child !== node &&
+            (ts.isFunctionDeclaration(child) ||
+              ts.isFunctionExpression(child) ||
+              ts.isArrowFunction(child) ||
+              ts.isMethodDeclaration(child) ||
+              ts.isGetAccessor(child) ||
+              ts.isSetAccessor(child))
+          ) {
+            const { line: innerStart } = sourceFile.getLineAndCharacterOfPosition(child.getStart());
+            const { line: innerEnd } = sourceFile.getLineAndCharacterOfPosition(child.getEnd());
+            innerFunctionRanges.push({ start: innerStart + 1, end: innerEnd + 1 });
+            return;
+          }
+          ts.forEachChild(child, findInnerFunctions);
+        }
+        ts.forEachChild(node, findInnerFunctions);
+
         let stmtsTotal = 0;
         let stmtsCovered = 0;
         if (covEntry && covEntry.statementMap && covEntry.s) {
           for (const [id, loc] of Object.entries(covEntry.statementMap)) {
             if (loc.start.line >= startLine + 1 && loc.end.line <= endLine + 1) {
-              stmtsTotal++;
-              if (covEntry.s[id] > 0) stmtsCovered++;
+              const isInsideNested = innerFunctionRanges.some(
+                (range) => loc.start.line >= range.start && loc.end.line <= range.end,
+              );
+              if (!isInsideNested) {
+                stmtsTotal++;
+                if (covEntry.s[id] > 0) stmtsCovered++;
+              }
             }
           }
         }
 
-        const covRatio = stmtsTotal > 0 ? stmtsCovered / stmtsTotal : 1;
+        // If no coverage entry exists for the file, fail closed (0% coverage).
+        // If an entry exists but the function contains no statements, default to 1 (100%).
+        const covRatio = !covEntry ? 0 : stmtsTotal > 0 ? stmtsCovered / stmtsTotal : 1;
         const crap = calculateCrapScore(cc, covRatio);
 
         functions.push({
@@ -176,7 +205,13 @@ export function analyzeCrapMetrics({
 
 export function main() {
   const coverageFile = process.env.COVERAGE_FILE || resolve("coverage/coverage-final.json");
-  const threshold = Number(process.env.CRAP_THRESHOLD || DEFAULT_CRAP_THRESHOLD);
+  const rawThreshold = process.env.CRAP_THRESHOLD;
+  const threshold = rawThreshold !== undefined ? Number(rawThreshold) : DEFAULT_CRAP_THRESHOLD;
+  if (!Number.isFinite(threshold) || threshold < 0) {
+    process.stderr.write(`Invalid CRAP_THRESHOLD: ${rawThreshold}\n`);
+    process.exitCode = 1;
+    return;
+  }
   const libDir = resolve(process.env.SRC_LIB_DIR || "src/lib");
 
   let coverageData = {};
