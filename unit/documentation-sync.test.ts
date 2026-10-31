@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { documentationSyncIssues } from "../scripts/check-documentation-sync.mjs";
+import { documentationSyncIssues, isTrustedDependencyBot } from "../scripts/check-documentation-sync.mjs";
 
 const checklist = `## Mandatory final stage: Documentation and Sync
 
@@ -12,6 +12,13 @@ const checklist = `## Mandatory final stage: Documentation and Sync
 `;
 
 describe("documentation sync PR checklist", () => {
+  it("recognizes only Dependabot and Renovate PR authors", () => {
+    assert.equal(isTrustedDependencyBot("dependabot[bot]"), true);
+    assert.equal(isTrustedDependencyBot("renovate[bot]"), true);
+    assert.equal(isTrustedDependencyBot("some-other-bot[bot]"), false);
+    assert.equal(isTrustedDependencyBot("anyulled"), false);
+  });
+
   it("accepts all five completed final-stage items", () => {
     assert.deepEqual(documentationSyncIssues(checklist), []);
   });

@@ -10,6 +10,11 @@ const REQUIRED_ITEMS = [
   "Branch is rebased",
   "The PR description and checklist reflect",
 ];
+const DEPENDENCY_BOTS = new Set(["dependabot[bot]", "renovate[bot]"]);
+
+export function isTrustedDependencyBot(login) {
+  return DEPENDENCY_BOTS.has(login);
+}
 
 export function documentationSyncIssues(body) {
   const start = body.indexOf(HEADING);
@@ -32,6 +37,10 @@ function main() {
   const pullRequest = event.pull_request;
   if (!pullRequest) {
     process.stdout.write("Documentation checklist validation applies to pull requests only.\n");
+    return;
+  }
+  if (isTrustedDependencyBot(pullRequest.user?.login)) {
+    process.stdout.write("Trusted dependency-bot PR: human documentation checklist is not required; validation and E2E checks still run.\n");
     return;
   }
 
