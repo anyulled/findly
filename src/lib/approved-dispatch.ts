@@ -11,29 +11,45 @@ export type ApprovedDispatchResult = {
 };
 
 // A Buffer request can take up to 20 seconds. Stop starting further requests
-// after 10 seconds to keep recovery bounded without aborting an active send.
+// after 10 seconds spent dispatching, without aborting an active send.
 export const RECOVERY_BUDGET_MS = 10_000;
+export type DispatchBudget = { remainingMs: number };
 
 export function hasDispatchFailures(...results: ApprovedDispatchResult[]): boolean {
   return results.some((result) => result.failed > 0 || result.needsReconciliation > 0 || result.errors > 0);
+}
+
+/** Record each event batch, including failures before a batch can be listed. */
+export async function recordDispatchBatch(
+  summary: ApprovedDispatchResult,
+  run: () => Promise<ApprovedDispatchResult>,
+): Promise<void> {
+  try {
+    const result = await run();
+    for (const key of Object.keys(summary) as (keyof ApprovedDispatchResult)[]) summary[key] += result[key];
+  } catch (error) {
+    summary.errors += 1;
+    throw error;
+  }
 }
 
 /** Resume durable approved intents. Each scheduler atomically claims its post. */
 export async function dispatchApprovedPosts(
   listApproved: () => Promise<string[]>,
   schedule: (postId: string) => Promise<PostPublishingOutcome>,
-  options: { now?: () => number; budgetMs?: number; deadlineMs?: number } = {},
+  options: { now?: () => number; budget?: DispatchBudget } = {},
 ): Promise<ApprovedDispatchResult> {
   const now = options.now ?? Date.now;
-  const deadline = options.deadlineMs ?? now() + (options.budgetMs ?? RECOVERY_BUDGET_MS);
+  const budget = options.budget ?? { remainingMs: RECOVERY_BUDGET_MS };
   const postIds = await listApproved();
   const result: ApprovedDispatchResult = { selected: postIds.length, scheduled: 0, failed: 0, needsReconciliation: 0, notClaimed: 0, errors: 0, deferred: 0 };
   for (let index = 0; index < postIds.length; index += 1) {
-    if (now() >= deadline) {
+    if (budget.remainingMs <= 0) {
       result.deferred = postIds.length - index;
       break;
     }
     const postId = postIds[index];
+    const started = now();
     try {
       const outcome = await schedule(postId);
       if (outcome.kind === "scheduled") result.scheduled += 1;
@@ -44,6 +60,8 @@ export async function dispatchApprovedPosts(
       // The claim or its result could not be persisted. Do not retry this ID
       // here: a later run will only select it if it is still approved.
       result.errors += 1;
+    } finally {
+      budget.remainingMs = Math.max(0, budget.remainingMs - Math.max(0, now() - started));
     }
   }
   return result;
@@ -62,7 +80,7 @@ export async function dispatchApprovedPostsWithSupabase(
   ownerId: string,
   eventId: string | null = null,
   fetchImpl?: typeof fetch,
-  options: { deadlineMs?: number } = {},
+  options: { budget?: DispatchBudget } = {},
 ): Promise<ApprovedDispatchResult> {
   const database = supabase as Database;
   return dispatchApprovedPosts(async () => {

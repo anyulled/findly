@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { dispatchApprovedPosts, dispatchApprovedPostsWithSupabase, hasDispatchFailures } from "../src/lib/approved-dispatch";
+import { dispatchApprovedPosts, dispatchApprovedPostsWithSupabase, hasDispatchFailures, recordDispatchBatch } from "../src/lib/approved-dispatch";
 import type { PostPublishingOutcome } from "../src/lib/post-publishing";
 
 test("recovers previously approved posts after interruption without resending confirmed or uncertain posts", async () => {
@@ -179,15 +179,23 @@ test("a slow delivery defers remaining approved posts to the next run", async ()
 });
 
 
-test("an already exhausted shared deadline defers a later event batch", async () => {
+test("shared budget counts delivery time but ignores time spent generating a later event", async () => {
+  let clock = 0;
+  const budget = { remainingMs: 10_000 };
   let sent = 0;
-  const result = await dispatchApprovedPosts(
-    async () => ["later-event"],
-    async () => { sent += 1; return { kind: "scheduled", bufferPostId: "remote" }; },
-    { now: () => 20_000, deadlineMs: 10_000 },
-  );
-  assert.equal(sent, 0);
-  assert.equal(result.deferred, 1);
+  const schedule = async (): Promise<PostPublishingOutcome> => {
+    sent += 1;
+    clock += 6_000;
+    return { kind: "scheduled", bufferPostId: `remote-${sent}` };
+  };
+  const first = await dispatchApprovedPosts(async () => ["first"], schedule, { now: () => clock, budget });
+  clock += 60_000; // Feed fetch and Groq generation do not spend delivery budget.
+  const second = await dispatchApprovedPosts(async () => ["second", "third"], schedule, { now: () => clock, budget });
+  assert.equal(first.scheduled, 1);
+  assert.equal(second.scheduled, 1);
+  assert.equal(second.deferred, 1);
+  assert.equal(sent, 2);
+  assert.equal(budget.remainingMs, 0);
 });
 
 
@@ -197,4 +205,14 @@ test("only failed, uncertain, or unexpected outcomes signal a failed sync", () =
   for (const field of ["failed", "needsReconciliation", "errors"] as const) {
     assert.equal(hasDispatchFailures(ok, { ...ok, [field]: 1 }), true);
   }
+});
+
+
+test("a failed Luma batch lookup remains visible to cron monitoring", async () => {
+  const totals = { selected: 0, scheduled: 0, failed: 0, needsReconciliation: 0, notClaimed: 0, errors: 0, deferred: 0 };
+  await recordDispatchBatch(totals, async () => ({ selected: 1, scheduled: 1, failed: 0, needsReconciliation: 0, notClaimed: 0, errors: 0, deferred: 0 }));
+  await assert.rejects(() => recordDispatchBatch(totals, async () => { throw new Error("lookup failed"); }), /lookup failed/);
+  assert.equal(totals.scheduled, 1);
+  assert.equal(totals.errors, 1);
+  assert.equal(hasDispatchFailures(totals), true);
 });
