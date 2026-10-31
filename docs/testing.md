@@ -9,6 +9,7 @@ The current E2E coverage checks:
 - Switching the calendar between its default fortnight, week, and month views.
 - Creating an event eight days ahead, which leaves the one-week and one-day reminders in range and omits the two-week reminder. The generated drafts cover all seven configured social channels.
 - Approving a draft, recording it as a style example, and retaining that approval after a page reload.
+- Expanding a day with seven publications, opening and approving each account/channel with the keyboard, and opening a simulated uncertain publication that was initially hidden. This checks access to the existing reconciliation UI in demo mode; it does not exercise Buffer.
 - Pasting an event URL, receiving mocked extracted details from the route, reviewing the populated fields, and saving the event.
 - Distinguishing an active Buffer send from an uncertain result: absence cannot be confirmed while the send is active.
 
