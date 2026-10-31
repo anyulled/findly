@@ -43,6 +43,7 @@ jobs:
 
   documentation-sync:
     name: Documentation and Sync
+    needs: validate
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
