@@ -59,6 +59,35 @@ test("creates an event, prepares only timely reminders, and saves approval as a 
   await expect(page.getByText("1 ejemplos aprobados").first()).toBeVisible();
 });
 
+test("extracts event details from a pasted URL and lets the owner review the result", async ({ page }) => {
+  const eventDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1_000).toISOString().slice(0, 10);
+  await page.route("**/api/events/extract", async (route) => {
+    expect(route.request().method()).toBe("POST");
+    expect(route.request().postDataJSON()).toEqual({ url: "https://luma.com/community-night" });
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        event: { title: "Community Night", date: eventDate, time: "19:00", place: "Barcelona", description: "Meet the community.", url: "https://luma.com/community-night" },
+        missingFields: [],
+      }),
+    });
+  });
+
+  await page.getByRole("button", { name: "Añadir evento" }).first().click();
+  await page.getByLabel("URL del evento").fill("https://luma.com/community-night");
+  await page.getByRole("button", { name: "Extraer datos del evento" }).click();
+  await expect(page.getByLabel("TÍTULO")).toHaveValue("Community Night");
+  await expect(page.getByLabel("FECHA")).toHaveValue(eventDate);
+  await expect(page.getByLabel("HORA")).toHaveValue("19:00");
+  await expect(page.getByLabel("LUGAR")).toHaveValue("Barcelona");
+  await expect(page.getByLabel("DESCRIPCIÓN")).toHaveValue("Meet the community.");
+  await expect(page.getByRole("status")).toHaveText("Datos extraídos. Revísalos antes de crear el evento.");
+
+  await page.getByRole("button", { name: "Crear evento" }).click();
+  await expect(page.getByRole("heading", { name: "Community Night", exact: true })).toBeVisible();
+});
+
 test("stores a Luma iCal source linked to multiple accounts", async ({ page }) => {
   await page.getByRole("button", { name: "Ajustes" }).click();
   await page.getByLabel("Nombre de la fuente").fill("BarcelonaJS Luma");

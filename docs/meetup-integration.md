@@ -4,7 +4,7 @@
 
 Reviewed Meetup's official GraphQL documentation and API license terms on 2026-10-31. No real event URL, Meetup account, OAuth client, or API token was available for testing.
 
-The official documentation reviewed does not describe a general RSS or iCalendar feed for event listings. This is a limit of the documentation reviewed, not proof that no account-specific feed exists. Do not assume one until a concrete URL is checked.
+A public group RSS URL was verified for Software Crafters Barcelona: [Meetup events RSS](https://www.meetup.com/software-crafters-barcelona/events/rss/). On 2026-10-31 it returned HTTP 200 with `application/rss+xml`, but contained no `<item>` entries. This confirms that the group endpoint exists, not that it currently supplies upcoming events or that all Meetup groups have feeds.
 
 ## Documented API option
 
@@ -16,9 +16,8 @@ The API terms also prohibit commercial use without Meetup's express written cons
 
 ## Current integration decision
 
-- Use the manual event form for Meetup events. Keep the Meetup URL as a reference and let the owner enter or correct the event details.
-- If Meetup Pro and API authorization are available, prefer the documented GraphQL API over page scraping. Use the event ID from a supplied event link where possible, and fetch only the fields needed by Findly.
-- Do not implement scraping until a concrete event URL and an allowed, reliable access path have been reviewed. Public page markup is not a documented integration contract.
-- If a verified RSS or iCalendar URL is later provided, test its format and field coverage before enabling polling. This research did not verify such a feed.
+- Use the manual event form for single Meetup events. Its URL extractor reads public page metadata and structured event data when available; the owner reviews and corrects the result. This best-effort HTML extraction is not a stable Meetup API contract.
+- Do not add recurring Meetup polling or broader scraping. If Meetup Pro and API authorization become available, evaluate the documented GraphQL API as the supported integration. Use only fields needed by Findly.
+- The verified Software Crafters Barcelona RSS link may be configured as a source after confirming expected entries. It was empty during the check, so it did not establish event coverage. Do not generalize its URL pattern to other groups.
 
-No Meetup feed polling, OAuth flow, or page extraction is currently implemented.
+No Meetup feed polling or OAuth flow is implemented. Manual URL extraction supports public HTTPS Meetup event pages and can leave fields for owner completion.

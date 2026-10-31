@@ -90,8 +90,10 @@ function Dashboard() {
   const [reconciliationId, setReconciliationId] = useState("");
   const [absenceConfirmed, setAbsenceConfirmed] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
-  const [newEvent, setNewEvent] = useState({ title: "", date: "", time: "19:00", place: "Barcelona", description: "", source: "Manual" });
+  const [newEvent, setNewEvent] = useState({ title: "", date: "", time: "", place: "", description: "", source: "Manual" });
   const [sourceUrl, setSourceUrl] = useState("");
+  const [extractingEvent, setExtractingEvent] = useState(false);
+  const [extractionMessage, setExtractionMessage] = useState("");
   const [hydrated, setHydrated] = useState(false);
   const [feedback, setFeedback] = useState("");
   const persistent = isSupabaseConfigured();
@@ -163,13 +165,14 @@ function Dashboard() {
     if (selected) setSelected({ ...selected, ...changes });
   }
   async function addEvent() {
-    if (!newEvent.title.trim() || !newEvent.date) return;
+    if (!newEvent.title.trim() || !newEvent.date || !newEvent.time) return;
     let parsedUrl: URL | null = null;
     try {
       const candidate = new URL(sourceUrl.trim());
       if (candidate.protocol === "https:" || candidate.protocol === "http:") parsedUrl = candidate;
     } catch { /* A missing or invalid link falls back to manual event entry. */ }
-    const source = parsedUrl?.hostname.endsWith("lu.ma") ? "Luma" : parsedUrl?.hostname.endsWith("meetup.com") ? "Meetup" : "Manual";
+    const host = parsedUrl?.hostname ?? "";
+    const source = host === "lu.ma" || host.endsWith(".lu.ma") || host === "luma.com" || host.endsWith(".luma.com") ? "Luma" : host === "meetup.com" || host.endsWith(".meetup.com") ? "Meetup" : "Manual";
     const draftEvent = { ...newEvent, source, url: parsedUrl?.toString() };
     let savedEvent: EventItem | null = null;
     try {
@@ -185,7 +188,9 @@ function Dashboard() {
       if (savedEvent) {
         setFeedback(`El evento quedó guardado, pero no se guardaron todos sus borradores. Puedes reintentarlo desde la ficha del evento. ${error instanceof Error ? error.message : ""}`);
         setShowAdd(false);
-        setNewEvent({ title: "", date: "", time: "19:00", place: "Barcelona", description: "", source: "Manual" });
+        setNewEvent({ title: "", date: "", time: "", place: "", description: "", source: "Manual" });
+        setSourceUrl("");
+        setExtractionMessage("");
         setTab("Eventos");
       } else {
         setFeedback(error instanceof Error ? error.message : "No se pudo guardar el evento.");
@@ -193,8 +198,39 @@ function Dashboard() {
       return;
     }
     setShowAdd(false);
-    setNewEvent({ title: "", date: "", time: "19:00", place: "Barcelona", description: "", source: "Manual" });
+    setNewEvent({ title: "", date: "", time: "", place: "", description: "", source: "Manual" });
+    setSourceUrl("");
+    setExtractionMessage("");
     setTab("Eventos");
+  }
+
+  async function extractEventFromUrl() {
+    if (!sourceUrl.trim()) return;
+    setExtractingEvent(true);
+    setExtractionMessage("");
+    try {
+      const response = await fetch("/api/events/extract", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: sourceUrl }),
+      });
+      const payload = await response.json() as { event?: typeof newEvent & { url: string }; missingFields?: string[]; error?: string };
+      if (!response.ok || !payload.event || !payload.missingFields) throw new Error(payload.error ?? "No se pudieron extraer los datos del evento.");
+      const result = { event: payload.event, missingFields: payload.missingFields };
+      setNewEvent((current) => ({
+        ...current,
+        ...result.event,
+        source: new URL(result.event.url).hostname.endsWith("meetup.com") ? "Meetup" : "Luma",
+      }));
+      setSourceUrl(result.event.url);
+      setExtractionMessage(result.missingFields.length === 0
+        ? "Datos extraídos. Revísalos antes de crear el evento."
+        : `Extraje lo disponible; completa estos campos: ${result.missingFields.map((field) => ({ date: "fecha", time: "hora", place: "lugar", description: "descripción" })[field]).join(", ")}.`);
+    } catch (error) {
+      setExtractionMessage(error instanceof Error ? error.message : "No se pudieron extraer los datos del evento.");
+    } finally {
+      setExtractingEvent(false);
+    }
   }
 
   async function retryDrafts(event: EventItem) {
@@ -338,7 +374,20 @@ function Dashboard() {
       </div>
     </section>
     {selected && <div className={styles.overlay} onMouseDown={(e) => { if (e.target === e.currentTarget) setSelected(null); }}><section className={styles.detailPanel}><button className={styles.close} onClick={() => setSelected(null)}>×</button><div className={styles.eyebrow}>DETALLE DE PUBLICACIÓN</div><h2>{currentEvent?.title}</h2><div className={styles.detailDate}>◷ &nbsp;{dateAt(selected.date).toLocaleDateString("es-ES", { weekday: "long", day: "numeric", month: "long" })} · {selected.time} · Europe/Madrid</div><div className={styles.channelChip}>{selected.network} <span>·</span> {selected.account}</div><label className={styles.postEditor}>TEXTO DE LA PUBLICACIÓN<textarea value={editing} disabled={!(["review", "approved", "failed"] as Status[]).includes(selected.status)} onChange={(e) => setEditing(e.target.value)} rows={8}/></label><div className={styles.characterCount}>{postValidation?.message} <span>Validación local por red.</span></div>{selected.lastError && <p className={styles.deliveryError}>{selected.lastError}</p>}{["needs_reconciliation", "scheduling"].includes(selected.status) && <div className={styles.reconcileBox}><p>Comprueba la cola de Buffer. Si encuentras la publicación, pega su ID para confirmar el envío.</p><label>ID DEL POST DE BUFFER<input aria-label="ID confirmado del post de Buffer" value={reconciliationId} onChange={(event) => setReconciliationId(event.target.value)}/></label><button className={styles.secondaryButton} disabled={!reconciliationId.trim()} onClick={() => { void confirmReconciledPost(selected); }}>Confirmar que está programada</button><label className={styles.absenceConfirm}><input type="checkbox" checked={absenceConfirmed} onChange={(event) => setAbsenceConfirmed(event.target.checked)}/> He revisado el canal y no aparece ningún post coincidente.</label><button className={styles.secondaryButton} disabled={!absenceConfirmed} onClick={() => { void confirmPostAbsent(selected); }}>Confirmar ausencia y permitir reintento</button></div>}<div className={styles.detailActions}>{(["review", "approved", "failed"] as Status[]).includes(selected.status) && <button className={styles.secondaryButton} onClick={() => { void savePostChanges(selected, { text: editing }); }}>Guardar cambios</button>}{selected.status === "review" && <button className={styles.approveButton} onClick={() => { void savePostChanges(selected, { text: editing, status: "approved" }); }} disabled={!postValidation?.valid}>{persistent ? "✓ Aprobar, programar y guardar ejemplo" : "✓ Aprobar y guardar ejemplo"}</button>}{selected.status === "failed" && <button className={styles.approveButton} onClick={() => { void retryPost(selected); }}>Reintentar envío</button>}</div><p className={styles.autoNote}>{selected.status === "scheduled" ? `Programada en Buffer · ID ${selected.bufferPostId ?? "guardado"}` : selected.status === "scheduling" ? "El envío no tiene confirmación guardada. Comprueba Buffer y registra el ID si ya aparece en la cola." : selected.status === "needs_reconciliation" ? "Estado incierto; conciliación manual necesaria antes de cualquier reintento." : selected.status === "failed" ? "Buffer rechazó el envío o falta configuración. Corrige el problema y vuelve a intentarlo." : selected.status === "review" ? (persistent ? "Al aprobar se programa en Buffer y se guarda el texto final como ejemplo de estilo." : "En la demo, al aprobar se guarda el texto en este navegador como ejemplo local.") : selected.status === "published" ? "La red confirmó la publicación." : "Edita y guarda el texto antes de aprobarlo."}</p></section></div>}
-    {showAdd && <div className={styles.overlay} onMouseDown={(e) => { if (e.target === e.currentTarget) setShowAdd(false); }}><section className={styles.modal}><button className={styles.close} onClick={() => setShowAdd(false)}>×</button><div className={styles.eyebrow}>NUEVO EVENTO</div><h2>Añade un evento</h2><p className={styles.modalDesc}>Pega un enlace de Meetup o Luma para completar los datos manualmente en esta versión.</p><label className={styles.formLabel}>ENLACE DEL EVENTO<input value={sourceUrl} onChange={(e) => setSourceUrl(e.target.value)} placeholder="https://lu.ma/tu-evento"/></label><div className={styles.formDivider}><span>o introduce los datos</span></div><label className={styles.formLabel}>TÍTULO<input value={newEvent.title} onChange={(e) => setNewEvent({ ...newEvent, title: e.target.value })} placeholder="Nombre del evento"/></label><div className={styles.formGrid}><label className={styles.formLabel}>FECHA<input type="date" value={newEvent.date} onChange={(e) => setNewEvent({ ...newEvent, date: e.target.value })}/></label><label className={styles.formLabel}>HORA<input type="time" value={newEvent.time} onChange={(e) => setNewEvent({ ...newEvent, time: e.target.value })}/></label></div><label className={styles.formLabel}>LUGAR<input value={newEvent.place} onChange={(e) => setNewEvent({ ...newEvent, place: e.target.value })}/></label><label className={styles.formLabel}>DESCRIPCIÓN<textarea rows={3} value={newEvent.description} onChange={(e) => setNewEvent({ ...newEvent, description: e.target.value })} placeholder="¿Qué ocurrirá en el evento?"/></label><div className={styles.modalActions}><button className={styles.secondaryButton} onClick={() => setShowAdd(false)}>Cancelar</button><button className={styles.approveButton} onClick={addEvent} disabled={!newEvent.title || !newEvent.date}>Crear evento</button></div></section></div>}
+    {showAdd && <div className={styles.overlay} onMouseDown={(e) => { if (e.target === e.currentTarget) setShowAdd(false); }}><section className={styles.modal}>
+      <button className={styles.close} onClick={() => setShowAdd(false)}>×</button>
+      <div className={styles.eyebrow}>NUEVO EVENTO</div><h2>Añade un evento</h2>
+      <p className={styles.modalDesc}>Pega la URL pública de un evento de Meetup o Luma para extraer los datos. Podrás revisarlos y corregirlos antes de guardar.</p>
+      <label className={styles.formLabel}>ENLACE DEL EVENTO<input aria-label="URL del evento" value={sourceUrl} onChange={(e) => { setSourceUrl(e.target.value); setExtractionMessage(""); }} placeholder="https://lu.ma/tu-evento"/></label>
+      <button className={styles.secondaryButton} onClick={() => { void extractEventFromUrl(); }} disabled={!sourceUrl.trim() || extractingEvent}>{extractingEvent ? "Extrayendo…" : "Extraer datos del evento"}</button>
+      {extractionMessage && <p className={styles.extractionMessage} role="status">{extractionMessage}</p>}
+      <div className={styles.formDivider}><span>revisa o completa los datos</span></div>
+      <label className={styles.formLabel}>TÍTULO<input value={newEvent.title} onChange={(e) => setNewEvent({ ...newEvent, title: e.target.value })} placeholder="Nombre del evento"/></label>
+      <div className={styles.formGrid}><label className={styles.formLabel}>FECHA<input type="date" value={newEvent.date} onChange={(e) => setNewEvent({ ...newEvent, date: e.target.value })}/></label><label className={styles.formLabel}>HORA<input type="time" value={newEvent.time} onChange={(e) => setNewEvent({ ...newEvent, time: e.target.value })}/></label></div>
+      <label className={styles.formLabel}>LUGAR<input value={newEvent.place} onChange={(e) => setNewEvent({ ...newEvent, place: e.target.value })}/></label>
+      <label className={styles.formLabel}>DESCRIPCIÓN<textarea rows={3} value={newEvent.description} onChange={(e) => setNewEvent({ ...newEvent, description: e.target.value })} placeholder="¿Qué ocurrirá en el evento?"/></label>
+      <div className={styles.modalActions}><button className={styles.secondaryButton} onClick={() => setShowAdd(false)}>Cancelar</button><button className={styles.approveButton} onClick={addEvent} disabled={!newEvent.title.trim() || !newEvent.date || !newEvent.time}>Crear evento</button></div>
+    </section></div>}
   </main>;
 }
 

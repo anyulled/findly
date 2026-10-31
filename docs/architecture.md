@@ -12,7 +12,9 @@ flowchart LR
   owner -->|authenticated UI| app[Next.js application]
   timer[cron-job.org every six hours] -->|Bearer secret| sync[Authenticated sync endpoint]
   app -->|authenticated server actions| actions[Workspace actions]
+  app -->|POST /api/events/extract| extract[Owner-checked event extraction]
   actions --> db[(Supabase Postgres)]
+  extract -->|allowlisted HTTPS fetch| eventPages[Meetup or Luma event page]
   sync --> db
   sync -->|read calendar feed| luma[Luma iCal]
   app -->|generate per account and channel| groq[Groq API]
@@ -22,7 +24,7 @@ flowchart LR
   auth -. session validation .-> app
 ```
 
-The browser contains no provider secrets. Workspace writes go through Next.js Server Actions that verify the Google-authenticated owner; Supabase RLS independently scopes rows to that user. Approval and style-example insertion use a transactional database function. Persistent event creation and newly imported Luma events use Groq when its server configuration is present; the authenticated cron endpoint imports Luma events and leaves them saved without drafts when Groq is unavailable. Only the exact `POST /api/cron/sync` request bypasses browser-session middleware; the route validates its bearer secret and uses a server-only Supabase service-role key. Meetup sync and Buffer scheduling/publication are not implemented.
+The browser contains no provider secrets. Workspace writes go through Next.js Server Actions, and event extraction goes through `POST /api/events/extract`; both verify the Google-authenticated owner when Supabase is configured. Local demo mode permits extraction without an account for local use. Supabase RLS independently scopes persisted rows to the owner. Approval and style-example insertion use a transactional database function. Persistent event creation and newly imported Luma events use Groq when its server configuration is present; the authenticated cron endpoint imports Luma events and leaves them saved without drafts when Groq is unavailable. Only the exact `POST /api/cron/sync` request bypasses browser-session middleware; the route validates its bearer secret and uses a server-only Supabase service-role key. Meetup polling and Buffer scheduling/publication are not implemented. Manual extraction fetches only public HTTPS event pages on Meetup/Luma, parses available HTML metadata and JSON-LD, caps the response at 1 MB, and leaves missing fields for owner review.
 
 ## Event-to-publication lifecycle
 
@@ -61,7 +63,7 @@ All event and publication times use `Europe/Madrid` and 13:00 for scheduled remi
 | Groq | Generate candidate copy from account prompt and relevant approved examples | API limits vary by account/model; generation must be bounded and failures kept visible for retry. |
 | Buffer | Schedule and report per-channel posts | API key and connected channels are required. Verify three accounts, permissions, plan and channel-specific constraints before enabling automatic mode. |
 | Luma | Publish event calendars and provide iCal subscription URLs | Test a real feed for field completeness and refresh behavior before treating it as a reliable source. |
-| Meetup / event pages | Candidate source or manual URL extraction | No feed or reliable page extraction has been verified yet. Do not assume arbitrary scraping will work. |
+| Meetup event pages | Manual URL extraction for individual events | Best-effort public HTML metadata and JSON-LD parsing only; no recurring sync or API integration. Provider markup can change, and missing fields require owner correction. |
 | cron-job.org | Invoke the authenticated sync route every six hours | Configure HTTPS endpoint and Bearer secret; account schedule accuracy and service availability should be checked before production reliance. |
 
 ## Cost and hosting decision
