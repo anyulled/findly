@@ -1,0 +1,166 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import {
+  approveAndSchedulePost,
+  schedulePostWithSupabase,
+  type PostToSchedule,
+} from "../src/lib/post-publishing";
+
+const post: PostToSchedule = {
+  id: "post-uuid",
+  account_id: "account-uuid",
+  network: "LinkedIn",
+  due_at: "2026-11-07T12:00:00+00:00",
+  content: "Join us next week!",
+};
+
+function bufferResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
+}
+
+function fakeSupabase(options: { channelId?: string; status?: string; confirmedPersistenceFails?: boolean } = {}) {
+  const calls: string[] = [];
+  let status = options.status ?? "approved";
+  let bufferPostId: string | null = null;
+  let lastError: string | null = null;
+
+  function rpc(name: string, args: Record<string, unknown>) {
+    calls.push(name);
+    const execute = async () => {
+      if (name === "claim_post_for_scheduling") {
+        if ((status !== "approved" && status !== "failed") || bufferPostId) return { data: null, error: null };
+        status = "scheduling";
+        return { data: post, error: null };
+      }
+      if (name === "mark_post_scheduled") {
+        if (options.confirmedPersistenceFails) return { data: null, error: { message: "database unavailable" } };
+        status = "scheduled";
+        bufferPostId = String(args.p_buffer_post_id);
+      } else if (name === "mark_post_scheduling_failure") {
+        status = args.p_needs_reconciliation ? "needs_reconciliation" : "failed";
+        lastError = String(args.p_error);
+      }
+      return { data: null, error: null };
+    };
+    return {
+      maybeSingle: execute,
+      then: (resolve: (value: Awaited<ReturnType<typeof execute>>) => unknown, reject?: (reason: unknown) => unknown) => execute().then(resolve, reject),
+    };
+  }
+
+  const supabase = {
+    from: (table: string) => {
+      assert.equal(table, "account_buffer_channels");
+      return {
+        select: () => ({
+          eq: () => ({
+            eq: () => ({
+              eq: () => ({ maybeSingle: async () => ({ data: options.channelId ? { buffer_channel_id: options.channelId } : null, error: null }) }),
+            }),
+          }),
+        }),
+      };
+    },
+    rpc,
+  };
+
+  return {
+    supabase: supabase as unknown as Parameters<typeof schedulePostWithSupabase>[1],
+    calls,
+    get state() { return { status, bufferPostId, lastError }; },
+  };
+}
+
+test("review approval records approval before Buffer scheduling and stores confirmed ID", async () => {
+  const database = fakeSupabase({ channelId: "buffer-channel-1" });
+  const result = await approveAndSchedulePost(
+    post.id,
+    post.content,
+    database.supabase,
+    "owner-uuid",
+    "mock-buffer-key",
+    async (_url, request) => {
+      assert.equal(request?.headers && new Headers(request.headers).get("Authorization"), "Bearer mock-buffer-key");
+      const body = JSON.parse(String(request?.body)) as { variables: { input: { channelId: string; dueAt: string; mode: string; text: string } } };
+      assert.equal(body.variables.input.channelId, "buffer-channel-1");
+      assert.equal(body.variables.input.dueAt, "2026-11-07T12:00:00.000Z");
+      assert.equal(body.variables.input.mode, "customScheduled");
+      assert.equal(body.variables.input.text, post.content);
+      return bufferResponse({ data: { createPost: { __typename: "PostActionSuccess", post: { id: "buffer-post-1", text: post.content } } } });
+    },
+  );
+
+  assert.equal(result.kind, "scheduled");
+  assert.deepEqual(database.calls, ["approve_post", "claim_post_for_scheduling", "mark_post_scheduled"]);
+  assert.deepEqual(database.state, { status: "scheduled", bufferPostId: "buffer-post-1", lastError: null });
+});
+
+test("automatic dispatch claims a generated post without invoking review approval", async () => {
+  const database = fakeSupabase({ channelId: "buffer-channel-1" });
+  const result = await schedulePostWithSupabase(
+    post.id,
+    database.supabase,
+    "owner-uuid",
+    "mock-buffer-key",
+    async () => bufferResponse({ data: { createPost: { __typename: "PostActionSuccess", post: { id: "buffer-post-2", text: post.content } } } }),
+  );
+  assert.equal(result.kind, "scheduled");
+  assert.equal(database.calls.includes("approve_post"), false);
+  assert.equal(database.state.status, "scheduled");
+});
+
+test("a database failure after Buffer confirmation requires reconciliation, never retry", async () => {
+  const database = fakeSupabase({ channelId: "buffer-channel-1", confirmedPersistenceFails: true });
+  let requests = 0;
+  const fetchImpl: typeof fetch = async () => {
+    requests += 1;
+    return bufferResponse({ data: { createPost: { __typename: "PostActionSuccess", post: { id: "buffer-post-3", text: post.content } } } });
+  };
+  const first = await schedulePostWithSupabase(post.id, database.supabase, "owner-uuid", "mock-buffer-key", fetchImpl);
+  const second = await schedulePostWithSupabase(post.id, database.supabase, "owner-uuid", "mock-buffer-key", fetchImpl);
+  assert.equal(first.kind, "needs_reconciliation");
+  assert.equal(second.kind, "not_claimed");
+  assert.equal(database.state.status, "needs_reconciliation");
+  assert.equal(requests, 1);
+});
+
+test("Buffer rejection is stored as failed and can be safely retried after correction", async () => {
+  const database = fakeSupabase({ channelId: "buffer-channel-1" });
+  const result = await schedulePostWithSupabase(
+    post.id,
+    database.supabase,
+    "owner-uuid",
+    "mock-buffer-key",
+    async () => bufferResponse({ data: { createPost: { __typename: "MutationError", message: "Channel rejected this post" } } }),
+  );
+  assert.equal(result.kind, "failed");
+  assert.equal(database.state.status, "failed");
+  assert.equal(database.state.lastError, "Channel rejected this post");
+});
+
+test("a transport timeout becomes reconciliation-required and a second dispatch cannot duplicate", async () => {
+  const database = fakeSupabase({ channelId: "buffer-channel-1" });
+  let requests = 0;
+  const fetchImpl: typeof fetch = async () => {
+    requests += 1;
+    throw new Error("connection reset");
+  };
+  const first = await schedulePostWithSupabase(post.id, database.supabase, "owner-uuid", "mock-buffer-key", fetchImpl);
+  const second = await schedulePostWithSupabase(post.id, database.supabase, "owner-uuid", "mock-buffer-key", fetchImpl);
+  assert.equal(first.kind, "needs_reconciliation");
+  assert.equal(second.kind, "not_claimed");
+  assert.equal(database.state.status, "needs_reconciliation");
+  assert.equal(requests, 1);
+});
+
+test("a missing account/network channel fails before calling Buffer", async () => {
+  const database = fakeSupabase();
+  let requests = 0;
+  const result = await schedulePostWithSupabase(post.id, database.supabase, "owner-uuid", "mock-buffer-key", async () => {
+    requests += 1;
+    return bufferResponse({});
+  });
+  assert.equal(result.kind, "failed");
+  assert.equal(database.state.status, "failed");
+  assert.equal(requests, 0);
+});

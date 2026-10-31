@@ -5,20 +5,20 @@ import styles from "./page.module.css";
 import { validatePost } from "@/lib/social-validation";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import { detectTitleLanguage, type PostLanguage } from "@/lib/language";
-import { approvePost, createEvent, generateReviewPosts, loadWorkspace, updateAccountVoice, updatePostContent, updatePublishingMode, type SourceView } from "./workspace-actions";
+import { approvePost, createEvent, generateReviewPosts, loadWorkspace, reconcileScheduledPost, retryFailedPost, saveBufferChannel, updateAccountVoice, updatePostContent, updatePublishingMode, type SourceView } from "./workspace-actions";
 import { SourceSettings } from "./source-settings";
 
 type Range = "Quincena" | "Semana" | "Mes";
-type Status = "review" | "approved" | "scheduled";
+type Status = "review" | "approved" | "scheduling" | "scheduled" | "published" | "failed" | "needs_reconciliation";
 type Network = "LinkedIn" | "X" | "Bluesky";
 type EventItem = { id: string; title: string; date: string; time: string; place: string; description: string; source: string; url?: string; language?: PostLanguage; };
-type Post = { id: string; eventId: string; date: string; time: string; account: string; accountId?: string; network: Network; text: string; status: Status; leadDays?: 14 | 7 | 1; language?: PostLanguage; };
-type Account = { id?: string; name: string; kind: string; initials: string; color: string; prompt: string; networks: Network[]; };
+type Post = { id: string; eventId: string; date: string; time: string; account: string; accountId?: string; network: Network; text: string; status: Status; leadDays?: 14 | 7 | 1; language?: PostLanguage; lastError?: string | null; bufferPostId?: string | null; };
+type Account = { id?: string; name: string; kind: string; initials: string; color: string; prompt: string; networks: Network[]; bufferChannels: Partial<Record<Network, string>>; styleExampleCount: number; };
 
 const accounts: Account[] = [
-  { name: "Alex · personal", kind: "Cuenta personal", initials: "A", color: "violet", prompt: "Cercano, curioso y directo. Primera persona. Evita sonar promocional.", networks: ["LinkedIn", "X", "Bluesky"] },
-  { name: "BarcelonaJS", kind: "Comunidad", initials: "B", color: "orange", prompt: "Comunidad tecnológica abierta. Entusiasta, inclusiva y concreta.", networks: ["LinkedIn", "X"] },
-  { name: "DevBcn", kind: "Asociación", initials: "D", color: "green", prompt: "Tono profesional y acogedor. Destaca la comunidad y el aprendizaje.", networks: ["LinkedIn", "Bluesky"] },
+  { name: "Alex · personal", kind: "Cuenta personal", initials: "A", color: "violet", prompt: "Cercano, curioso y directo. Primera persona. Evita sonar promocional.", networks: ["LinkedIn", "X", "Bluesky"], bufferChannels: {}, styleExampleCount: 0 },
+  { name: "BarcelonaJS", kind: "Comunidad", initials: "B", color: "orange", prompt: "Comunidad tecnológica abierta. Entusiasta, inclusiva y concreta.", networks: ["LinkedIn", "X"], bufferChannels: {}, styleExampleCount: 0 },
+  { name: "DevBcn", kind: "Asociación", initials: "D", color: "green", prompt: "Tono profesional y acogedor. Destaca la comunidad y el aprendizaje.", networks: ["LinkedIn", "Bluesky"], bufferChannels: {}, styleExampleCount: 0 },
 ];
 
 const initialEvents: EventItem[] = [
@@ -83,8 +83,10 @@ function Dashboard() {
   const [sources, setSources] = useState<SourceView[]>([]);
   const [posts, setPosts] = useState(initialPosts);
   const [mode, setMode] = useState<"review" | "automatic">("review");
+  const [bufferApiKeyConfigured, setBufferApiKeyConfigured] = useState(false);
   const [selected, setSelected] = useState<Post | null>(null);
   const [editing, setEditing] = useState("");
+  const [reconciliationId, setReconciliationId] = useState("");
   const [showAdd, setShowAdd] = useState(false);
   const [newEvent, setNewEvent] = useState({ title: "", date: "", time: "19:00", place: "Barcelona", description: "", source: "Manual" });
   const [sourceUrl, setSourceUrl] = useState("");
@@ -102,6 +104,7 @@ function Dashboard() {
         setEvents(snapshot.events);
         setPosts(snapshot.posts);
         setMode(snapshot.mode);
+        setBufferApiKeyConfigured(snapshot.bufferApiKeyConfigured);
         setAccountList(snapshot.accounts);
         setSources(snapshot.sources);
         setHydrated(true);
@@ -135,12 +138,27 @@ function Dashboard() {
   }
   async function updatePost(post: Post, next: Partial<Post>) {
     const content = next.text ?? post.text;
+    let changes = next;
     if (persistent) {
-      if (next.status === "approved") await approvePost(post.id, content);
+      if (next.status === "approved") {
+        const outcome = await approvePost(post.id, content);
+        const status: Status = outcome.kind === "scheduled" ? "scheduled" : outcome.kind === "failed" ? "failed" : outcome.kind === "needs_reconciliation" ? "needs_reconciliation" : "scheduling";
+        const message = "message" in outcome ? outcome.message : null;
+        changes = { ...next, status, lastError: message };
+        setAccountList((all) => all.map((account) => account.id === post.accountId
+          ? { ...account, styleExampleCount: (persistent ? account.styleExampleCount : posts.filter((item) => item.accountId === post.accountId && item.status === "approved").length) + 1 }
+          : account));
+        setFeedback(status === "scheduled" ? "Publicación aprobada y programada en Buffer." : status === "needs_reconciliation" ? "Buffer pudo aceptar la publicación. Comprueba su cola antes de reintentar." : status === "failed" ? `La publicación se aprobó, pero Buffer la rechazó: ${message ?? "comprueba la configuración"}` : "La publicación está en proceso de envío.");
+      }
       else if (next.text !== undefined) await updatePostContent(post.id, content);
     }
-    setPosts((all) => all.map((item) => item.id === post.id ? { ...item, ...next } : item));
-    if (selected) setSelected({ ...selected, ...next });
+    if (!persistent && next.status === "approved") {
+      setAccountList((all) => all.map((account) => account.name === post.account
+        ? { ...account, styleExampleCount: posts.filter((item) => item.account === post.account && item.status === "approved").length + 1 }
+        : account));
+    }
+    setPosts((all) => all.map((item) => item.id === post.id ? { ...item, ...changes } : item));
+    if (selected) setSelected({ ...selected, ...changes });
   }
   async function addEvent() {
     if (!newEvent.title.trim() || !newEvent.date) return;
@@ -214,11 +232,51 @@ function Dashboard() {
     }
   }
 
+  async function changeBufferChannel(account: Account, network: Network, value: string) {
+    if (!account.id) return;
+    try {
+      if (persistent) await saveBufferChannel(account.id, network, value);
+      setAccountList((all) => all.map((item) => item.id === account.id
+        ? { ...item, bufferChannels: { ...item.bufferChannels, [network]: value.trim() } }
+        : item));
+      setFeedback("");
+    } catch (error) {
+      setFeedback(error instanceof Error ? error.message : "No se pudo guardar el canal de Buffer.");
+    }
+  }
+
+  async function retryPost(post: Post) {
+    try {
+      const outcome = await retryFailedPost(post.id);
+      const status: Status = outcome.kind === "scheduled" ? "scheduled" : outcome.kind === "failed" ? "failed" : outcome.kind === "needs_reconciliation" ? "needs_reconciliation" : "scheduling";
+      const message = "message" in outcome ? outcome.message : null;
+      const changes: Partial<Post> = { status, lastError: message };
+      setPosts((all) => all.map((item) => item.id === post.id ? { ...item, ...changes } : item));
+      if (selected?.id === post.id) setSelected({ ...selected, ...changes });
+      setFeedback(status === "scheduled" ? "Publicación programada en Buffer." : status === "needs_reconciliation" ? "Comprueba la cola de Buffer antes de reintentar." : status === "failed" ? `Buffer rechazó la publicación: ${message ?? "comprueba la configuración"}` : "La publicación está en proceso de envío.");
+    } catch (error) {
+      setFeedback(error instanceof Error ? error.message : "No se pudo reintentar la publicación.");
+    }
+  }
+
+  async function confirmReconciledPost(post: Post) {
+    try {
+      await reconcileScheduledPost(post.id, reconciliationId);
+      const changes: Partial<Post> = { status: "scheduled", bufferPostId: reconciliationId.trim(), lastError: null };
+      setPosts((all) => all.map((item) => item.id === post.id ? { ...item, ...changes } : item));
+      setSelected({ ...post, ...changes });
+      setReconciliationId("");
+      setFeedback("Post encontrado en Buffer y marcado como programado.");
+    } catch (error) {
+      setFeedback(error instanceof Error ? error.message : "No se pudo guardar la conciliación.");
+    }
+  }
+
   async function savePostChanges(post: Post, next: Partial<Post>) {
     try {
       await updatePost(post, next);
       setSelected(null);
-      setFeedback("");
+      if (next.status !== "approved") setFeedback("");
     } catch (error) {
       setFeedback(error instanceof Error ? error.message : "No se pudo guardar la publicación.");
     }
@@ -244,7 +302,7 @@ function Dashboard() {
       <div className={styles.content}>
         {tab === "Calendario" && <><div className={styles.pageHeading}><div><div className={styles.eyebrow}>TU CONTENIDO, DE UN VISTAZO</div><h1>Calendario</h1><p>Todos tus anuncios, en un solo lugar.</p></div><button className={styles.mobileAdd} onClick={() => setShowAdd(true)}>＋ Evento</button></div>
           {!persistent && <div className={styles.notice}><span className={styles.noticeIcon}>✦</span><div><b>Modo demostración</b><span>Los cambios se guardan en este navegador. Configura Supabase para usar persistencia compartida.</span></div><button onClick={() => setTab("Ajustes")}>Ver configuración <span>→</span></button></div>}
-          {persistent && <div className={styles.notice}><span className={styles.noticeIcon}>✓</span><div><b>Datos guardados en Supabase</b><span>Los borradores nuevos se generan con Groq. La programación con Buffer aún no está conectada.</span></div><button onClick={() => setTab("Ajustes")}>Ver configuración <span>→</span></button></div>}
+          {persistent && <div className={styles.notice}><span className={styles.noticeIcon}>✓</span><div><b>Datos guardados en Supabase</b><span>Los recordatorios se programan por Buffer al aprobarlos o al generarlos en modo automático. Los resultados inciertos requieren conciliación manual.</span></div><button onClick={() => setTab("Ajustes")}>Ver configuración <span>→</span></button></div>}
           {feedback && <p role="alert" style={{ color: "#a43a32", background: "#fff1f0", borderRadius: 8, padding: "10px 14px" }}>{feedback}</p>}
           <div className={styles.calendarToolbar}><div className={styles.period}><button onClick={() => navigate(-1)} aria-label="Periodo anterior">‹</button><button onClick={() => setAnchor(new Date())} className={styles.today}>Hoy</button><button onClick={() => navigate(1)} aria-label="Periodo siguiente">›</button><h2>{monthLabel}</h2></div><div className={styles.viewToggle}>{(["Quincena", "Semana", "Mes"] as Range[]).map((opt) => <button key={opt} onClick={() => setRange(opt)} className={range === opt ? styles.viewSelected : ""} aria-pressed={range === opt}>{opt}</button>)}</div></div>
           <div className={styles.calendar}>
@@ -259,12 +317,12 @@ function Dashboard() {
 
         {tab === "Eventos" && <><div className={styles.pageHeading}><div><div className={styles.eyebrow}>EVENTOS DETECTADOS Y MANUALES</div><h1>Eventos</h1><p>Gestiona los eventos y las publicaciones que generan.</p></div><button className={styles.addButton} onClick={() => setShowAdd(true)}>＋ Añadir evento</button></div><div className={styles.eventsList}>{events.map((event) => { const eventPosts = posts.filter((post) => post.eventId === event.id); const expected = expectedPostCount(event, accountList); return <article key={event.id} className={styles.eventCard}><div className={styles.eventDate}><b>{dateAt(event.date).toLocaleDateString("es-ES", { day: "2-digit" })}</b><span>{dateAt(event.date).toLocaleDateString("es-ES", { month: "short" })}</span></div><div className={styles.eventInfo}><div className={styles.eventMeta}><span className={styles.sourceTag}>{event.source}</span><span>{event.time} · {event.place}</span></div><h3>{event.title}</h3><p>{event.description}</p><div className={styles.eventFoot}>{eventPosts.length} publicaciones previstas {persistent && eventPosts.length < expected && expected > 0 && <button className={styles.morePosts} onClick={() => { void retryDrafts(event); }}>Completar recordatorios</button>} <a href={event.url ?? (event.source === "Luma" ? "https://lu.ma" : event.source === "Meetup" ? "https://meetup.com" : "#")} target={event.url ? "_blank" : undefined} rel="noreferrer">{event.source === "Manual" ? "Añadido manualmente" : "Abrir evento ↗"}</a></div></div><button className={styles.iconAction} onClick={() => { setNewEvent({ title: event.title, date: event.date, time: event.time, place: event.place, description: event.description, source: event.source }); setSourceUrl(event.url ?? ""); setShowAdd(true); }}>···</button></article>; })}</div></>}
 
-        {tab === "Cuentas" && <><div className={styles.pageHeading}><div><div className={styles.eyebrow}>CANALES Y VOZ DE MARCA</div><h1>Tus cuentas</h1><p>Cada cuenta tiene una voz propia para tus publicaciones.</p></div></div><div className={styles.accountsGrid}>{accountList.map((account, accountIndex) => <article className={styles.accountCard} key={account.id ?? account.name}><div className={`${styles.accountTop}`}><div className={`${styles.accountAvatar} ${styles[account.color]}`}>{account.initials}</div><div><b>{account.name}</b><small>{account.kind}</small></div><span className={styles.connected}>{persistent ? "● Supabase" : "● Demo"}</span></div><div className={styles.accountNetworks}>{account.networks.map((network) => <span key={network}>{network === "LinkedIn" ? "in" : network === "X" ? "𝕏" : "◉"} &nbsp;{network}</span>)}</div><label>VOZ Y TONO<textarea value={account.prompt} onChange={(e) => setAccountList((all) => all.map((item, index) => index === accountIndex ? { ...item, prompt: e.target.value } : item))} onBlur={(e) => { void changeVoice(account, e.currentTarget.value); }} rows={3}/></label><div className={styles.exampleBox}><span>✦</span><div><b>{posts.filter((p) => p.account === account.name && p.status === "approved").length} ejemplos aprobados</b><small>Las publicaciones aprobadas ayudan a mantener tu estilo.</small></div></div></article>)}</div></>}
+        {tab === "Cuentas" && <><div className={styles.pageHeading}><div><div className={styles.eyebrow}>CANALES Y VOZ DE MARCA</div><h1>Tus cuentas</h1><p>Cada cuenta tiene una voz propia para tus publicaciones.</p></div></div><div className={styles.accountsGrid}>{accountList.map((account, accountIndex) => <article className={styles.accountCard} key={account.id ?? account.name}><div className={`${styles.accountTop}`}><div className={`${styles.accountAvatar} ${styles[account.color]}`}>{account.initials}</div><div><b>{account.name}</b><small>{account.kind}</small></div><span className={styles.connected}>{persistent ? "● Supabase" : "● Demo"}</span></div><div className={styles.accountNetworks}>{account.networks.map((network) => <span key={network}>{network === "LinkedIn" ? "in" : network === "X" ? "𝕏" : "◉"} &nbsp;{network}</span>)}</div><div className={styles.bufferChannels}><h4>CANALES DE BUFFER</h4><p>Introduce el ID del canal de Buffer conectado a cada red.</p>{account.networks.map((network) => <label key={network}><span>{network}</span><input aria-label={`ID de canal de Buffer ${network} para ${account.name}`} value={account.bufferChannels?.[network] ?? ""} disabled={!persistent} onChange={(event) => setAccountList((all) => all.map((item) => item.id === account.id ? { ...item, bufferChannels: { ...item.bufferChannels, [network]: event.target.value } } : item))} onBlur={(event) => { void changeBufferChannel(account, network, event.currentTarget.value); }} placeholder="ID del canal"/></label>)}</div><label>VOZ Y TONO<textarea value={account.prompt} onChange={(e) => setAccountList((all) => all.map((item, index) => index === accountIndex ? { ...item, prompt: e.target.value } : item))} onBlur={(e) => { void changeVoice(account, e.currentTarget.value); }} rows={3}/></label><div className={styles.exampleBox}><span>✦</span><div><b>{account.styleExampleCount ?? posts.filter((p) => p.account === account.name && p.status === "approved").length} ejemplos aprobados</b><small>Las publicaciones aprobadas ayudan a mantener tu estilo.</small></div></div></article>)}</div></>}
 
-        {tab === "Ajustes" && <><div className={styles.pageHeading}><div><div className={styles.eyebrow}>PREFERENCIAS DEL ESPACIO</div><h1>Ajustes</h1><p>Controla cómo se preparan y programan tus publicaciones.</p></div></div><div className={styles.settingsLayout}><section className={styles.settingsCard}><div className={styles.settingsTitle}><span className={styles.settingsIcon}>◷</span><div><h3>Modo de publicación</h3><p>Elige si revisas los textos antes de que se programen.</p></div></div><div className={styles.modeChoices}><button className={mode === "review" ? styles.modeChosen : ""} onClick={() => { void changeMode("review"); }}><span>◉</span><b>Revisión</b><small>Aprueba cada texto. Al aprobarlo, se añade a los ejemplos de estilo.</small></button><button className={mode === "automatic" ? styles.modeChosen : ""} onClick={() => { void changeMode("automatic"); }}><span>⚡</span><b>Automático</b><small>Buffer programará los borradores cuando la integración esté configurada.</small></button></div>{mode === "automatic" && <div className={styles.warning}>Hasta conectar Buffer, los borradores nuevos siguen pendientes de revisión.</div>}</section><section className={styles.settingsCard}><div className={styles.settingsTitle}><span className={styles.settingsIcon}>✦</span><div><h3>Servicios conectados</h3><p>Las credenciales se guardan en el entorno del servidor.</p></div></div>{[["Supabase", "Autenticación y base de datos", persistent ? "Configurado" : "Pendiente de configurar"], ["Buffer", "Publicación en redes", "Pendiente de configurar"], ["Groq", "Redacción de borradores", "Requiere GROQ_API_KEY y GROQ_MODEL"], ["Luma iCal", "Detección de eventos", "Configuración disponible; importación pendiente"]].map(([name, desc, status]) => <div className={styles.serviceRow} key={name}><div><b>{name}</b><small>{desc}</small></div><span className={styles.servicePending}><i/> {status}</span></div>)}<div className={styles.cronHint}>La sincronización periódica todavía no está implementada.</div></section></div><SourceSettings accounts={accountList} sources={sources} persistent={persistent} onSourcesChange={setSources}/></>}
+        {tab === "Ajustes" && <><div className={styles.pageHeading}><div><div className={styles.eyebrow}>PREFERENCIAS DEL ESPACIO</div><h1>Ajustes</h1><p>Controla cómo se preparan y programan tus publicaciones.</p></div></div><div className={styles.settingsLayout}><section className={styles.settingsCard}><div className={styles.settingsTitle}><span className={styles.settingsIcon}>◷</span><div><h3>Modo de publicación</h3><p>Elige si revisas los textos antes de que se programen.</p></div></div><div className={styles.modeChoices}><button className={mode === "review" ? styles.modeChosen : ""} onClick={() => { void changeMode("review"); }}><span>◉</span><b>Revisión</b><small>Al aprobar, se programa el texto y se guarda como ejemplo de estilo.</small></button><button className={mode === "automatic" ? styles.modeChosen : ""} onClick={() => { void changeMode("automatic"); }}><span>⚡</span><b>Automático</b><small>{persistent ? "Buffer programa los borradores nuevos en cuanto se generan, sin aprobación de estilo." : "En la demo, los textos y cambios se quedan en este navegador y no se envían a Buffer."}</small></button></div>{mode === "automatic" && <div className={styles.warning}>{persistent ? "Los borradores nuevos se envían a Buffer al generarse. Si falta la clave o el ID del canal, quedarán marcados como fallidos; los resultados inciertos no se reintentan automáticamente." : "La demo no publica en redes; la opción automática solo se guarda en este navegador."}</div>}</section><section className={styles.settingsCard}><div className={styles.settingsTitle}><span className={styles.settingsIcon}>✦</span><div><h3>Servicios conectados</h3><p>Las credenciales se guardan en el entorno del servidor.</p></div></div>{[["Supabase", "Autenticación y base de datos", persistent ? "Configurado" : "Pendiente de configurar"], ["Buffer", "Publicación en redes", bufferApiKeyConfigured ? "Clave configurada" : "Falta BUFFER_API_KEY"], ["Groq", "Redacción de borradores", "Requiere GROQ_API_KEY y GROQ_MODEL"], ["Luma iCal", "Detección de eventos", "Configuración disponible; importación pendiente"]].map(([name, desc, status]) => <div className={styles.serviceRow} key={name}><div><b>{name}</b><small>{desc}</small></div><span className={styles.servicePending}><i/> {status}</span></div>)}<div className={styles.cronHint}>La sincronización periódica todavía no está implementada.</div></section></div><SourceSettings accounts={accountList} sources={sources} persistent={persistent} onSourcesChange={setSources}/></>}
       </div>
     </section>
-    {selected && <div className={styles.overlay} onMouseDown={(e) => { if (e.target === e.currentTarget) setSelected(null); }}><section className={styles.detailPanel}><button className={styles.close} onClick={() => setSelected(null)}>×</button><div className={styles.eyebrow}>DETALLE DE PUBLICACIÓN</div><h2>{currentEvent?.title}</h2><div className={styles.detailDate}>◷ &nbsp;{dateAt(selected.date).toLocaleDateString("es-ES", { weekday: "long", day: "numeric", month: "long" })} · {selected.time} · Europe/Madrid</div><div className={styles.channelChip}>{selected.network} <span>·</span> {selected.account}</div><label className={styles.postEditor}>TEXTO DE LA PUBLICACIÓN<textarea value={editing} onChange={(e) => setEditing(e.target.value)} rows={8}/></label><div className={styles.characterCount}>{postValidation?.message} <span>Validación local por red.</span></div><div className={styles.detailActions}><button className={styles.secondaryButton} onClick={() => { void savePostChanges(selected, { text: editing }); }}>Guardar cambios</button>{selected.status === "review" && <button className={styles.approveButton} onClick={() => { void savePostChanges(selected, { text: editing, status: "approved" }); }} disabled={!postValidation?.valid}>✓ Aprobar y guardar ejemplo</button>}</div><p className={styles.autoNote}>{postValidation?.valid ? "La programación con Buffer requiere configurar las credenciales de la API." : postValidation?.message}</p></section></div>}
+    {selected && <div className={styles.overlay} onMouseDown={(e) => { if (e.target === e.currentTarget) setSelected(null); }}><section className={styles.detailPanel}><button className={styles.close} onClick={() => setSelected(null)}>×</button><div className={styles.eyebrow}>DETALLE DE PUBLICACIÓN</div><h2>{currentEvent?.title}</h2><div className={styles.detailDate}>◷ &nbsp;{dateAt(selected.date).toLocaleDateString("es-ES", { weekday: "long", day: "numeric", month: "long" })} · {selected.time} · Europe/Madrid</div><div className={styles.channelChip}>{selected.network} <span>·</span> {selected.account}</div><label className={styles.postEditor}>TEXTO DE LA PUBLICACIÓN<textarea value={editing} disabled={!(["review", "approved", "failed"] as Status[]).includes(selected.status)} onChange={(e) => setEditing(e.target.value)} rows={8}/></label><div className={styles.characterCount}>{postValidation?.message} <span>Validación local por red.</span></div>{selected.lastError && <p className={styles.deliveryError}>{selected.lastError}</p>}{["needs_reconciliation", "scheduling"].includes(selected.status) && <div className={styles.reconcileBox}><p>Comprueba la cola de Buffer. Si encuentras la publicación, pega su ID para confirmar el envío.</p><label>ID DEL POST DE BUFFER<input aria-label="ID confirmado del post de Buffer" value={reconciliationId} onChange={(event) => setReconciliationId(event.target.value)}/></label><button className={styles.secondaryButton} disabled={!reconciliationId.trim()} onClick={() => { void confirmReconciledPost(selected); }}>Confirmar que está programada</button></div>}<div className={styles.detailActions}>{(["review", "approved", "failed"] as Status[]).includes(selected.status) && <button className={styles.secondaryButton} onClick={() => { void savePostChanges(selected, { text: editing }); }}>Guardar cambios</button>}{selected.status === "review" && <button className={styles.approveButton} onClick={() => { void savePostChanges(selected, { text: editing, status: "approved" }); }} disabled={!postValidation?.valid}>{persistent ? "✓ Aprobar, programar y guardar ejemplo" : "✓ Aprobar y guardar ejemplo"}</button>}{selected.status === "failed" && <button className={styles.approveButton} onClick={() => { void retryPost(selected); }}>Reintentar envío</button>}</div><p className={styles.autoNote}>{selected.status === "scheduled" ? `Programada en Buffer · ID ${selected.bufferPostId ?? "guardado"}` : selected.status === "scheduling" ? "El envío no tiene confirmación guardada. Comprueba Buffer y registra el ID si ya aparece en la cola." : selected.status === "needs_reconciliation" ? "Estado incierto; conciliación manual necesaria antes de cualquier reintento." : selected.status === "failed" ? "Buffer rechazó el envío o falta configuración. Corrige el problema y vuelve a intentarlo." : selected.status === "review" ? (persistent ? "Al aprobar se programa en Buffer y se guarda el texto final como ejemplo de estilo." : "En la demo, al aprobar se guarda el texto en este navegador como ejemplo local.") : selected.status === "published" ? "Buffer confirmó la publicación." : "Edita y guarda el texto antes de aprobarlo."}</p></section></div>}
     {showAdd && <div className={styles.overlay} onMouseDown={(e) => { if (e.target === e.currentTarget) setShowAdd(false); }}><section className={styles.modal}><button className={styles.close} onClick={() => setShowAdd(false)}>×</button><div className={styles.eyebrow}>NUEVO EVENTO</div><h2>Añade un evento</h2><p className={styles.modalDesc}>Pega un enlace de Meetup o Luma para completar los datos manualmente en esta versión.</p><label className={styles.formLabel}>ENLACE DEL EVENTO<input value={sourceUrl} onChange={(e) => setSourceUrl(e.target.value)} placeholder="https://lu.ma/tu-evento"/></label><div className={styles.formDivider}><span>o introduce los datos</span></div><label className={styles.formLabel}>TÍTULO<input value={newEvent.title} onChange={(e) => setNewEvent({ ...newEvent, title: e.target.value })} placeholder="Nombre del evento"/></label><div className={styles.formGrid}><label className={styles.formLabel}>FECHA<input type="date" value={newEvent.date} onChange={(e) => setNewEvent({ ...newEvent, date: e.target.value })}/></label><label className={styles.formLabel}>HORA<input type="time" value={newEvent.time} onChange={(e) => setNewEvent({ ...newEvent, time: e.target.value })}/></label></div><label className={styles.formLabel}>LUGAR<input value={newEvent.place} onChange={(e) => setNewEvent({ ...newEvent, place: e.target.value })}/></label><label className={styles.formLabel}>DESCRIPCIÓN<textarea rows={3} value={newEvent.description} onChange={(e) => setNewEvent({ ...newEvent, description: e.target.value })} placeholder="¿Qué ocurrirá en el evento?"/></label><div className={styles.modalActions}><button className={styles.secondaryButton} onClick={() => setShowAdd(false)}>Cancelar</button><button className={styles.approveButton} onClick={addEvent} disabled={!newEvent.title || !newEvent.date}>Crear evento</button></div></section></div>}
   </main>;
 }
