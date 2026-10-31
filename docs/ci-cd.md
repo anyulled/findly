@@ -4,7 +4,7 @@
 
 `.github/workflows/ci.yml` runs for pull requests targeting `main` and pushes to `main`. It installs the lockfile dependencies with `npm ci`, runs ESLint and a production build on Node.js 22, then runs the Playwright E2E happy paths in Chromium. GitHub Actions cancels an older run for the same branch when a newer commit arrives. The workflow has read-only repository permissions and needs no secrets. The E2E job is named `E2E (Playwright)`.
 
-The repository is configured to allow rebase merges only. GitHub currently blocks required branch checks and auto-merge for this private repository on its Free plan. Once the repository plan supports those controls, make `E2E (Playwright)` a required check and enable auto-merge in repository settings.
+The public repository is configured to allow rebase merges only. The `main` branch requires the `E2E (Playwright)` check, and auto-merge is enabled in repository settings. Select rebase when enabling auto-merge on a pull request.
 
 ## Continuous deployment
 
