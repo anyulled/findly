@@ -5,11 +5,10 @@ import { generateSocialPost } from "@/lib/groq";
 import { generateLumaEventDrafts, type LumaDraftRepository } from "@/lib/luma-drafts";
 import type { PostLanguage } from "@/lib/language";
 import type { SocialNetwork } from "@/lib/social-validation";
-import { schedulePostWithSupabase } from "@/lib/post-publishing";
 import { createClient } from "@/lib/supabase/server";
 import { isSameOriginSessionRequest } from "@/lib/sync-request-auth";
 import { selectEventAccounts } from "@/lib/event-targets";
-import { dispatchApprovedPostsWithSupabase } from "@/lib/approved-dispatch";
+import { dispatchApprovedPostsWithSupabase, hasDispatchFailures, RECOVERY_BUDGET_MS, type ApprovedDispatchResult } from "@/lib/approved-dispatch";
 
 const NETWORKS: SocialNetwork[] = ["LinkedIn", "X", "Bluesky"];
 
@@ -48,6 +47,10 @@ export async function POST(request: Request): Promise<Response> {
   }
   if (!ownerId) return Response.json({ error: "sync_not_configured" }, { status: 503 });
 
+  // All delivery batches in this invocation share one deadline; Luma must not
+  // restart the budget for every event after recovery has consumed it.
+  const deliveryDeadline = Date.now() + RECOVERY_BUDGET_MS;
+  const automaticDelivery: ApprovedDispatchResult = { selected: 0, scheduled: 0, failed: 0, needsReconciliation: 0, notClaimed: 0, errors: 0, deferred: 0 };
   const draftRepository: LumaDraftRepository = {
     async getPublishingMode(ownerId) {
       const { data, error } = await supabase.from("app_settings").select("value")
@@ -103,12 +106,9 @@ export async function POST(request: Request): Promise<Response> {
       return data?.length ?? 0;
     },
     async scheduleAutomaticPosts(ownerId, eventId, accountIds) {
-      const { data, error } = await supabase.from("posts").select("id")
-        .eq("owner_id", ownerId).eq("event_id", eventId).eq("status", "approved").in("account_id", accountIds);
-      if (error) throw new Error("Unable to read generated posts ready for Buffer");
-      for (const row of data ?? []) {
-        await schedulePostWithSupabase(row.id, supabase, ownerId);
-      }
+      if (accountIds.length === 0) return;
+      const delivery = await dispatchApprovedPostsWithSupabase(supabase, ownerId, eventId, undefined, { deadlineMs: deliveryDeadline });
+      for (const key of Object.keys(automaticDelivery) as (keyof ApprovedDispatchResult)[]) automaticDelivery[key] += delivery[key];
     },
   };
 
@@ -137,13 +137,13 @@ export async function POST(request: Request): Promise<Response> {
   try {
     // Recover persisted approval intents even when there are no feeds or Groq
     // is unavailable. Failed and uncertain posts are never selected here.
-    const approvedRecovery = await dispatchApprovedPostsWithSupabase(supabase, ownerId);
+    const approvedRecovery = await dispatchApprovedPostsWithSupabase(supabase, ownerId, null, undefined, { deadlineMs: deliveryDeadline });
     const groqConfigured = Boolean(process.env.GROQ_API_KEY?.trim() && process.env.GROQ_MODEL?.trim());
     const generateDrafts: DraftGenerator | undefined = groqConfigured
       ? (_source, event) => generateLumaEventDrafts(event, draftRepository, generateSocialPost)
       : undefined;
     const result = await syncLumaSources(repository, fetchLumaFeed, generateDrafts);
-    return Response.json({ ...result, approvedRecovery }, { status: 200 });
+    return Response.json({ ...result, approvedRecovery, automaticDelivery }, { status: hasDispatchFailures(approvedRecovery, automaticDelivery) ? 503 : 200 });
   } catch {
     return Response.json({ error: "sync_unavailable" }, { status: 503 });
   }
