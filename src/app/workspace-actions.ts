@@ -6,6 +6,7 @@ import { validatePost, type SocialNetwork } from "@/lib/social-validation";
 import { detectTitleLanguage, type PostLanguage } from "@/lib/language";
 import { generateSocialPost } from "@/lib/groq";
 import { generateEventDrafts } from "@/lib/groq-workflow";
+import { approveAndSchedulePost, schedulePostWithSupabase, type PostPublishingOutcome } from "@/lib/post-publishing";
 
 export type AccountView = {
   id?: string;
@@ -15,6 +16,8 @@ export type AccountView = {
   color: string;
   prompt: string;
   networks: SocialNetwork[];
+  bufferChannels: Partial<Record<SocialNetwork, string>>;
+  styleExampleCount: number;
 };
 
 export type EventView = {
@@ -38,7 +41,9 @@ export type PostView = {
   accountId?: string;
   network: SocialNetwork;
   text: string;
-  status: "review" | "approved" | "scheduled";
+  status: "review" | "approved" | "scheduling" | "scheduled" | "published" | "failed" | "needs_reconciliation";
+  lastError?: string | null;
+  bufferPostId?: string | null;
   leadDays?: 14 | 7 | 1;
   language?: PostLanguage;
 };
@@ -62,6 +67,7 @@ export type WorkspaceSnapshot = {
   posts: PostView[];
   sources: SourceView[];
   mode: "review" | "automatic";
+  bufferApiKeyConfigured: boolean;
 };
 
 const DEFAULT_ACCOUNTS = [
@@ -82,7 +88,7 @@ async function authorizedClient() {
   return { supabase, ownerId: user.id };
 }
 
-function accountView(row: { id: string; name: string; account_type: string; voice_prompt: string; networks: string[] }, index: number): AccountView {
+function accountView(row: { id: string; name: string; account_type: string; voice_prompt: string; networks: string[] }, index: number, bufferChannels: Partial<Record<SocialNetwork, string>> = {}, styleExampleCount = 0): AccountView {
   const networks = row.networks.filter((network): network is SocialNetwork => NETWORKS.includes(network as SocialNetwork));
   return {
     id: row.id,
@@ -92,6 +98,8 @@ function accountView(row: { id: string; name: string; account_type: string; voic
     color: ACCOUNT_COLORS[index % ACCOUNT_COLORS.length],
     prompt: row.voice_prompt,
     networks,
+    bufferChannels,
+    styleExampleCount,
   };
 }
 
@@ -118,14 +126,16 @@ export async function loadWorkspace(): Promise<WorkspaceSnapshot> {
   const accounts = rows.map((row, index) => accountView(row, index));
   const accountNames = new Map(accounts.map((account) => [account.id, account.name]));
 
-  const [eventsResult, postsResult, settingsResult, sourcesResult, sourceAccountsResult] = await Promise.all([
+  const [eventsResult, postsResult, settingsResult, sourcesResult, sourceAccountsResult, channelResult, examplesResult] = await Promise.all([
     supabase.from("events").select("id,title,starts_at,location,description,event_url,detected_language").order("starts_at"),
-    supabase.from("posts").select("id,event_id,account_id,network,lead_days,due_at,content,status,language").order("due_at"),
+    supabase.from("posts").select("id,event_id,account_id,network,lead_days,due_at,content,status,language,last_error,buffer_post_id").order("due_at"),
     supabase.from("app_settings").select("value").eq("key", "publishing_mode").maybeSingle(),
     supabase.from("sources").select("id,name,source_type,feed_url,enabled").order("created_at"),
     supabase.from("source_accounts").select("source_id,account_id"),
+    supabase.from("account_buffer_channels").select("account_id,network,buffer_channel_id"),
+    supabase.from("style_examples").select("account_id"),
   ]);
-  if (eventsResult.error || postsResult.error || settingsResult.error || sourcesResult.error || sourceAccountsResult.error) {
+  if (eventsResult.error || postsResult.error || settingsResult.error || sourcesResult.error || sourceAccountsResult.error || channelResult.error || examplesResult.error) {
     throw new Error("No se pudo cargar el calendario desde Supabase. Comprueba que has aplicado las migraciones.");
   }
 
@@ -143,6 +153,16 @@ export async function loadWorkspace(): Promise<WorkspaceSnapshot> {
       language: row.detected_language as PostLanguage,
     };
   });
+  const channelIdsByAccount = new Map<string, Partial<Record<SocialNetwork, string>>>();
+  for (const channel of channelResult.data ?? []) {
+    if (!NETWORKS.includes(channel.network as SocialNetwork)) continue;
+    const channels = channelIdsByAccount.get(channel.account_id) ?? {};
+    channels[channel.network as SocialNetwork] = channel.buffer_channel_id;
+    channelIdsByAccount.set(channel.account_id, channels);
+  }
+  const exampleCounts = new Map<string, number>();
+  for (const example of examplesResult.data ?? []) exampleCounts.set(example.account_id, (exampleCounts.get(example.account_id) ?? 0) + 1);
+  const accountsWithChannels = rows.map((row, index) => accountView(row, index, channelIdsByAccount.get(row.id), exampleCounts.get(row.id) ?? 0));
   const posts: PostView[] = (postsResult.data ?? []).flatMap((row) => {
     const network = NETWORKS.find((value) => value === row.network);
     if (!network) return [];
@@ -157,6 +177,8 @@ export async function loadWorkspace(): Promise<WorkspaceSnapshot> {
       network,
       text: row.content,
       status: row.status as PostView["status"],
+      lastError: row.last_error,
+      bufferPostId: row.buffer_post_id,
       leadDays: row.lead_days as PostView["leadDays"],
       language: row.language as PostLanguage,
     }];
@@ -172,7 +194,7 @@ export async function loadWorkspace(): Promise<WorkspaceSnapshot> {
     if (row.source_type !== "luma_ical" && row.source_type !== "meetup") return [];
     return [{ id: row.id, name: row.name, type: row.source_type, url: row.feed_url ?? "", enabled: row.enabled, accountIds: accountIdsBySource.get(row.id) ?? [] }];
   });
-  return { accounts, events, posts, sources, mode: settings?.mode === "automatic" ? "automatic" : "review" };
+  return { accounts: accountsWithChannels, events, posts, sources, mode: settings?.mode === "automatic" ? "automatic" : "review", bufferApiKeyConfigured: Boolean(process.env.BUFFER_API_KEY?.trim()) };
 }
 
 function validateSource(input: SourceInput): SourceInput {
@@ -276,15 +298,17 @@ export async function generateReviewPosts(eventId: string): Promise<PostView[]> 
   const { supabase, ownerId } = await authorizedClient();
   if (!/^[0-9a-f-]{36}$/i.test(eventId)) throw new Error("Solicitud de publicaciones no válida.");
 
-  const [eventResult, accountResult, existingResult] = await Promise.all([
+  const [eventResult, accountResult, existingResult, settingsResult] = await Promise.all([
     supabase.from("events").select("id,title,starts_at,location,description,event_url,detected_language")
       .eq("id", eventId).eq("owner_id", ownerId).single(),
     supabase.from("accounts").select("id,name,voice_prompt,networks").eq("owner_id", ownerId).eq("enabled", true).order("created_at"),
     supabase.from("posts").select("account_id,network,lead_days").eq("owner_id", ownerId).eq("event_id", eventId),
+    supabase.from("app_settings").select("value").eq("owner_id", ownerId).eq("key", "publishing_mode").maybeSingle(),
   ]);
   if (eventResult.error || !eventResult.data) throw new Error("No se encontró el evento en este espacio.");
   if (accountResult.error || !accountResult.data) throw new Error("No se pudieron cargar las cuentas.");
   if (existingResult.error || !existingResult.data) throw new Error("No se pudo comprobar si ya existen recordatorios.");
+  if (settingsResult.error) throw new Error("No se pudo cargar el modo de publicación.");
 
   const accountIds = accountResult.data.map((account) => account.id);
   const exampleResult = accountIds.length === 0
@@ -322,6 +346,7 @@ export async function generateReviewPosts(eventId: string): Promise<PostView[]> 
     generate: generateSocialPost,
   });
 
+  const automatic = (settingsResult.data?.value as { mode?: string } | null)?.mode === "automatic";
   const rows = drafts.map((post) => {
     const validation = validatePost(post.network, post.text);
     if (!validation.valid) throw new Error(validation.message);
@@ -334,19 +359,27 @@ export async function generateReviewPosts(eventId: string): Promise<PostView[]> 
       due_at: madridDateTimeToIso(post.date, post.time),
       timezone: "Europe/Madrid",
       content: post.text,
-      status: "review",
+      status: automatic ? "approved" : "review",
       language: post.language,
     };
   });
+  let insertedIds: string[] = [];
   if (rows.length > 0) {
-    const { error: upsertError } = await supabase.from("posts").upsert(rows, {
+    const { data: inserted, error: upsertError } = await supabase.from("posts").upsert(rows, {
       onConflict: "event_id,account_id,network,lead_days",
       ignoreDuplicates: true,
-    });
+    }).select("id");
     if (upsertError) throw new Error("No se pudieron guardar las publicaciones pendientes.");
+    insertedIds = (inserted ?? []).map((row) => row.id);
+  }
+  if (automatic) {
+    const apiKey = process.env.BUFFER_API_KEY ?? "";
+    for (const postId of insertedIds) {
+      await schedulePostWithSupabase(postId, supabase, ownerId, apiKey);
+    }
   }
 
-  const { data, error } = await supabase.from("posts").select("id,event_id,account_id,network,lead_days,due_at,content,status,language")
+  const { data, error } = await supabase.from("posts").select("id,event_id,account_id,network,lead_days,due_at,content,status,language,last_error,buffer_post_id")
     .eq("owner_id", ownerId).eq("event_id", eventId).order("due_at");
   if (error || !data) throw new Error("No se pudieron recuperar las publicaciones pendientes.");
   const accountNames = new Map(accountResult.data.map((account) => [account.id, account.name]));
@@ -364,6 +397,8 @@ export async function generateReviewPosts(eventId: string): Promise<PostView[]> 
       network,
       text: row.content,
       status: row.status as PostView["status"],
+      lastError: row.last_error,
+      bufferPostId: row.buffer_post_id,
       leadDays: row.lead_days as PostView["leadDays"],
       language: row.language as PostLanguage,
     }];
@@ -381,16 +416,53 @@ export async function updatePostContent(postId: string, content: string): Promis
   if (error) throw new Error("No se pudo guardar la publicación. Comprueba que has aplicado las migraciones.");
 }
 
-export async function approvePost(postId: string, content: string): Promise<void> {
-  const { supabase } = await authorizedClient();
+export async function approvePost(postId: string, content: string): Promise<PostPublishingOutcome> {
+  const { supabase, ownerId } = await authorizedClient();
   const validationNetwork = await supabase.from("posts").select("network").eq("id", postId).single();
   if (validationNetwork.error || !NETWORKS.includes(validationNetwork.data.network as SocialNetwork)) {
     throw new Error("No se pudo comprobar la red de la publicación.");
   }
   const validation = validatePost(validationNetwork.data.network as SocialNetwork, content);
   if (!validation.valid) throw new Error(validation.message);
-  const { error } = await supabase.rpc("approve_post", { p_post_id: postId, p_content: content });
-  if (error) throw new Error("No se pudo aprobar la publicación y guardar su ejemplo de estilo.");
+  return approveAndSchedulePost(postId, content, supabase, ownerId, process.env.BUFFER_API_KEY ?? "");
+}
+
+export async function retryFailedPost(postId: string): Promise<PostPublishingOutcome> {
+  const { supabase, ownerId } = await authorizedClient();
+  if (!/^[0-9a-f-]{36}$/i.test(postId)) throw new Error("Solicitud de publicación no válida.");
+  return schedulePostWithSupabase(postId, supabase, ownerId, process.env.BUFFER_API_KEY ?? "");
+}
+
+export async function reconcileScheduledPost(postId: string, bufferPostId: string): Promise<void> {
+  const { supabase } = await authorizedClient();
+  if (!/^[0-9a-f-]{36}$/i.test(postId)) throw new Error("Solicitud de publicación no válida.");
+  const normalizedId = bufferPostId.trim();
+  if (!normalizedId || normalizedId.length > 200) throw new Error("Introduce el ID del post confirmado en Buffer.");
+  const { error } = await supabase.rpc("reconcile_post_scheduled", {
+    p_post_id: postId,
+    p_buffer_post_id: normalizedId,
+  });
+  if (error) throw new Error("No se pudo confirmar la programación conciliada.");
+}
+
+export async function saveBufferChannel(accountId: string, network: SocialNetwork, bufferChannelId: string): Promise<void> {
+  const { supabase, ownerId } = await authorizedClient();
+  if (!/^[0-9a-f-]{36}$/i.test(accountId) || !NETWORKS.includes(network)) throw new Error("La cuenta o red no es válida.");
+  const channelId = bufferChannelId.trim();
+  if (channelId.length > 200) throw new Error("El ID del canal de Buffer no puede superar 200 caracteres.");
+  if (!channelId) {
+    const { error } = await supabase.from("account_buffer_channels").delete()
+      .eq("owner_id", ownerId).eq("account_id", accountId).eq("network", network);
+    if (error) throw new Error("No se pudo eliminar el ID del canal de Buffer.");
+    return;
+  }
+  const { error } = await supabase.from("account_buffer_channels").upsert({
+    owner_id: ownerId,
+    account_id: accountId,
+    network,
+    buffer_channel_id: channelId,
+  }, { onConflict: "owner_id,account_id,network" });
+  if (error) throw new Error("No se pudo guardar el ID del canal de Buffer.");
 }
 
 export async function updateAccountVoice(accountId: string, prompt: string): Promise<void> {
