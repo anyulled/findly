@@ -23,3 +23,5 @@
 .absenceConfirm{display:flex!important;grid-template-columns:none!important;align-items:flex-start;gap:7px!important;margin:11px 0!important;font-size:9px!important;font-weight:400!important;letter-spacing:0!important}.absenceConfirm input{accent-color:#7361dc;margin:1px 0 0}
 
 .accountLogo{width:38px;height:38px;object-fit:contain;border-radius:9px;background:#fff;border:1px solid #f0f0f3}.keyStatus{font-size:9px;color:#777782;margin-top:10px}
+
+.extractionMessage{font-size:10px;color:#777782;line-height:1.45;margin:8px 0}

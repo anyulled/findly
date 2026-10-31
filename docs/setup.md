@@ -43,7 +43,7 @@ Supabase free projects may pause after a week of sufficiently low activity. This
 
 1. Save the Luma iCal subscription URL in **Settings → Event sources**, then associate it with one or more accounts.
 2. Invoke `POST /api/cron/sync` with `Authorization: Bearer <CRON_SECRET>` to fetch enabled Luma feeds and insert newly discovered events. This exact POST path bypasses browser-session middleware and is authenticated by its constant-time bearer-secret check. When both `GROQ_API_KEY` and `GROQ_MODEL` are configured, missing reminders are generated for events returned by enabled feeds, using the account voice and matching approved examples. The global publishing mode controls whether new drafts stay in review or are submitted to Buffer automatically; automatic scheduling requires a configured Buffer API key and channel mapping for each account/network.
-3. The route is safe to retry: existing `(owner, source, external ID)` records are ignored and never updated, and only missing reminder drafts are generated. If Groq is unconfigured or draft generation fails, the event remains saved; later syncs retry its missing reminders, and the event's **Crear recordatorios** action is also available. Meetup synchronization and scraping are unsupported; add those events through the manual event form.
+3. The route is safe to retry: existing `(owner, source, external ID)` records are ignored and never updated, and only missing reminder drafts are generated. If Groq is unconfigured or draft generation fails, the event remains saved; later syncs retry its missing reminders, and the event's **Crear recordatorios** action is also available. Meetup feed synchronization and API/OAuth integration remain unsupported. For a single public event, use the manual form URL extractor; it reads available public metadata and leaves missing values for review.
 4. Feed fetches require HTTPS, reject redirects, time out after 10 seconds, and cap response bodies at 2 MB. Feed URLs are not included in the response. Date changes and cancellations remain out of scope.
 
 ### Scheduled sync
@@ -76,3 +76,9 @@ Reminder candidates are 14, 7 and 1 calendar days before the event. Schedule eac
 - On uncertain timeouts, do not blindly retry a create operation. The post remains `needs_reconciliation`; search the matching Buffer channel and record the discovered Buffer post ID in Findly.
 - Vercel Hobby allows personal or non-commercial usage only under current terms. Confirm that the association use case is eligible or choose a different host/plan before production use.
 - Free-tier quotas and terms change. Review provider dashboards before connecting the live scheduler, and avoid enabling paid upgrades without a deliberate decision.
+
+### Alta manual por URL
+
+1. In **Events**, paste a public HTTPS event page from `luma.com`, `lu.ma`, or `meetup.com`, then select **Extract event data**.
+2. Review the extracted title, date, time, location and description. Providers may omit fields or change their HTML; complete or correct any missing value before saving.
+3. In deployed environments with Supabase configured, the extraction endpoint verifies the authenticated owner. Local development demo mode permits unauthenticated extraction for local use; production without Supabase returns a configuration error. Fetches are limited to supported provider domains, at most three redirects within those domains, and 1 MB of response HTML. This does not poll Meetup or replace the Luma iCal feed.
