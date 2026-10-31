@@ -66,6 +66,9 @@ begin
   if exists (select 1 from public.claim_post_for_scheduling('50000000-0000-4000-8000-000000000002', '11111111-1111-4111-8111-111111111111')) then
     raise exception 'Unlinked source account was claimed';
   end if;
+  if exists (select 1 from public.claim_post_for_scheduling('50000000-0000-4000-8000-000000000007', '11111111-1111-4111-8111-111111111111')) then
+    raise exception 'Disabled account was claimed';
+  end if;
   if not exists (select 1 from public.claim_post_for_scheduling('50000000-0000-4000-8000-000000000001', '11111111-1111-4111-8111-111111111111')) then
     raise exception 'Manual event could not be claimed';
   end if;
