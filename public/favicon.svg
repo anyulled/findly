@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <defs>
+    <linearGradient id="findlyGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#8372ec" />
+      <stop offset="100%" stop-color="#624ecc" />
+    </linearGradient>
+  </defs>
+  <rect width="32" height="32" rx="9" fill="url(#findlyGrad)" />
+  <!-- Lowercase f glyph matching the brandmark -->
+  <path d="M 19 6.5 C 16.5 6.5 14.5 8 14.5 11 L 14.5 13 L 11.5 13 C 11 13 10.5 13.5 10.5 14 L 10.5 16 C 10.5 16.5 11 17 11.5 17 L 14.5 17 L 14.5 25 C 14.5 25.5 15 26 15.5 26 L 18 26 C 18.5 26 19 25.5 19 25 L 19 17 L 21.5 17 C 22 17 22.5 16.5 22.5 16 L 22.5 14 C 22.5 13.5 22 13 21.5 13 L 19 13 L 19 11.5 C 19 10.7 19.4 10.2 20.3 10.2 C 20.8 10.2 21.3 10.3 21.7 10.5 C 22.1 10.7 22.5 10.4 22.5 10 L 22.5 7.6 C 22.5 7.1 22 6.7 21.5 6.6 C 20.7 6.5 19.8 6.5 19 6.5 Z" fill="#ffffff" />
+  <!-- Distinctive Findly dot -->
+  <circle cx="23.5" cy="24.5" r="2" fill="#ffd479" />
+</svg>
