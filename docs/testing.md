@@ -6,13 +6,17 @@ The Playwright suite runs against the Next.js app in demo mode with an isolated 
 
 The current E2E coverage checks:
 
-- Switching the calendar between its default fortnight view, week view, and month view.
+- Switching the calendar between its default fortnight, week, and month views.
 - Creating an event eight days ahead, which leaves the one-week and one-day reminders in range and omits the two-week reminder. The generated drafts cover all seven configured social channels.
 - Approving a draft, recording it as a style example, and retaining that approval after a page reload.
 
-## Unit tests
+## Unit tests and coverage
 
-`npm run test:unit` runs pure logic tests with Node's built-in `node:test` runner through `tsx`. These tests need no browser, service credentials, or network access. They cover social character counting, title-language fallback, Madrid timezone conversion, and the Luma iCalendar parsing boundary.
+`npm run test:unit` runs logic tests with Node's built-in `node:test` runner through `tsx`. These tests need no browser, service credentials, or network access.
+
+Every TypeScript business-logic module directly under `src/lib/` must maintain at least 80% line coverage on its own. The `Coverage (80%)` CI job runs the unit suite with `c8 --all` and checks every matching module per file, including modules that no test imports. This prevents a highly covered module from masking an untested one and prevents new modules from silently escaping the gate.
+
+The gate measures `src/lib/*.ts`, where deterministic domain and provider logic belongs. UI components and Next.js route wiring are exercised by the Playwright E2E suite; Supabase client construction wrappers are configuration glue rather than domain logic. Keep route handlers thin and move testable rules into `src/lib/` so the coverage gate sees them.
 
 The iCalendar parser reads event `UID`, `SUMMARY`, `DESCRIPTION`, `LOCATION`, `URL`, and `DTSTART`. It relies on ical.js for RFC 5545 content-line folding and escaped text. UTC, embedded `VTIMEZONE`, IANA `TZID`, floating Madrid times, and date-only events are normalized to Madrid date/time. Malformed events produce per-event issues while valid events in the same calendar remain available. The parser does not fetch feeds, expand `RRULE` recurrences, or reconcile cancellation and date changes.
 
@@ -23,14 +27,9 @@ The browser uses the `Europe/Madrid` time zone. The test server binds to localho
 ```sh
 npm ci
 npm run test:unit
+npm run test:coverage
 npx playwright install chromium
 npm run test:e2e
 ```
 
-CI installs Chromium and its system dependencies with `npx playwright install --with-deps chromium`. A failed run uploads the Playwright report and test results as a GitHub Actions artifact.
-
-## RSI plan
-
-1. Research the existing demo mode, calendar interactions, reminder generation, approval flow, and CI workflow.
-2. Use Playwright with a local demo-mode server to cover representative user journeys without external credentials.
-3. Run the suite and lint/build locally, document the tested boundary, then synchronize and open a pull request.
+CI installs Chromium and its system dependencies with `npx playwright install --with-deps chromium`. A failed run uploads the Playwright report and test results as a GitHub Actions artifact. The coverage job is an independent required check for pull requests; a failure blocks merge even if the regular unit test job passes.

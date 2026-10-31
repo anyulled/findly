@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "test:e2e": "playwright test",
-    "test:unit": "tsx --test unit/*.test.ts"
+    "test:unit": "tsx --test unit/*.test.ts",
+    "test:coverage": "c8 --all --include='src/lib/*.ts' --per-file --reporter=text --check-coverage --lines=80 tsx --test unit/*.test.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.7",
@@ -23,6 +24,7 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "c8": "^12.0.0",
     "eslint": "^9",
     "eslint-config-next": "16.4.3",
     "tsx": "^4.23.15",

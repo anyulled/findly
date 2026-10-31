@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { isAuthorizedCronRequest, isCronSyncRequest } from "../src/lib/cron-auth";
-import { syncLumaSources, type PersistableEvent, type SyncRepository } from "../src/lib/luma-sync";
+import { fetchLumaFeed, syncLumaSources, type PersistableEvent, type SyncRepository } from "../src/lib/luma-sync";
 import type { ImportedLumaEvent } from "../src/lib/luma-drafts";
 
 const fixture = readFileSync(new URL("./fixtures/luma-sample.ics", import.meta.url), "utf8");
@@ -187,4 +187,30 @@ test("events skipped without Groq are retried later and reminders are generated 
   assert.equal(repeated.draftsCreated, 0);
   assert.equal(generatedReminderCount, 9);
   assert.equal(stored.size, 3);
+});
+
+test("fetchLumaFeed rejects invalid, private, unsuccessful, and oversized feeds", async () => {
+  await assert.rejects(fetchLumaFeed("not a URL"), /Invalid feed URL/);
+  await assert.rejects(fetchLumaFeed("http://example.test/feed.ics"), /must use HTTPS/);
+  await assert.rejects(fetchLumaFeed("https://user:secret@example.test/feed.ics"), /must use HTTPS/);
+  for (const host of ["localhost", "api.localhost", "printer.local", "127.0.0.1", "10.0.0.1", "192.168.1.1", "169.254.1.1", "172.16.0.1"]) {
+    await assert.rejects(fetchLumaFeed(`https://${host}/feed.ics`), /Private feed host/);
+  }
+
+  const originalFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = async () => new Response("unavailable", { status: 503 });
+    await assert.rejects(fetchLumaFeed("https://example.test/feed.ics"), /Feed request failed/);
+
+    globalThis.fetch = async () => new Response("", { headers: { "content-length": "2000001" } });
+    await assert.rejects(fetchLumaFeed("https://example.test/feed.ics"), /Feed is too large/);
+
+    globalThis.fetch = async () => new Response("x".repeat(2_000_001));
+    await assert.rejects(fetchLumaFeed("https://example.test/feed.ics"), /Feed is too large/);
+
+    globalThis.fetch = async () => new Response(fixture, { headers: { "content-length": String(Buffer.byteLength(fixture)) } });
+    assert.equal(await fetchLumaFeed("https://example.test/feed.ics"), fixture);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
