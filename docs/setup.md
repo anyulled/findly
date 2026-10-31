@@ -23,11 +23,12 @@ Supabase free projects may pause after a week of sufficiently low activity. This
 
 ### Buffer
 
-1. Confirm the Buffer API is available on the owner account and create an API key with the intended scope.
-2. Confirm all three Buffer accounts, their connected channels, and the publishing permissions available to the key.
-3. Store the key only in server-side deployment secrets.
-4. Verify how the API handles exact scheduled times, link counts, Unicode and each channel's limits against real connected channels.
-5. Buffer scheduling is not wired into the dashboard yet. After that integration is implemented, begin in global review mode and verify the Buffer queue's channel and Madrid time before enabling global automatic mode.
+1. Confirm the Buffer API is available on the owner account, create an API key with the required scope, and store it as the server-only `BUFFER_API_KEY` secret.
+2. In **Cuentas**, enter the Buffer channel ID for every configured account/network pair. A feed may target several accounts, but each post is sent to its account's matching network channel.
+3. In global review mode, approve a post to schedule that one post and save its final text as a style example. Global automatic mode schedules newly generated posts immediately and does not create style examples.
+4. Check the Buffer queue to verify the selected channel and exact Madrid publication time. Findly converts `due_at` to UTC and submits a `customScheduled` time; 13:00 Europe/Madrid changes between UTC offsets with daylight saving time.
+5. Explicit Buffer rejections are marked failed; correct configuration or content and retry them. A timeout, server error or incomplete response is marked as needing reconciliation. Findly never retries that state automatically. Look up the post in Buffer and record its ID in the post detail before treating it as scheduled.
+6. `scheduled` means Buffer accepted the queued post; it does not mean the social network has published it. No live Buffer credentials are included, so validate against the owner account before relying on production publication.
 
 ### Groq
 
@@ -55,13 +56,14 @@ Supabase free projects may pause after a week of sufficiently low activity. This
 
 ## Secret inventory
 
-Use the names in `.env.example`. Persistent-mode Groq draft generation needs `GROQ_API_KEY` and `GROQ_MODEL`; the deployment also needs Supabase URL/publishable key and owner email. The Luma sync endpoint needs server-side Supabase service-role and cron secrets. Buffer credentials are needed when dashboard scheduling is implemented. The public Supabase URL and publishable key are configuration values, not privileged credentials; browser database access remains protected by RLS. Never place Buffer/Groq/service-role/cron values in a `NEXT_PUBLIC_` variable. `JEV_API_KEY` is a reserved empty placeholder; the application does not call Jev.
+Use the names in `.env.example`. Persistent-mode Groq draft generation needs `GROQ_API_KEY` and `GROQ_MODEL`; the deployment also needs Supabase URL/publishable key and owner email. The Luma sync endpoint needs server-side Supabase service-role and cron secrets. Buffer scheduling needs the server-only `BUFFER_API_KEY` and a Buffer channel ID for every account/network pair in **Cuentas**. The public Supabase URL and publishable key are configuration values, not privileged credentials; browser database access remains protected by RLS. Never place Buffer/Groq/service-role/cron values in a `NEXT_PUBLIC_` variable. `JEV_API_KEY` is a reserved empty placeholder; the application does not call Jev.
 
 ## Review and automatic modes
 
-- **Review:** the system prepares a draft for each applicable reminder, account and channel. The owner can edit and approve; approval records the final text as a style example, but the post remains a draft and is not sent to Buffer.
-- **Automatic:** the preference is stored globally, but the application does not yet schedule or publish posts through Buffer. Drafts remain in review even when automatic mode is selected.
-- The setting is global across all accounts. Enable automatic mode only after feed, identity, scheduling and character-count behavior have been checked with real provider accounts.
+- **Review:** the system prepares a draft for each applicable reminder, account and channel. The owner can edit and approve; the same approval transaction stores the final text as a style example, then Findly schedules that post in Buffer.
+- **Automatic:** the global preference schedules newly generated drafts in Buffer immediately. These drafts are not added to style examples.
+- If a Buffer response is uncertain, Findly records `needs_reconciliation` and will not retry the post. Confirm it in Buffer and enter its post ID in Findly to reconcile. Only known failures can be explicitly retried.
+- The setting is global across all accounts. The demo mode remains local and never calls Buffer. Validate the connected account/channel mappings and scheduled queue before relying on automatic mode.
 
 ## Calendar and dates
 
@@ -70,7 +72,7 @@ Reminder candidates are 14, 7 and 1 calendar days before the event. Schedule eac
 ## Operational limits and phase boundaries
 
 - Date changes and cancellations are not synchronized automatically in the first phase. Update or cancel previously scheduled posts manually in Buffer.
-- A successful `createPost` response means Buffer accepted the scheduled post; it does not prove the social network published it. Reconcile provider status separately.
-- On uncertain timeouts, do not blindly retry a create operation. Look up the existing provider post using the persisted correlation data first.
+- A successful `createPost` response means Buffer accepted the scheduled post; it does not prove the social network published it. Posts remain `scheduled` until publication status is available from the provider.
+- On uncertain timeouts, do not blindly retry a create operation. The post remains `needs_reconciliation`; search the matching Buffer channel and record the discovered Buffer post ID in Findly.
 - Vercel Hobby allows personal or non-commercial usage only under current terms. Confirm that the association use case is eligible or choose a different host/plan before production use.
 - Free-tier quotas and terms change. Review provider dashboards before connecting the live scheduler, and avoid enabling paid upgrades without a deliberate decision.

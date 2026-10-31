@@ -4,7 +4,7 @@
 
 Buffer's current API is GraphQL at `https://api.buffer.com`. A scheduled post is created with one `channelId`, `schedulingType: automatic`, `mode: customScheduled`, and a `dueAt` ISO 8601 instant in UTC ([scheduled post example](https://developers.buffer.com/examples/create-scheduled-post.html), [scheduling guide](https://developers.buffer.com/guides/posts-and-scheduling.html)). The GraphQL payload is a typed union: `PostActionSuccess` on success or `MutationError` on a handled mutation failure. API-level errors may also appear in the top-level `errors` array ([error-handling guide](https://developers.buffer.com/guides/error-handling.html)).
 
-The adapter in `src/lib/buffer.ts` sends one mutation for one channel and never retries automatically. It accepts an API key from its caller and does not read environment variables, so callers must keep it server-side. It does not discover Buffer channels, convert Madrid wall time to UTC, validate network character limits, or persist the resulting post ID; those responsibilities belong to other layers.
+The adapter in `src/lib/buffer.ts` sends one mutation for one channel and never retries automatically. It accepts an API key from its caller and does not read environment variables, so callers must keep it server-side. The dashboard stores a separate Buffer channel ID for each account/network pair. It converts the persisted `due_at` instant to UTC, checks the deterministic network character limit before sending, and persists Buffer's post ID only after a confirmed success. Channel discovery remains manual.
 
 ## Outcomes and safe retry behavior
 
@@ -15,6 +15,10 @@ The adapter in `src/lib/buffer.ts` sends one mutation for one channel and never 
 - `BufferInputError` and `BufferConfigurationError` happen before any network request.
 
 Transport failures, timeouts, unreadable responses, server failures, and unrecognizable mutation results are treated conservatively as uncertain. The client provides no retry loop or idempotency key because Buffer's `createPost` mutation does not document one.
+
+The persistence workflow claims an `approved` post as `scheduling` before calling Buffer, so overlapping calls cannot submit it twice. Confirmed success stores the Buffer post ID and changes the state to `scheduled`. A known rejection is stored as `failed` and may be explicitly retried after correction. An uncertain response is stored as `needs_reconciliation` and is never retried automatically. Findly provides a reconciliation action to record the Buffer post ID after the owner verifies it in the matching channel. A process crash after claiming but before recording a result leaves the post in `scheduling`; check Buffer before taking action. `scheduled` means accepted by Buffer, not published by the social network.
+
+Review approval first atomically saves the final text as the account/network/language style example, then schedules that single post. In global automatic mode, newly generated posts are claimed and scheduled immediately without adding style examples. Demo mode never contacts Buffer. `published` is not set by this integration.
 
 ## Example
 
@@ -33,14 +37,8 @@ if (result.kind === "scheduled") {
 }
 ```
 
-Use this module only from server-side code. Callers should persist a local correlation record before issuing the mutation, then persist Buffer's post ID after success. On `BufferUncertainResultError`, look up the pending post in that channel before deciding whether a retry is safe.
+Use this module only from server-side code. The application requires `BUFFER_API_KEY` and an explicit account/network channel mapping. On `BufferUncertainResultError`, look up the pending post in the matching Buffer channel and record its ID in Findly if present. Do not retry an uncertain post.
 
-## RSI plan
+## Verification and limits
 
-1. Research Buffer's official create-post, scheduling, and error-handling documentation.
-2. Define a small injected-fetch adapter for one UTC-scheduled post per channel, with typed mutation/API failures and a separate uncertain-result signal.
-3. Verify request construction and error cases with mocked fetch; run lint, unit tests, and the production build; update this document and synchronize the branch before merging.
-
-## Documentation and sync checklist
-
-Before merging this adapter, confirm this guide remains aligned with the implementation and that the PR description records the completed documentation and synchronization stage.
+The GraphQL client and persisted approval/automatic workflows are covered by unit tests with mocked Buffer fetches and mocked Supabase RPCs. This verifies request construction, channel selection, UTC scheduling, confirmed-ID persistence, rejection handling, and uncertain-result duplicate prevention. The repository has no real Buffer API key or connected channels, so these tests do not verify live account permissions or social network publication. The owner must verify channel IDs and the Buffer queue before production use.
