@@ -10,6 +10,7 @@ The current E2E coverage checks:
 - Creating an event eight days ahead, which leaves the one-week and one-day reminders in range and omits the two-week reminder. The generated drafts cover all seven configured social channels.
 - Approving a draft, recording it as a style example, and retaining that approval after a page reload.
 - Pasting an event URL, receiving mocked extracted details from the route, reviewing the populated fields, and saving the event.
+- Distinguishing an active Buffer send from an uncertain result: absence cannot be confirmed while the send is active.
 
 ## Unit tests and coverage
 
@@ -21,7 +22,7 @@ The gate measures `src/lib/*.ts`, where deterministic domain and provider logic 
 
 The event URL extractor is covered by fetch-mocked unit cases for JSON-LD, metadata fallback, Madrid time conversion, unsupported hosts, redirects and response bounds. These cases verify parser behavior without requesting live Meetup or Luma pages. The authenticated sync request's same-origin guard has unit coverage; the demo E2E verifies that feed sync stays disabled without Supabase credentials. Source targeting tests exercise the shared account selection rule, missing reminder keys, and the Luma generation and dispatch orchestration with mocked repositories and generators in both review and automatic modes. A source with no associated enabled accounts produces no drafts; manual events select all enabled accounts.
 
-The required `Database migrations` CI check uses an isolated local Postgres database to apply all Supabase migrations in order and lint the resulting schema and functions. It does not connect to the hosted project; deployment happens only after a migration reaches `main`. See [database migrations](database-migrations.md) for the local command and deployment configuration.
+The required `Database migrations` CI check uses an isolated local Postgres database to apply all Supabase migrations in order, lint the resulting schema and functions, and execute every transactional SQL script under `supabase/tests/`. The reconciliation SQL regression exercises RLS and real state transitions, including concurrent claim prevention and fencing of stale responses. It does not connect to the hosted project; deployment happens only after a migration reaches `main`. See [database migrations](database-migrations.md) for the local command and deployment configuration.
 
 The iCalendar parser reads event `UID`, `SUMMARY`, `DESCRIPTION`, `LOCATION`, `URL`, and `DTSTART`. It relies on ical.js for RFC 5545 content-line folding and escaped text. UTC, embedded `VTIMEZONE`, IANA `TZID`, floating Madrid times, and date-only events are normalized to Madrid date/time. Malformed events produce per-event issues while valid events in the same calendar remain available. The parser does not fetch feeds, expand `RRULE` recurrences, or reconcile cancellation and date changes.
 

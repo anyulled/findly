@@ -62,7 +62,8 @@ Use the names in `.env.example`. Persistent-mode Groq draft generation needs `GR
 
 - **Review:** the system prepares a draft for each applicable reminder, account and channel. The owner can edit and approve; the same approval transaction stores the final text as a style example, then Findly schedules that post in Buffer.
 - **Automatic:** the global preference schedules newly generated drafts in Buffer immediately. These drafts are not added to style examples.
-- If a Buffer response is uncertain, Findly records `needs_reconciliation` and will not retry the post. Confirm it in Buffer and enter its post ID in Findly to reconcile. Only known failures can be explicitly retried.
+- If a Buffer response is uncertain, Findly records `needs_reconciliation` and will not retry the post. Confirm it in Buffer and enter its post ID in Findly to reconcile. After checking the queue, the owner can confirm absence and then retry. Only known failures can be explicitly retried.
+- A post in `scheduling` can still be in flight. Its absence cannot be confirmed and it cannot be retried. If it appears in Buffer, confirm the post ID; an eventual matching response from the original attempt is idempotent. A process interruption may leave `scheduling` stuck when no post is found. Do not bypass this lock or reset it based only on elapsed time: the original process could resume. Recovery of that case requires independent proof that the original attempt cannot execute; the application does not currently provide such a proof.
 - The setting is global across all accounts. The demo mode remains local and never calls Buffer. Validate the connected account/channel mappings and scheduled queue before relying on automatic mode.
 
 ## Calendar and dates

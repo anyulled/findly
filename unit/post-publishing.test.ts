@@ -8,6 +8,7 @@ import {
 
 const post: PostToSchedule = {
   id: "post-uuid",
+  attempt_id: "attempt-uuid",
   account_id: "account-uuid",
   network: "LinkedIn",
   due_at: "2026-11-07T12:00:00+00:00",
@@ -25,6 +26,8 @@ function fakeSupabase(options: { channelId?: string; status?: string; confirmedP
   let status = options.status ?? "approved";
   let bufferPostId: string | null = null;
   let lastError: string | null = null;
+  let attemptId: string | null = null;
+  let attempts = 0;
 
   function rpc(name: string, args: Record<string, unknown>) {
     calls.push(name);
@@ -33,7 +36,12 @@ function fakeSupabase(options: { channelId?: string; status?: string; confirmedP
       if (name === "claim_post_for_scheduling") {
         if ((status !== "approved" && status !== "failed") || bufferPostId) return { data: null, error: null };
         status = "scheduling";
-        return { data: options.scheduledPost ?? post, error: null };
+        attemptId = `attempt-${++attempts}`;
+        return { data: { ...(options.scheduledPost ?? post), attempt_id: attemptId }, error: null };
+      }
+      if ((name === "mark_post_scheduled" || name === "mark_post_scheduling_failure") &&
+          (status !== "scheduling" || args.p_attempt_id !== attemptId)) {
+        return { data: null, error: { message: "Post is not held by this scheduling attempt" } };
       }
       if (name === "mark_post_scheduled") {
         if (options.confirmedPersistenceFails) return { data: null, error: { message: "database unavailable" } };
@@ -69,6 +77,11 @@ function fakeSupabase(options: { channelId?: string; status?: string; confirmedP
     supabase: supabase as unknown as Parameters<typeof schedulePostWithSupabase>[1],
     calls,
     rpcArguments,
+    reconcileMissing() {
+      if (status !== "needs_reconciliation") return false;
+      status = "failed";
+      return true;
+    },
     get state() { return { status, bufferPostId, lastError }; },
   };
 }
@@ -95,6 +108,7 @@ test("review approval records approval before Buffer scheduling and stores confi
   assert.deepEqual(database.calls, ["approve_post", "claim_post_for_scheduling", "mark_post_scheduled"]);
   assert.equal(database.rpcArguments.find((call) => call.name === "claim_post_for_scheduling")?.args.p_owner_id, "owner-uuid");
   assert.equal(database.rpcArguments.find((call) => call.name === "mark_post_scheduled")?.args.p_owner_id, "owner-uuid");
+  assert.equal(database.rpcArguments.find((call) => call.name === "mark_post_scheduled")?.args.p_attempt_id, "attempt-1");
   assert.deepEqual(database.state, { status: "scheduled", bufferPostId: "buffer-post-1", lastError: null });
 });
 
@@ -177,4 +191,35 @@ test("persisted text is validated deterministically before Buffer is called", as
   assert.equal(result.kind, "failed");
   assert.equal(database.state.status, "failed");
   assert.equal(requests, 0);
+});
+
+
+test("an in-flight Buffer request cannot be released and retried by another session", async () => {
+  const database = fakeSupabase({ channelId: "buffer-channel-1" });
+  let requests = 0;
+  let signalStarted!: () => void;
+  let finishResponse!: (response: Response) => void;
+  const started = new Promise<void>((resolve) => { signalStarted = resolve; });
+  const pendingResponse = new Promise<Response>((resolve) => { finishResponse = resolve; });
+  const fetchImpl: typeof fetch = async () => {
+    requests += 1;
+    signalStarted();
+    return pendingResponse;
+  };
+  const first = schedulePostWithSupabase(post.id, database.supabase, "owner-uuid", fetchImpl);
+  await started;
+  assert.equal(database.state.status, "scheduling");
+  assert.equal(database.reconcileMissing(), false);
+  const second = await schedulePostWithSupabase(post.id, database.supabase, "owner-uuid", fetchImpl);
+  assert.equal(second.kind, "not_claimed");
+  assert.equal(requests, 1);
+  finishResponse(bufferResponse({ data: { createPost: { __typename: "PostActionSuccess", post: { id: "only-buffer-post", text: post.content } } } }));
+  assert.equal((await first).kind, "scheduled");
+  assert.equal(database.state.bufferPostId, "only-buffer-post");
+});
+
+test("the Supabase repository sends the active attempt ID when recording failure", async () => {
+  const database = fakeSupabase({ channelId: "buffer-channel-1" });
+  await schedulePostWithSupabase(post.id, database.supabase, "owner-uuid", async () => { throw new Error("timeout"); });
+  assert.equal(database.rpcArguments.find((call) => call.name === "mark_post_scheduling_failure")?.args.p_attempt_id, "attempt-1");
 });

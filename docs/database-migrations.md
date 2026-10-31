@@ -2,7 +2,7 @@
 
 ## Pull request validation
 
-The required `Database migrations` check starts a local Postgres instance with the Supabase CLI, applies every checked-in migration to a clean database, and runs `supabase db lint --local --fail-on error`. It has no credentials for or connection to a hosted Supabase project. Invalid SQL, ordering conflicts, duplicate migration versions, or schema/function errors fail the PR check.
+The required `Database migrations` check starts a local Postgres instance with the Supabase CLI, applies every checked-in migration to a clean database, runs `supabase db lint --local --fail-on error`, and executes every transactional SQL script in `supabase/tests/`. It has no credentials for or connection to a hosted Supabase project. Invalid SQL, ordering conflicts, duplicate migration versions, or schema/function errors fail the PR check.
 
 Run the same checks locally with Docker and Supabase CLI 2.122.0:
 
@@ -10,6 +10,9 @@ Run the same checks locally with Docker and Supabase CLI 2.122.0:
 supabase db start
 supabase db reset --local --no-seed
 supabase db lint --local --fail-on error
+for test_file in supabase/tests/*.sql; do
+  psql postgresql://postgres:postgres@127.0.0.1:55432/postgres -X -v ON_ERROR_STOP=1 -f "$test_file"
+done
 ```
 
 ## Deployment after merge
