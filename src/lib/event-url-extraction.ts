@@ -2,7 +2,14 @@ import { formatMadridDateTime } from "@/lib/madrid-time";
 
 const MAX_HTML_BYTES = 1_000_000;
 const MAX_REDIRECTS = 3;
-const SUPPORTED_HOSTS = ["lu.ma", "luma.com", "meetup.com"];
+
+const MONTH_NAMES: Record<string, string> = {
+  jan: "01", ene: "01", feb: "02", mar: "03", apr: "04", abr: "04",
+  may: "05", jun: "06", jul: "07", aug: "08", ago: "08",
+  sep: "09", set: "09", oct: "10", nov: "11", dec: "12", dic: "12",
+};
+
+const PRIVATE_HOST_PATTERN = /^(?:localhost|0\.0\.0\.0|::|::1|127\.\d{1,3}\.\d{1,3}\.\d{1,3}|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}|169\.254\.\d{1,3}\.\d{1,3})$|(?:\.localhost|\.local|\.internal)$/iu;
 
 export type EventPageDetails = {
   title: string;
@@ -25,10 +32,15 @@ export class EventUrlExtractionError extends Error {
   }
 }
 
+function isPrivateHost(host: string): boolean {
+  return PRIVATE_HOST_PATTERN.test(host.toLowerCase().replace(/^\[|\]$/gu, ""));
+}
+
 function isSupportedUrl(url: URL): boolean {
-  return url.protocol === "https:" && !url.username && !url.password &&
-    (url.port === "" || url.port === "443") &&
-    SUPPORTED_HOSTS.some((host) => url.hostname === host || url.hostname.endsWith(`.${host}`));
+  if (url.protocol !== "https:") return false;
+  if (url.username || url.password) return false;
+  if (url.port !== "" && url.port !== "443") return false;
+  return Boolean(url.hostname) && !isPrivateHost(url.hostname);
 }
 
 function decodeHtml(value: string): string {
@@ -100,6 +112,27 @@ function locationText(value: unknown): string {
   return [...new Set([cleanText(record.name), ...addressParts.map(cleanText)].filter(Boolean))].join(", ");
 }
 
+function parseTextDate(text: string): string {
+  const iso = /\b(\d{4})[/-](\d{1,2})[/-](\d{1,2})\b/u.exec(text);
+  if (iso) return `${iso[1]}-${iso[2].padStart(2, "0")}-${iso[3].padStart(2, "0")}`;
+
+  const numeric = /\b(\d{1,2})[/-](\d{1,2})[/-](\d{4})\b/u.exec(text);
+  if (numeric) return `${numeric[3]}-${numeric[2].padStart(2, "0")}-${numeric[1].padStart(2, "0")}`;
+
+  const alpha = /\b(\d{1,2})[/\s-]([a-z]{3,4})[/\s-](\d{4})\b/iu.exec(text);
+  if (alpha) {
+    const month = MONTH_NAMES[alpha[2].toLowerCase().slice(0, 3)];
+    if (month) return `${alpha[3]}-${month}-${alpha[1].padStart(2, "0")}`;
+  }
+  return "";
+}
+
+function parseTextTime(text: string): string {
+  const match = /\b([01]?\d|2[0-3]):([0-5]\d)\b/u.exec(text);
+  if (match) return `${match[1].padStart(2, "0")}:${match[2]}`;
+  return "";
+}
+
 function eventDateTime(value: unknown): { date: string; time: string } {
   if (typeof value !== "string" || !value.trim()) return { date: "", time: "" };
   const raw = value.trim();
@@ -111,23 +144,77 @@ function eventDateTime(value: unknown): { date: string; time: string } {
   return formatMadridDateTime(instant);
 }
 
+function extractFallbackDateTime(html: string): { date: string; time: string } {
+  for (const match of html.matchAll(/<time\b[^>]*datetime\s*=\s*["']([^"']+)["'][^>]*>/giu)) {
+    const dt = eventDateTime(match[1]);
+    if (dt.date) return dt;
+  }
+  let date = "";
+  let time = "";
+  for (const match of html.matchAll(/class\s*=\s*["'][^"']*(?:event-date|date|agenda)[^"']*["'][^>]*>([\s\S]*?)<\//giu)) {
+    const text = cleanText(match[1]);
+    const d = parseTextDate(text);
+    if (d) { date = d; break; }
+  }
+  for (const match of html.matchAll(/class\s*=\s*["'][^"']*(?:time|hour|hora|schedule)[^"']*["'][^>]*>([\s\S]*?)<\//giu)) {
+    const text = cleanText(match[1]);
+    const t = parseTextTime(text);
+    if (t) { time = t; break; }
+  }
+  return { date, time: time || parseTextTime(html) };
+}
+
+function extractFallbackPlace(html: string): string {
+  for (const match of html.matchAll(/<div\b[^>]*class\s*=\s*["'][^"']*(?:location|venue|place)[^"']*["'][^>]*>([\s\S]*?)<\/div>/giu)) {
+    const loc = cleanText(match[1]);
+    if (loc && loc.length > 2 && loc.length < 150) return loc;
+  }
+  return "";
+}
+
+function resolveTitle(structured: Record<string, unknown> | undefined, meta: Record<string, string>, html: string): string {
+  const structuredName = cleanText(structured?.name);
+  if (structuredName) return structuredName;
+  const metaTitle = cleanText(meta["og:title"] || meta["twitter:title"]);
+  if (metaTitle) return metaTitle;
+  const titleTag = /<title\b[^>]*>([\s\S]*?)<\/title\s*>/iu.exec(html)?.[1];
+  return cleanText(titleTag ?? "");
+}
+
+function resolveDateTime(structured: Record<string, unknown> | undefined, meta: Record<string, string>, html: string): { date: string; time: string } {
+  const explicit = eventDateTime(structured?.startDate ?? structured?.start_date ?? meta["event:start_time"] ?? meta["og:start_time"]);
+  if (explicit.date) return explicit;
+  const fallback = extractFallbackDateTime(html);
+  return { date: fallback.date, time: explicit.time || fallback.time };
+}
+
+function resolvePlace(structured: Record<string, unknown> | undefined, meta: Record<string, string>, html: string): string {
+  const structuredLoc = locationText(structured?.location);
+  if (structuredLoc) return structuredLoc;
+  const metaLoc = cleanText(meta["event:location"] || meta["og:locality"]);
+  if (metaLoc) return metaLoc;
+  return extractFallbackPlace(html);
+}
+
+function resolveDescription(structured: Record<string, unknown> | undefined, meta: Record<string, string>): string {
+  const structuredDesc = cleanText(structured?.description);
+  if (structuredDesc) return structuredDesc;
+  return cleanText(meta["og:description"] || meta.description || meta["twitter:description"]);
+}
+
 export function parseEventPage(html: string, pageUrl: string): EventPageExtraction {
   const meta = readMeta(html);
   const structured = structuredEvents(html)[0];
-  const title = cleanText(structured?.name) || cleanText(meta["og:title"] || meta["twitter:title"]) ||
-    cleanText(/<title\b[^>]*>([\s\S]*?)<\/title\s*>/iu.exec(html)?.[1] ?? "");
+  const title = resolveTitle(structured, meta, html);
   if (!title) throw new EventUrlExtractionError("No pude encontrar el título del evento en esa página.");
 
-  const dateTime = eventDateTime(structured?.startDate ?? structured?.start_date ?? meta["event:start_time"] ?? meta["og:start_time"]);
-  const place = locationText(structured?.location) || cleanText(meta["event:location"] || meta["og:locality"]);
-  const description = cleanText(structured?.description) || cleanText(meta["og:description"] || meta.description || meta["twitter:description"]);
+  const dateTime = resolveDateTime(structured, meta, html);
+  const place = resolvePlace(structured, meta, html);
+  const description = resolveDescription(structured, meta);
   const url = new URL(pageUrl);
   const event: EventPageDetails = { title, ...dateTime, place, description, url: url.toString() };
-  const missingFields: EventPageExtraction["missingFields"] = [];
-  if (!event.date) missingFields.push("date");
-  if (!event.time) missingFields.push("time");
-  if (!event.place) missingFields.push("place");
-  if (!event.description) missingFields.push("description");
+
+  const missingFields = (["date", "time", "place", "description"] as const).filter((field) => !event[field]);
   return { event, missingFields };
 }
 
@@ -156,8 +243,8 @@ export async function extractEventPageDetails(input: string, fetchImpl: typeof f
   if (typeof input !== "string" || input.length > 2_048) throw new EventUrlExtractionError("El enlace del evento debe tener menos de 2048 caracteres.");
   let current: URL;
   try { current = new URL(input.trim()); }
-  catch { throw new EventUrlExtractionError("Introduce una URL válida de Meetup o Luma."); }
-  if (!isSupportedUrl(current)) throw new EventUrlExtractionError("La extracción solo admite enlaces HTTPS de Meetup o Luma.");
+  catch { throw new EventUrlExtractionError("Introduce una URL HTTPS válida."); }
+  if (!isSupportedUrl(current)) throw new EventUrlExtractionError("La extracción solo admite enlaces web públicos HTTPS.");
 
   for (let redirects = 0; redirects <= MAX_REDIRECTS; redirects += 1) {
     let response: Response;
@@ -165,7 +252,7 @@ export async function extractEventPageDetails(input: string, fetchImpl: typeof f
       response = await fetchImpl(current, {
         redirect: "manual",
         signal: AbortSignal.timeout(8_000),
-        headers: { accept: "text/html,application/xhtml+xml" },
+        headers: { accept: "text/html,application/xhtml+xml", "user-agent": "Mozilla/5.0 (compatible; Findly/1.0; +https://findly.vercel.app)" },
       });
     } catch {
       throw new EventUrlExtractionError("No se pudo leer la página del evento. Comprueba el enlace e inténtalo de nuevo.");
@@ -174,7 +261,7 @@ export async function extractEventPageDetails(input: string, fetchImpl: typeof f
       const location = response.headers.get("location");
       if (!location || redirects === MAX_REDIRECTS) throw new EventUrlExtractionError("La página redirigió demasiadas veces.");
       current = new URL(location, current);
-      if (!isSupportedUrl(current)) throw new EventUrlExtractionError("La página redirige a un dominio no admitido.");
+      if (!isSupportedUrl(current)) throw new EventUrlExtractionError("La página redirige a un dominio o protocolo no admitido.");
       continue;
     }
     if (!response.ok) throw new EventUrlExtractionError("El proveedor no pudo cargar esa página del evento.");

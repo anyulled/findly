@@ -34,52 +34,80 @@ test("preserves a floating ISO datetime as Madrid wall-clock time", () => {
   assert.equal(result.event.time, "18:30");
 });
 
+test("extracts date, time and location from generic HTML classes and text patterns", () => {
+  const genericHtml = `<!doctype html>
+  <html><head><meta property="og:title" content="Upskilling Week Autumn Edition - Mobile World Capital">
+  <meta property="og:description" content="Upskilling digital workshop.">
+  </head><body>
+    <div class="post-event-date">16/NOV/2026 - 19/NOV/2026</div>
+    <div class="post-location">Cibernàrium 22@ - Barcelona Activa</div>
+    <div class="post-time">15:00 - 20:00 h.</div>
+  </body></html>`;
+  const result = parseEventPage(genericHtml, "https://mobileworldcapital.com/en/agenda/upskilling-week-november-2026/");
+  assert.equal(result.event.title, "Upskilling Week Autumn Edition - Mobile World Capital");
+  assert.equal(result.event.date, "2026-11-16");
+  assert.equal(result.event.time, "15:00");
+  assert.equal(result.event.place, "Cibernàrium 22@ - Barcelona Activa");
+  assert.equal(result.event.description, "Upskilling digital workshop.");
+  assert.deepEqual(result.missingFields, []);
+});
+
 test("rejects unsupported sources before making a request", async () => {
   let requests = 0;
-  await assert.rejects(
-    extractEventPageDetails("http://127.0.0.1/private", async () => { requests += 1; return new Response(); }),
-    EventUrlExtractionError,
-  );
+  const mockFetch = async () => { requests += 1; return new Response(); };
+  await assert.rejects(extractEventPageDetails("http://127.0.0.1/private", mockFetch), EventUrlExtractionError);
+  await assert.rejects(extractEventPageDetails("https://user:pass@example.com/event", mockFetch), EventUrlExtractionError);
+  await assert.rejects(extractEventPageDetails("https://example.com:8080/event", mockFetch), EventUrlExtractionError);
+  await assert.rejects(extractEventPageDetails("https://localhost/event", mockFetch), EventUrlExtractionError);
+  await assert.rejects(extractEventPageDetails("https://10.0.0.1/event", mockFetch), EventUrlExtractionError);
+  await assert.rejects(extractEventPageDetails("https://192.168.1.1/event", mockFetch), EventUrlExtractionError);
+  await assert.rejects(extractEventPageDetails("https://172.20.0.1/event", mockFetch), EventUrlExtractionError);
+  await assert.rejects(extractEventPageDetails("https://169.254.169.254/latest/meta-data", mockFetch), EventUrlExtractionError);
+  await assert.rejects(extractEventPageDetails("not-a-valid-url", mockFetch), EventUrlExtractionError);
   assert.equal(requests, 0);
 });
 
 test("rejects an overlong URL before making a request", async () => {
   let requests = 0;
   await assert.rejects(
-    extractEventPageDetails(`https://luma.com/${"a".repeat(2_050)}`, async () => { requests += 1; return new Response(); }),
+    extractEventPageDetails(`https://example.com/${"a".repeat(2_050)}`, async () => { requests += 1; return new Response(); }),
     /2048/u,
   );
   assert.equal(requests, 0);
 });
 
-test("blocks redirects outside the supported event providers", async () => {
-  await assert.rejects(extractEventPageDetails("https://luma.com/event", async () => new Response(null, {
+test("blocks redirects to non-HTTPS or private hosts", async () => {
+  await assert.rejects(extractEventPageDetails("https://example.com/event", async () => new Response(null, {
     status: 302,
-    headers: { location: "https://example.org/collect" },
-  })), /dominio no admitido/u);
+    headers: { location: "http://example.org/collect" },
+  })), /no admitido/u);
+  await assert.rejects(extractEventPageDetails("https://example.com/event", async () => new Response(null, {
+    status: 302,
+    headers: { location: "https://127.0.0.1/private" },
+  })), /no admitido/u);
 });
 
-test("follows a redirect between supported provider hosts", async () => {
+test("follows a redirect between valid public HTTPS hosts", async () => {
   const urls: string[] = [];
   const fetchImpl: typeof fetch = async (input) => {
     urls.push(String(input));
-    if (urls.length === 1) return new Response(null, { status: 301, headers: { location: "https://luma.com/java-evening" } });
+    if (urls.length === 1) return new Response(null, { status: 301, headers: { location: "https://other-domain.org/java-evening" } });
     return new Response(eventPage, { status: 200, headers: { "content-type": "text/html; charset=utf-8" } });
   };
-  const result = await extractEventPageDetails("https://lu.ma/java-evening", fetchImpl);
+  const result = await extractEventPageDetails("https://example.com/java-evening", fetchImpl);
   assert.equal(urls.length, 2);
-  assert.equal(result.event.url, "https://luma.com/java-evening");
+  assert.equal(result.event.url, "https://other-domain.org/java-evening");
 });
 
 test("rejects non-HTML and oversized pages", async () => {
-  await assert.rejects(extractEventPageDetails("https://luma.com/event", async () => new Response("text", {
+  await assert.rejects(extractEventPageDetails("https://example.com/event", async () => new Response("text", {
     headers: { "content-type": "application/json" },
   })), /HTML/u);
-  await assert.rejects(extractEventPageDetails("https://luma.com/event", async () => new Response("", {
+  await assert.rejects(extractEventPageDetails("https://example.com/event", async () => new Response("", {
     headers: { "content-type": "text/html", "content-length": "1100000" },
   })), /grande/u);
 });
 
 test("rejects a page without an event title", () => {
-  assert.throws(() => parseEventPage("<html><body>Not an event</body></html>", "https://luma.com/not-an-event"), EventUrlExtractionError);
+  assert.throws(() => parseEventPage("<html><body>Not an event</body></html>", "https://example.com/not-an-event"), EventUrlExtractionError);
 });
