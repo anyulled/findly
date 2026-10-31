@@ -175,6 +175,11 @@ function Dashboard() {
     if (persistent) {
       if (next.status === "approved") {
         const outcome = await approvePost(post.id, content);
+        if (outcome.kind === "not_claimed") {
+          await refreshWorkspaceAfterSync();
+          setFeedback("No se pudo reservar la publicación. Revisa su estado y la cuenta asociada a la fuente.");
+          return;
+        }
         const status: Status = outcome.kind === "scheduled" ? "scheduled" : outcome.kind === "failed" ? "failed" : outcome.kind === "needs_reconciliation" ? "needs_reconciliation" : "scheduling";
         const message = "message" in outcome ? outcome.message : null;
         changes = { ...next, status, lastError: message };
@@ -328,6 +333,12 @@ function Dashboard() {
   async function retryPost(post: Post) {
     try {
       const outcome = await retryFailedPost(post.id);
+      if (outcome.kind === "not_claimed") {
+        await refreshWorkspaceAfterSync();
+        setSelected(null);
+        setFeedback("No se pudo reservar la publicación. Revisa su estado y la cuenta asociada a la fuente.");
+        return;
+      }
       const status: Status = outcome.kind === "scheduled" ? "scheduled" : outcome.kind === "failed" ? "failed" : outcome.kind === "needs_reconciliation" ? "needs_reconciliation" : "scheduling";
       const message = "message" in outcome ? outcome.message : null;
       const changes: Partial<Post> = { status, lastError: message };

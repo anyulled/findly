@@ -7,16 +7,29 @@ export type ApprovedDispatchResult = {
   needsReconciliation: number;
   notClaimed: number;
   errors: number;
+  deferred: number;
 };
+
+// A Buffer request can take up to 20 seconds. Stop starting further requests
+// after 10 seconds to keep recovery bounded without aborting an active send.
+const RECOVERY_BUDGET_MS = 10_000;
 
 /** Resume durable approved intents. Each scheduler atomically claims its post. */
 export async function dispatchApprovedPosts(
   listApproved: () => Promise<string[]>,
   schedule: (postId: string) => Promise<PostPublishingOutcome>,
+  options: { now?: () => number; budgetMs?: number } = {},
 ): Promise<ApprovedDispatchResult> {
+  const now = options.now ?? Date.now;
+  const deadline = now() + (options.budgetMs ?? RECOVERY_BUDGET_MS);
   const postIds = await listApproved();
-  const result: ApprovedDispatchResult = { selected: postIds.length, scheduled: 0, failed: 0, needsReconciliation: 0, notClaimed: 0, errors: 0 };
-  for (const postId of postIds) {
+  const result: ApprovedDispatchResult = { selected: postIds.length, scheduled: 0, failed: 0, needsReconciliation: 0, notClaimed: 0, errors: 0, deferred: 0 };
+  for (let index = 0; index < postIds.length; index += 1) {
+    if (now() >= deadline) {
+      result.deferred = postIds.length - index;
+      break;
+    }
+    const postId = postIds[index];
     try {
       const outcome = await schedule(postId);
       if (outcome.kind === "scheduled") result.scheduled += 1;

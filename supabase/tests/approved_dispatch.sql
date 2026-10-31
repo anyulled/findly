@@ -56,4 +56,19 @@ begin
   end if;
 end;
 $$;
+reset role;
+set local role authenticated;
+do $$
+begin
+  -- Simulate a removal after the approved list was read but before claiming.
+  delete from public.source_accounts where source_id = '30000000-0000-4000-8000-000000000001'
+    and account_id = '10000000-0000-4000-8000-000000000002';
+  if exists (select 1 from public.claim_post_for_scheduling('50000000-0000-4000-8000-000000000002', '11111111-1111-4111-8111-111111111111')) then
+    raise exception 'Unlinked source account was claimed';
+  end if;
+  if not exists (select 1 from public.claim_post_for_scheduling('50000000-0000-4000-8000-000000000001', '11111111-1111-4111-8111-111111111111')) then
+    raise exception 'Manual event could not be claimed';
+  end if;
+end;
+$$;
 rollback;
