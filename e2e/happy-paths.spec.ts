@@ -63,13 +63,13 @@ test("stores a Luma iCal source linked to multiple accounts", async ({ page }) =
   await page.getByRole("button", { name: "Ajustes" }).click();
   await page.getByLabel("Nombre de la fuente").fill("BarcelonaJS Luma");
   await page.getByLabel("URL de suscripción iCal").fill("https://calendar.example.com/barcelonajs.ics");
-  await page.getByRole("checkbox", { name: "Alex · personal" }).check();
-  await page.getByRole("checkbox", { name: "BarcelonaJS" }).check();
+  await page.getByRole("checkbox", { name: "Personal" }).check();
+  await page.getByRole("checkbox", { name: "Barcelona JUG" }).check();
   await page.getByRole("button", { name: "Guardar fuente" }).click();
 
   const source = page.getByRole("article").filter({ hasText: "BarcelonaJS Luma" });
   await expect(source).toContainText("Luma · iCal");
-  await expect(source).toContainText("Alex · personal, BarcelonaJS");
+  await expect(source).toContainText("Personal, Barcelona JUG");
   await expect(page.getByText("La configuración se guarda, pero la importación y extracción todavía no están conectadas.")).toBeVisible();
 
   await source.getByRole("checkbox", { name: "Activa" }).uncheck();

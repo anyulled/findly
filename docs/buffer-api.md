@@ -23,7 +23,7 @@ Review approval first atomically saves the final text as the account/network/lan
 ## Example
 
 ```ts
-const client = new BufferClient({ apiKey: process.env.BUFFER_API_KEY ?? "" });
+const client = new BufferClient({ apiKey: process.env.BUFFER_API_KEY_PERSONAL ?? "" });
 const result = await client.schedulePost({
   channelId: "channel-id-from-buffer",
   text: "Join us next week!",
@@ -37,7 +37,7 @@ if (result.kind === "scheduled") {
 }
 ```
 
-Use this module only from server-side code. The application requires `BUFFER_API_KEY` and an explicit account/network channel mapping. On `BufferUncertainResultError`, look up the pending post in the matching Buffer channel and record its ID in Findly if present. Do not retry an uncertain post.
+Use this module only from server-side code. The application requires one server-only key per managed account: `BUFFER_API_KEY_PERSONAL`, `BUFFER_API_KEY_BARCELONA_JUG`, and `BUFFER_API_KEY_SOFTWARE_CRAFTERS_BARCELONA`, plus an explicit account/network channel mapping. Keys are selected by the post account and never sent to the browser. On `BufferUncertainResultError`, look up the pending post in the matching Buffer channel and record its ID in Findly if present. Do not retry an uncertain post.
 
 ## Verification and limits
 
