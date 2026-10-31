@@ -83,13 +83,16 @@ export function SourceSettings({ accounts, sources, persistent, onSourcesChange,
     setMessage("");
     try {
       const response = await fetch("/api/cron/sync", { method: "POST" });
-      const result = await response.json() as { sources?: number; feedsSucceeded?: number; feedsFailed?: number; eventsInserted?: number; draftsCreated?: number; issues?: unknown[]; error?: string; approvedRecovery?: { scheduled: number; failed: number; needsReconciliation: number; errors: number; selected: number; deferred: number } };
-      if (!response.ok) throw new Error(result.error === "unauthorized" ? "Vuelve a iniciar sesión para sincronizar." : "No se pudo completar la sincronización. Comprueba la configuración del servidor.");
+      type Delivery = { scheduled: number; failed: number; needsReconciliation: number; errors: number; selected: number; deferred: number };
+      const result = await response.json() as { sources?: number; feedsSucceeded?: number; feedsFailed?: number; eventsInserted?: number; draftsCreated?: number; issues?: unknown[]; error?: string; approvedRecovery?: Delivery; automaticDelivery?: Delivery };
+      if (!response.ok && !result.approvedRecovery) throw new Error(result.error === "unauthorized" ? "Vuelve a iniciar sesión para sincronizar." : "No se pudo completar la sincronización. Comprueba la configuración del servidor.");
       await onSyncComplete();
       const issueCount = result.issues?.length ?? 0;
-      const recovery = result.approvedRecovery;
-      const deliveryIssues = (recovery?.failed ?? 0) + (recovery?.needsReconciliation ?? 0) + (recovery?.errors ?? 0);
-      setMessage(`Sincronización terminada: ${result.feedsSucceeded ?? 0} fuentes consultadas, ${result.eventsInserted ?? 0} eventos nuevos, ${result.draftsCreated ?? 0} borradores creados y ${recovery?.scheduled ?? 0} aprobados programados.${issueCount || deliveryIssues ? ` Hay ${issueCount + deliveryIssues} incidencias que revisar.` : ""}${(recovery?.deferred ?? 0) > 0 || (recovery?.selected ?? 0) >= 50 ? " Puede haber más aprobados pendientes; vuelve a sincronizar." : ""}`);
+      const deliveries = [result.approvedRecovery, result.automaticDelivery].filter((item): item is Delivery => Boolean(item));
+      const deliveryIssues = deliveries.reduce((sum, item) => sum + item.failed + item.needsReconciliation + item.errors, 0);
+      const scheduled = deliveries.reduce((sum, item) => sum + item.scheduled, 0);
+      const hasMore = deliveries.some((item) => item.deferred > 0 || item.selected >= 50);
+      setMessage(`Sincronización terminada: ${result.feedsSucceeded ?? 0} fuentes consultadas, ${result.eventsInserted ?? 0} eventos nuevos, ${result.draftsCreated ?? 0} borradores creados y ${scheduled} aprobados programados.${issueCount || deliveryIssues ? ` Hay ${issueCount + deliveryIssues} incidencias que revisar.` : ""}${hasMore ? " Puede haber más aprobados pendientes; vuelve a sincronizar." : ""}`);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "No se pudo completar la sincronización.");
     } finally {
