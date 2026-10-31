@@ -14,6 +14,10 @@ export type ApprovedDispatchResult = {
 // after 10 seconds to keep recovery bounded without aborting an active send.
 export const RECOVERY_BUDGET_MS = 10_000;
 
+export function hasDispatchFailures(...results: ApprovedDispatchResult[]): boolean {
+  return results.some((result) => result.failed > 0 || result.needsReconciliation > 0 || result.errors > 0);
+}
+
 /** Resume durable approved intents. Each scheduler atomically claims its post. */
 export async function dispatchApprovedPosts(
   listApproved: () => Promise<string[]>,

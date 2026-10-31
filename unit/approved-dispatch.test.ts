@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { dispatchApprovedPosts, dispatchApprovedPostsWithSupabase } from "../src/lib/approved-dispatch";
+import { dispatchApprovedPosts, dispatchApprovedPostsWithSupabase, hasDispatchFailures } from "../src/lib/approved-dispatch";
 import type { PostPublishingOutcome } from "../src/lib/post-publishing";
 
 test("recovers previously approved posts after interruption without resending confirmed or uncertain posts", async () => {
@@ -188,4 +188,13 @@ test("an already exhausted shared deadline defers a later event batch", async ()
   );
   assert.equal(sent, 0);
   assert.equal(result.deferred, 1);
+});
+
+
+test("only failed, uncertain, or unexpected outcomes signal a failed sync", () => {
+  const ok = { selected: 3, scheduled: 1, failed: 0, needsReconciliation: 0, notClaimed: 1, errors: 0, deferred: 1 };
+  assert.equal(hasDispatchFailures(ok), false);
+  for (const field of ["failed", "needsReconciliation", "errors"] as const) {
+    assert.equal(hasDispatchFailures(ok, { ...ok, [field]: 1 }), true);
+  }
 });
