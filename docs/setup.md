@@ -27,7 +27,7 @@ Supabase free projects may pause after a week of sufficiently low activity. This
 2. Confirm all three Buffer accounts, their connected channels, and the publishing permissions available to the key.
 3. Store the key only in server-side deployment secrets.
 4. Verify how the API handles exact scheduled times, link counts, Unicode and each channel's limits against real connected channels.
-5. Begin in global review mode. Confirm scheduled items appear in Buffer with the correct channel and Madrid time before enabling global automatic mode.
+5. Buffer scheduling is not wired into the dashboard yet. After that integration is implemented, begin in global review mode and verify the Buffer queue's channel and Madrid time before enabling global automatic mode.
 
 ### Groq
 
@@ -58,8 +58,8 @@ Use the names in `.env.example`. Persistent-mode Groq draft generation needs `GR
 
 ## Review and automatic modes
 
-- **Review:** the system prepares a draft for each applicable reminder, account and channel. The owner can edit and approve; approval also records the final version as a style example. Buffer scheduling is not connected to the dashboard yet.
-- **Automatic:** the preference is stored globally, but generated drafts still remain in review until Buffer scheduling is integrated. Selecting this mode does not currently publish or schedule content.
+- **Review:** the system prepares a draft for each applicable reminder, account and channel. The owner can edit and approve; approval records the final text as a style example, but the post remains a draft and is not sent to Buffer.
+- **Automatic:** the preference is stored globally, but the application does not yet schedule or publish posts through Buffer. Drafts remain in review even when automatic mode is selected.
 - The setting is global across all accounts. Enable automatic mode only after feed, identity, scheduling and character-count behavior have been checked with real provider accounts.
 
 ## Calendar and dates
