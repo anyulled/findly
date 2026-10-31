@@ -14,6 +14,7 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 - Documentation and Sync is part of implementation completion, not follow-up work. Before requesting merge, update the README and relevant docs to match user-visible behavior, environment/configuration changes, test coverage, and known limitations. If no docs need changing, explain why in the pull request checklist.
 - In the same final stage, rebase onto the latest `origin/main`, resolve conflicts without discarding another workstream’s changes, rerun the applicable checks, and confirm the pull request contains the documentation update. Do not mark a workstream complete while this stage remains unchecked.
 - Use the repository pull request template and complete its documentation and synchronization checklist before merge.
+- The `Documentation and Sync` GitHub Actions check validates that every final-stage checklist item is checked. The `main` branch must require this check and `E2E (Playwright)` before merge.
 - Use Conventional Commits for every commit, for example `feat: add calendar view`, `ci: validate pull requests`, or `docs: document architecture`.
 - Keep workstreams isolated in their own branches/worktrees and pull requests. Avoid editing files owned by another workstream; coordinate shared files before changes.
 - Keep the solution within free tiers where practical. Do not enable paid services or incur costs.

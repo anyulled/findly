@@ -37,4 +37,4 @@ npx playwright install chromium
 npm run test:e2e
 ```
 
-Los tests unitarios usan fixtures y `fetch` simulado; los E2E usan el modo demo local. Ninguno verifica integraciones reales con Supabase, Groq, Buffer, Luma ni Meetup. CI ejecuta lint, tests unitarios, build y Playwright; el check `E2E (Playwright)` es obligatorio para fusionar en `main`.
+Los tests unitarios usan fixtures y `fetch` simulado; los E2E usan el modo demo local. Ninguno verifica integraciones reales con Supabase, Groq, Buffer, Luma ni Meetup. CI ejecuta lint, tests unitarios, build y Playwright. El checklist de Documentación y Sincronización de la plantilla de PR ya se valida en CI, y la protección de `main` debe exigir este check junto a `E2E (Playwright)`.
