@@ -5,6 +5,7 @@ import { generateSocialPost } from "@/lib/groq";
 import { generateLumaEventDrafts, type LumaDraftRepository } from "@/lib/luma-drafts";
 import type { PostLanguage } from "@/lib/language";
 import type { SocialNetwork } from "@/lib/social-validation";
+import { schedulePostWithSupabase } from "@/lib/post-publishing";
 
 const NETWORKS: SocialNetwork[] = ["LinkedIn", "X", "Bluesky"];
 
@@ -25,6 +26,12 @@ export async function POST(request: Request): Promise<Response> {
   if (!owner) return Response.json({ error: "sync_not_configured" }, { status: 503 });
 
   const draftRepository: LumaDraftRepository = {
+    async getPublishingMode(ownerId) {
+      const { data, error } = await supabase.from("app_settings").select("value")
+        .eq("owner_id", ownerId).eq("key", "publishing_mode").maybeSingle();
+      if (error) throw new Error("Unable to read publishing mode");
+      return (data?.value as { mode?: string } | null)?.mode === "automatic" ? "automatic" : "review";
+    },
     async listLinkedAccounts(ownerId, sourceId) {
       const { data: links, error: linkError } = await supabase.from("source_accounts")
         .select("account_id").eq("owner_id", ownerId).eq("source_id", sourceId);
@@ -71,6 +78,14 @@ export async function POST(request: Request): Promise<Response> {
       }).select("id");
       if (error) throw new Error("Unable to persist generated drafts");
       return data?.length ?? 0;
+    },
+    async scheduleAutomaticPosts(ownerId, eventId) {
+      const { data, error } = await supabase.from("posts").select("id")
+        .eq("owner_id", ownerId).eq("event_id", eventId).eq("status", "approved");
+      if (error) throw new Error("Unable to read generated posts ready for Buffer");
+      for (const row of data ?? []) {
+        await schedulePostWithSupabase(row.id, supabase, ownerId, process.env.BUFFER_API_KEY ?? "");
+      }
     },
   };
 

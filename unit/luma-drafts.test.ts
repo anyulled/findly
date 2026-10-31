@@ -61,11 +61,43 @@ test("Luma drafts use linked accounts and approved examples and remain idempoten
   assert.equal(first, 5);
   assert.equal(second, 0);
   assert.equal(inserted.size, 5);
+  assert.equal([...inserted.values()].every((row) => row.status === "review"), true);
   assert.equal(generated.length, 5);
   assert.equal(generated.some((input) => input.network === "LinkedIn" && input.reminderDays === 14), false);
   assert.equal(generated.find((input) => input.network === "LinkedIn")?.approvedExamples?.[0].text, example.text);
   assert.equal(generated.find((input) => input.network === "X")?.approvedExamples?.length, 0);
   assert.ok([...inserted.values()].every((row) => row.status === "review" && row.timezone === "Europe/Madrid"));
+});
+
+test("automatic Luma drafts are approved for dispatch, not added as style examples", async () => {
+  const inserted = new Map<string, LumaDraftRow>();
+  let schedulingPasses = 0;
+  const repository: LumaDraftRepository = {
+    async getPublishingMode() { return "automatic"; },
+    async listLinkedAccounts() { return [{ id: "account-1", name: "Community", voice: "Informal", networks: ["LinkedIn"] }]; },
+    async listExistingReminders() {
+      return [...inserted.values()].map((row) => ({ accountId: row.account_id, network: row.network, leadDays: row.lead_days }));
+    },
+    async listApprovedExamples() { return []; },
+    async insertDrafts(rows) {
+      for (const row of rows) inserted.set(`${row.event_id}:${row.network}:${row.lead_days}`, row);
+      return rows.length;
+    },
+    async scheduleAutomaticPosts(ownerId, eventId) {
+      assert.equal(ownerId, event.owner_id);
+      assert.equal(eventId, event.id);
+      schedulingPasses += 1;
+    },
+  };
+  const generate = async (input: PostGenerationInput) => ({ text: `Join us on ${input.network}!` });
+
+  const first = await generateLumaEventDrafts(event, repository, generate, new Date("2029-12-01T00:00:00.000Z"));
+  const retry = await generateLumaEventDrafts(event, repository, generate, new Date("2029-12-01T00:00:00.000Z"));
+
+  assert.equal(first, 3);
+  assert.equal(retry, 0);
+  assert.equal([...inserted.values()].every((row) => row.status === "approved"), true);
+  assert.equal(schedulingPasses, 2);
 });
 
 test("Luma event with no linked accounts is persisted without requesting text", async () => {
