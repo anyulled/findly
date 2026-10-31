@@ -1,0 +1,28 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Findly//Fixture//EN
+BEGIN:VEVENT
+UID:utc-event@example.test
+DTSTAMP:20261001T120000Z
+DTSTART:20261205T180000Z
+SUMMARY:AI Builders\, Madrid
+DESCRIPTION:Join us\; talks\, demos\\fun\nSecond line.
+LOCATION:Barcelona\, Spain
+URL:https://lu.ma/builders
+END:VEVENT
+BEGIN:VEVENT
+UID:folded-event@example.test
+DTSTAMP:20261001T120000Z
+DTSTART;TZID=Europe/Madrid:20260712T203000
+SUMMARY:Folded event with a long title that continues on the next
+  line
+DESCRIPTION:A description folded over two 
+ lines.
+END:VEVENT
+BEGIN:VEVENT
+UID:all-day-event@example.test
+DTSTAMP:20261001T120000Z
+DTSTART;VALUE=DATE:20261119
+SUMMARY:All day event
+END:VEVENT
+END:VCALENDAR
