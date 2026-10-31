@@ -2,6 +2,8 @@
 
 Findly es una aplicación personal para preparar anuncios de eventos en varias cuentas sociales. El alcance acordado está en [docs/especificacion.md](docs/especificacion.md); la configuración y los servicios que aún faltan están en [docs/setup.md](docs/setup.md).
 
+![Ilustración de un calendario que conecta comunidades con publicaciones programadas.](docs/assets/findly-community-planning.png)
+
 ## Estado
 
 La aplicación incluye:
