@@ -4,7 +4,8 @@ import type { ApprovedStyleExample, GeneratedPost, PostGenerationInput } from ".
 import type { SocialNetwork } from "./social-validation";
 
 const REMINDER_DAYS = [14, 7, 1] as const;
-const MAX_GENERATED_POSTS = 24;
+// The configured maximum is 3 accounts × 3 networks × 3 reminder offsets.
+const MAX_GENERATED_POSTS = 27;
 const GENERATION_CONCURRENCY = 4;
 
 export type GenerationAccount = {

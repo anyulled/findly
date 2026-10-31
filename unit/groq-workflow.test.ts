@@ -65,6 +65,24 @@ describe("generateEventDrafts", () => {
     }), /too many posts/u);
   });
 
+  it("allows the maximum configured 3 accounts × 3 networks × 3 reminders", async () => {
+    const maximumAccounts = Array.from({ length: 3 }, (_, index) => ({
+      id: `account-${index}`,
+      name: `Account ${index}`,
+      voice: "",
+      networks: ["LinkedIn", "X", "Bluesky"] as GenerationAccount["networks"],
+    }));
+    const drafts = await generateEventDrafts({
+      event,
+      accounts: maximumAccounts,
+      approvedExamples: [],
+      existing: [],
+      now: new Date("2026-11-01T00:00:00.000Z"),
+      generate: async () => ({ text: "draft" }),
+    });
+    assert.equal(drafts.length, 27);
+  });
+
   it("keeps only reminders whose Madrid posting time is still in the future", async () => {
     const drafts = await generateEventDrafts({
       event: { ...event, date: "2026-12-12" },
