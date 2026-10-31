@@ -36,6 +36,7 @@ Supabase free projects may pause after a week of sufficiently low activity. This
 3. Expect account-specific rate limits. A throttled or failed request should leave a visible retryable item and must not create a partial schedule.
 4. Account voice instructions belong to the per-account system prompt. Only final texts approved in review mode are added as style examples; generated text must still pass deterministic length checks.
 5. Persistent-mode event creation requires `GROQ_API_KEY` and `GROQ_MODEL`; without them, the event remains saved and its reminders can be retried after configuration. Local demo mode uses deterministic templates without calling Groq.
+6. Draft generation supports the configured maximum of 3 accounts × 3 networks × 3 reminder offsets (27 posts per event); larger configurations are rejected safely.
 
 ### Luma and event links
 
