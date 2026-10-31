@@ -58,3 +58,25 @@ test("creates an event, prepares only timely reminders, and saves approval as a 
   await page.getByRole("button", { name: "Cuentas" }).click();
   await expect(page.getByText("1 ejemplos aprobados").first()).toBeVisible();
 });
+
+test("stores a Luma iCal source linked to multiple accounts", async ({ page }) => {
+  await page.getByRole("button", { name: "Ajustes" }).click();
+  await page.getByLabel("Nombre de la fuente").fill("BarcelonaJS Luma");
+  await page.getByLabel("URL de suscripción iCal").fill("https://calendar.example.com/barcelonajs.ics");
+  await page.getByRole("checkbox", { name: "Alex · personal" }).check();
+  await page.getByRole("checkbox", { name: "BarcelonaJS" }).check();
+  await page.getByRole("button", { name: "Guardar fuente" }).click();
+
+  const source = page.getByRole("article").filter({ hasText: "BarcelonaJS Luma" });
+  await expect(source).toContainText("Luma · iCal");
+  await expect(source).toContainText("Alex · personal, BarcelonaJS");
+  await expect(page.getByText("La configuración se guarda, pero la importación y extracción todavía no están conectadas.")).toBeVisible();
+
+  await source.getByRole("checkbox", { name: "Activa" }).uncheck();
+  await page.reload();
+  await page.getByRole("button", { name: "Ajustes" }).click();
+  const restored = page.getByRole("article").filter({ hasText: "BarcelonaJS Luma" });
+  await expect(restored.getByRole("checkbox", { name: "Activa" })).not.toBeChecked();
+  await restored.getByRole("button", { name: "Eliminar" }).click();
+  await expect(page.getByText("Aún no hay fuentes configuradas.")).toBeVisible();
+});

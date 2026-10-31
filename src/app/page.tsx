@@ -5,7 +5,8 @@ import styles from "./page.module.css";
 import { validatePost } from "@/lib/social-validation";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import { detectTitleLanguage, type PostLanguage } from "@/lib/language";
-import { approvePost, createEvent, createReviewPosts, loadWorkspace, updateAccountVoice, updatePostContent, updatePublishingMode } from "./workspace-actions";
+import { approvePost, createEvent, createReviewPosts, loadWorkspace, updateAccountVoice, updatePostContent, updatePublishingMode, type SourceView } from "./workspace-actions";
+import { SourceSettings } from "./source-settings";
 
 type Range = "Quincena" | "Semana" | "Mes";
 type Status = "review" | "approved" | "scheduled";
@@ -76,6 +77,7 @@ function Dashboard() {
   const [anchor, setAnchor] = useState(() => new Date());
   const [events, setEvents] = useState(initialEvents);
   const [accountList, setAccountList] = useState(accounts);
+  const [sources, setSources] = useState<SourceView[]>([]);
   const [posts, setPosts] = useState(initialPosts);
   const [mode, setMode] = useState<"review" | "automatic">("review");
   const [selected, setSelected] = useState<Post | null>(null);
@@ -98,6 +100,7 @@ function Dashboard() {
         setPosts(snapshot.posts);
         setMode(snapshot.mode);
         setAccountList(snapshot.accounts);
+        setSources(snapshot.sources);
         setHydrated(true);
       }).catch((error: unknown) => {
         if (!active) return;
@@ -108,13 +111,13 @@ function Dashboard() {
     }
     const saved = localStorage.getItem("findly-state-v1");
     if (saved) {
-      try { const value = JSON.parse(saved); setEvents(value.events ?? initialEvents); setPosts(value.posts ?? initialPosts); setMode(value.mode ?? "review"); setAccountList(value.accounts ?? accounts); }
+      try { const value = JSON.parse(saved); setEvents(value.events ?? initialEvents); setPosts(value.posts ?? initialPosts); setMode(value.mode ?? "review"); setAccountList(value.accounts ?? accounts); setSources(value.sources ?? []); }
       catch { localStorage.removeItem("findly-state-v1"); }
     }
     setHydrated(true);
   }, [persistent]);
   /* eslint-enable react-hooks/set-state-in-effect */
-  useEffect(() => { if (!persistent && hydrated) localStorage.setItem("findly-state-v1", JSON.stringify({ events, posts, mode, accounts: accountList })); }, [events, posts, mode, accountList, hydrated, persistent]);
+  useEffect(() => { if (!persistent && hydrated) localStorage.setItem("findly-state-v1", JSON.stringify({ events, posts, mode, accounts: accountList, sources })); }, [events, posts, mode, accountList, sources, hydrated, persistent]);
 
   const dates = useMemo(() => makeDates(anchor, range), [anchor, range]);
   const first = dates[0];
@@ -256,7 +259,7 @@ function Dashboard() {
 
         {tab === "Cuentas" && <><div className={styles.pageHeading}><div><div className={styles.eyebrow}>CANALES Y VOZ DE MARCA</div><h1>Tus cuentas</h1><p>Cada cuenta tiene una voz propia para tus publicaciones.</p></div></div><div className={styles.accountsGrid}>{accountList.map((account, accountIndex) => <article className={styles.accountCard} key={account.id ?? account.name}><div className={`${styles.accountTop}`}><div className={`${styles.accountAvatar} ${styles[account.color]}`}>{account.initials}</div><div><b>{account.name}</b><small>{account.kind}</small></div><span className={styles.connected}>{persistent ? "● Supabase" : "● Demo"}</span></div><div className={styles.accountNetworks}>{account.networks.map((network) => <span key={network}>{network === "LinkedIn" ? "in" : network === "X" ? "𝕏" : "◉"} &nbsp;{network}</span>)}</div><label>VOZ Y TONO<textarea value={account.prompt} onChange={(e) => setAccountList((all) => all.map((item, index) => index === accountIndex ? { ...item, prompt: e.target.value } : item))} onBlur={(e) => { void changeVoice(account, e.currentTarget.value); }} rows={3}/></label><div className={styles.exampleBox}><span>✦</span><div><b>{posts.filter((p) => p.account === account.name && p.status === "approved").length} ejemplos aprobados</b><small>Las publicaciones aprobadas ayudan a mantener tu estilo.</small></div></div></article>)}</div></>}
 
-        {tab === "Ajustes" && <><div className={styles.pageHeading}><div><div className={styles.eyebrow}>PREFERENCIAS DEL ESPACIO</div><h1>Ajustes</h1><p>Controla cómo se preparan y programan tus publicaciones.</p></div></div><div className={styles.settingsLayout}><section className={styles.settingsCard}><div className={styles.settingsTitle}><span className={styles.settingsIcon}>◷</span><div><h3>Modo de publicación</h3><p>Elige si revisas los textos antes de que se programen.</p></div></div><div className={styles.modeChoices}><button className={mode === "review" ? styles.modeChosen : ""} onClick={() => { void changeMode("review"); }}><span>◉</span><b>Revisión</b><small>Aprueba cada texto. Al aprobarlo, se añade a los ejemplos de estilo.</small></button><button className={mode === "automatic" ? styles.modeChosen : ""} onClick={() => { void changeMode("automatic"); }}><span>⚡</span><b>Automático</b><small>En cuanto esté configurado, las publicaciones se programarán sin revisión.</small></button></div>{mode === "automatic" && <div className={styles.warning}>La programación automática estará disponible cuando conectes Groq y Buffer.</div>}</section><section className={styles.settingsCard}><div className={styles.settingsTitle}><span className={styles.settingsIcon}>✦</span><div><h3>Servicios conectados</h3><p>Las credenciales se guardan en el entorno del servidor.</p></div></div>{[["Supabase", "Autenticación y base de datos", persistent ? "Configurado" : "Pendiente de configurar"], ["Buffer", "Publicación en redes", "Pendiente de configurar"], ["Groq", "Redacción con IA", "Pendiente de configurar"], ["Luma iCal", "Detección de eventos", "Añade la URL del calendario"]].map(([name, desc, status]) => <div className={styles.serviceRow} key={name}><div><b>{name}</b><small>{desc}</small></div><span className={styles.servicePending}><i/> {status}</span></div>)}<div className={styles.cronHint}>La consulta automática se ejecutará cada 6 horas mediante un cron externo.</div></section></div></>}
+        {tab === "Ajustes" && <><div className={styles.pageHeading}><div><div className={styles.eyebrow}>PREFERENCIAS DEL ESPACIO</div><h1>Ajustes</h1><p>Controla cómo se preparan y programan tus publicaciones.</p></div></div><div className={styles.settingsLayout}><section className={styles.settingsCard}><div className={styles.settingsTitle}><span className={styles.settingsIcon}>◷</span><div><h3>Modo de publicación</h3><p>Elige si revisas los textos antes de que se programen.</p></div></div><div className={styles.modeChoices}><button className={mode === "review" ? styles.modeChosen : ""} onClick={() => { void changeMode("review"); }}><span>◉</span><b>Revisión</b><small>Aprueba cada texto. Al aprobarlo, se añade a los ejemplos de estilo.</small></button><button className={mode === "automatic" ? styles.modeChosen : ""} onClick={() => { void changeMode("automatic"); }}><span>⚡</span><b>Automático</b><small>En cuanto esté configurado, las publicaciones se programarán sin revisión.</small></button></div>{mode === "automatic" && <div className={styles.warning}>La programación automática estará disponible cuando conectes Groq y Buffer.</div>}</section><section className={styles.settingsCard}><div className={styles.settingsTitle}><span className={styles.settingsIcon}>✦</span><div><h3>Servicios conectados</h3><p>Las credenciales se guardan en el entorno del servidor.</p></div></div>{[["Supabase", "Autenticación y base de datos", persistent ? "Configurado" : "Pendiente de configurar"], ["Buffer", "Publicación en redes", "Pendiente de configurar"], ["Groq", "Redacción con IA", "Pendiente de configurar"], ["Luma iCal", "Detección de eventos", "Configuración disponible; importación pendiente"]].map(([name, desc, status]) => <div className={styles.serviceRow} key={name}><div><b>{name}</b><small>{desc}</small></div><span className={styles.servicePending}><i/> {status}</span></div>)}<div className={styles.cronHint}>La sincronización periódica todavía no está implementada.</div></section></div><SourceSettings accounts={accountList} sources={sources} persistent={persistent} onSourcesChange={setSources}/></>}
       </div>
     </section>
     {selected && <div className={styles.overlay} onMouseDown={(e) => { if (e.target === e.currentTarget) setSelected(null); }}><section className={styles.detailPanel}><button className={styles.close} onClick={() => setSelected(null)}>×</button><div className={styles.eyebrow}>DETALLE DE PUBLICACIÓN</div><h2>{currentEvent?.title}</h2><div className={styles.detailDate}>◷ &nbsp;{dateAt(selected.date).toLocaleDateString("es-ES", { weekday: "long", day: "numeric", month: "long" })} · {selected.time} · Europe/Madrid</div><div className={styles.channelChip}>{selected.network} <span>·</span> {selected.account}</div><label className={styles.postEditor}>TEXTO DE LA PUBLICACIÓN<textarea value={editing} onChange={(e) => setEditing(e.target.value)} rows={8}/></label><div className={styles.characterCount}>{postValidation?.message} <span>Validación local por red.</span></div><div className={styles.detailActions}><button className={styles.secondaryButton} onClick={() => { void savePostChanges(selected, { text: editing }); }}>Guardar cambios</button>{selected.status === "review" && <button className={styles.approveButton} onClick={() => { void savePostChanges(selected, { text: editing, status: "approved" }); }} disabled={!postValidation?.valid}>✓ Aprobar y guardar ejemplo</button>}</div><p className={styles.autoNote}>{postValidation?.valid ? "La programación con Buffer requiere configurar las credenciales de la API." : postValidation?.message}</p></section></div>}
