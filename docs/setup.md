@@ -38,10 +38,10 @@ Supabase free projects may pause after a week of sufficiently low activity. This
 
 ### Luma and event links
 
-1. Add the iCal subscription URL for each Luma calendar in the application settings.
-2. Verify imported event title, description, start time, link and event timezone on representative examples.
-3. Add Meetup group URLs when available and inspect what can be obtained from a real group or event page. No Meetup feed integration is confirmed yet.
-4. Use the manual event form to correct any fields that could not be extracted. Do not infer a missing start time from page display alone.
+1. Save the Luma iCal subscription URL in **Settings → Event sources**, then associate it with one or more accounts.
+2. Save Meetup group or event URLs in the same view when they are available. Meetup extraction is not implemented.
+3. Source configuration is currently stored only; this application version does not fetch iCal or scrape Meetup yet. Add events through the manual event form until source synchronization is implemented.
+4. Once import is implemented, verify event title, description, start time, link and timezone against representative real events. Do not infer a missing start time from page display alone.
 
 ### Scheduled sync
 
