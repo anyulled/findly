@@ -8,6 +8,7 @@
 
 - Checks run:
 - Result:
+- Coverage check: `npm run test:coverage` passes for every `src/lib/*.ts` module.
 
 ## Mandatory final stage: Documentation and Sync
 
