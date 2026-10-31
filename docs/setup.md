@@ -17,7 +17,7 @@ This guide describes the intended setup for the personal event publishing app. I
 2. Enable Google as an Auth provider and configure Google OAuth credentials and redirect URLs for local and deployed origins.
 3. Restrict application access to the owner's Google identity. There is one application user; do not add self-service registration for other members.
 4. Apply the checked-in database migrations. Verify access policies before exposing the service to the public internet.
-5. Keep elevated Supabase credentials on the server. A browser may receive only the public/publishable key, protected by row-level security.
+5. Keep elevated Supabase credentials on the server. A browser may receive only the public/publishable key, protected by row-level security. The cron importer uses `SUPABASE_SERVICE_ROLE_KEY` because it has no interactive owner session; it is server-only and must never use a `NEXT_PUBLIC_` name.
 
 Supabase free projects may pause after a week of sufficiently low activity. This is a service availability behavior, not a data deletion guarantee; monitor the project and understand the resume process.
 
@@ -39,21 +39,21 @@ Supabase free projects may pause after a week of sufficiently low activity. This
 ### Luma and event links
 
 1. Save the Luma iCal subscription URL in **Settings → Event sources**, then associate it with one or more accounts.
-2. Save Meetup group or event URLs in the same view when they are available. Meetup extraction is not implemented.
-3. Source configuration is currently stored only; this application version does not fetch iCal or scrape Meetup yet. Add events through the manual event form until source synchronization is implemented.
-4. Once import is implemented, verify event title, description, start time, link and timezone against representative real events. Do not infer a missing start time from page display alone.
+2. Invoke `POST /api/cron/sync` with `Authorization: Bearer <CRON_SECRET>` to fetch enabled Luma feeds and insert newly discovered events. The route is safe to retry: existing `(owner, source, external ID)` records are ignored and never updated.
+3. The route does not create drafts or posts yet. Meetup synchronization and scraping are unsupported; add those events through the manual event form.
+4. Feed fetches require HTTPS, reject redirects, time out after 10 seconds, and cap response bodies at 2 MB. Feed URLs are not included in the response. Date changes and cancellations remain out of scope.
 
 ### Scheduled sync
 
 1. Deploy the application to an eligible hosting plan and confirm its HTTPS URL.
 2. Configure cron-job.org to call the sync endpoint every six hours over HTTPS.
-3. Send the endpoint's random secret using the configured authorization header, never a query string. Keep the same value in cron-job.org and the server secret store.
-4. Trigger a manual sync first and inspect persisted results. Then enable the recurring job.
-5. Monitor last-success time and failures. The sync operation must be idempotent because external schedulers can retry or overlap requests.
+3. Configure `CRON_SECRET` and `SUPABASE_SERVICE_ROLE_KEY` as server-only deployment secrets. Send the random cron secret using the configured authorization header, never a query string.
+4. Trigger a manual sync first and inspect the structured counts and safe issue codes. Then enable the recurring job.
+5. Monitor failures. The sync operation is idempotent because external schedulers can retry or overlap requests.
 
 ## Secret inventory
 
-Use the names in `.env.example`. The deployment will need Supabase URL/publishable key and owner email, plus server-side Buffer, Groq and cron secrets as their integrations are implemented. The public Supabase URL and publishable key are configuration values, not privileged credentials; browser database access remains protected by RLS. Never place Buffer/Groq/service-role/cron values in a `NEXT_PUBLIC_` variable. `JEV_API_KEY` is a reserved empty placeholder; the application does not call Jev.
+Use the names in `.env.example`. The deployment will need Supabase URL/publishable key and owner email, plus server-side Supabase service-role, cron, Buffer and Groq secrets as their integrations are used. The public Supabase URL and publishable key are configuration values, not privileged credentials; browser database access remains protected by RLS. Never place Buffer/Groq/service-role/cron values in a `NEXT_PUBLIC_` variable. `JEV_API_KEY` is a reserved empty placeholder; the application does not call Jev.
 
 ## Review and automatic modes
 
