@@ -9,6 +9,7 @@ import { generateEventDrafts } from "@/lib/groq-workflow";
 import { approveAndSchedulePost, schedulePostWithSupabase, type PostPublishingOutcome } from "@/lib/post-publishing";
 import { MANAGED_ACCOUNTS, managedAccount } from "@/lib/managed-accounts";
 import { bufferCredentialForAccount } from "@/lib/buffer-account-credentials";
+import { sourceForEventUrl } from "@/lib/event-source";
 
 export type AccountView = {
   id?: string;
@@ -113,13 +114,7 @@ function accountView(row: { id: string; name: string; account_type: string; voic
 }
 
 function sourceForUrl(value: string | null): string {
-  if (!value) return "Manual";
-  try {
-    const hostname = new URL(value).hostname.toLowerCase();
-    if (hostname === "lu.ma" || hostname.endsWith(".lu.ma") || hostname === "luma.com" || hostname.endsWith(".luma.com")) return "Luma";
-    if (hostname === "meetup.com" || hostname.endsWith(".meetup.com")) return "Meetup";
-  } catch { /* Invalid URLs are not used as external source identities. */ }
-  return "Manual";
+  return sourceForEventUrl(value);
 }
 
 export async function loadWorkspace(): Promise<WorkspaceSnapshot> {
