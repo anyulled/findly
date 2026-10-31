@@ -6,6 +6,7 @@ import {
 } from "@/lib/buffer";
 import type { SocialNetwork } from "@/lib/social-validation";
 import { validatePost } from "@/lib/social-validation";
+import { bufferCredentialForAccount } from "@/lib/buffer-account-credentials";
 
 type DatabaseError = { message: string };
 type DatabaseResult<T> = { data: T | null; error: DatabaseError | null };
@@ -20,6 +21,7 @@ export interface PostToSchedule {
 
 export interface PostPublishingRepository {
   claim(postId: string): Promise<PostToSchedule | null>;
+  accountName(accountId: string): Promise<string | null>;
   bufferChannelId(accountId: string, network: SocialNetwork): Promise<string | null>;
   markScheduled(postId: string, bufferPostId: string): Promise<void>;
   markFailure(postId: string, message: string, needsReconciliation: boolean): Promise<void>;
@@ -32,13 +34,18 @@ export type PostPublishingOutcome =
   | { kind: "not_claimed" };
 
 type SupabasePublisherClient = {
+  from(table: "accounts"): {
+    select(columns: "name"): {
+      eq(column: string, value: string): {
+        eq(column: string, value: string): { maybeSingle(): PromiseLike<DatabaseResult<{ name: string }>> };
+      };
+    };
+  };
   from(table: "account_buffer_channels"): {
     select(columns: "buffer_channel_id"): {
       eq(column: string, value: string): {
         eq(column: string, value: string): {
-          eq(column: string, value: string): {
-            maybeSingle(): PromiseLike<DatabaseResult<{ buffer_channel_id: string }>>;
-          };
+          eq(column: string, value: string): { maybeSingle(): PromiseLike<DatabaseResult<{ buffer_channel_id: string }>> };
         };
       };
     };
@@ -89,6 +96,13 @@ export class SupabasePostPublishingRepository implements PostPublishingRepositor
     return data?.buffer_channel_id ?? null;
   }
 
+  async accountName(accountId: string): Promise<string | null> {
+    const { data, error } = await this.supabase.from("accounts").select("name")
+      .eq("owner_id", this.ownerId).eq("id", accountId).maybeSingle();
+    if (error) throw new Error(`No se pudo cargar la cuenta de Buffer: ${error.message}`);
+    return data?.name ?? null;
+  }
+
   async markScheduled(postId: string, bufferPostId: string): Promise<void> {
     const { error } = await this.supabase.rpc("mark_post_scheduled", {
       p_post_id: postId,
@@ -112,7 +126,7 @@ export class SupabasePostPublishingRepository implements PostPublishingRepositor
 export async function schedulePostWithBuffer(
   postId: string,
   repository: PostPublishingRepository,
-  createClient: () => BufferClient,
+  createClient: (accountId: string) => Promise<BufferClient> | BufferClient,
 ): Promise<PostPublishingOutcome> {
   const post = await repository.claim(postId);
   if (!post) return { kind: "not_claimed" };
@@ -157,7 +171,7 @@ export async function schedulePostWithBuffer(
 
   let client: BufferClient;
   try {
-    client = createClient();
+    client = await createClient(post.account_id);
   } catch (error) {
     const message = errorMessage(error);
     await repository.markFailure(post.id, message, false);
@@ -196,11 +210,16 @@ export async function schedulePostWithSupabase(
   postId: string,
   supabase: unknown,
   ownerId: string,
-  apiKey: string,
   fetchImpl?: typeof fetch,
 ): Promise<PostPublishingOutcome> {
   const repository = new SupabasePostPublishingRepository(supabase as SupabasePublisherClient, ownerId);
-  return schedulePostWithBuffer(postId, repository, () => new BufferClient({ apiKey, fetchImpl }));
+  return schedulePostWithBuffer(postId, repository, async (accountId) => {
+    const name = await repository.accountName(accountId);
+    if (!name) throw new Error("No se encontró la cuenta asociada a la publicación.");
+    const credential = bufferCredentialForAccount(name);
+    if (!credential.apiKey) throw new Error(`Falta configurar ${credential.environmentVariable ?? "la API key de Buffer"} para ${name}.`);
+    return new BufferClient({ apiKey: credential.apiKey, fetchImpl });
+  });
 }
 
 export async function approveAndSchedulePost(
@@ -208,7 +227,6 @@ export async function approveAndSchedulePost(
   content: string,
   supabase: unknown,
   ownerId: string,
-  apiKey: string,
   fetchImpl?: typeof fetch,
 ): Promise<PostPublishingOutcome> {
   const database = supabase as SupabasePublisherClient;
@@ -217,5 +235,5 @@ export async function approveAndSchedulePost(
     p_content: content,
   });
   if (error) throw new Error(`No se pudo aprobar la publicación: ${error.message}`);
-  return schedulePostWithSupabase(postId, database, ownerId, apiKey, fetchImpl);
+  return schedulePostWithSupabase(postId, database, ownerId, fetchImpl);
 }

@@ -7,6 +7,8 @@ import { detectTitleLanguage, type PostLanguage } from "@/lib/language";
 import { generateSocialPost } from "@/lib/groq";
 import { generateEventDrafts } from "@/lib/groq-workflow";
 import { approveAndSchedulePost, schedulePostWithSupabase, type PostPublishingOutcome } from "@/lib/post-publishing";
+import { MANAGED_ACCOUNTS, managedAccount } from "@/lib/managed-accounts";
+import { bufferCredentialForAccount } from "@/lib/buffer-account-credentials";
 
 export type AccountView = {
   id?: string;
@@ -14,6 +16,9 @@ export type AccountView = {
   kind: string;
   initials: string;
   color: string;
+  logo: string;
+  bufferApiKeyEnv: string;
+  bufferApiKeyConfigured: boolean;
   prompt: string;
   networks: SocialNetwork[];
   bufferChannels: Partial<Record<SocialNetwork, string>>;
@@ -67,15 +72,13 @@ export type WorkspaceSnapshot = {
   posts: PostView[];
   sources: SourceView[];
   mode: "review" | "automatic";
-  bufferApiKeyConfigured: boolean;
 };
 
 const DEFAULT_ACCOUNTS = [
-  { name: "Alex · personal", account_type: "personal", voice_prompt: "Cercano, curioso y directo. Primera persona. Evita sonar promocional.", networks: ["LinkedIn", "X", "Bluesky"] },
-  { name: "BarcelonaJS", account_type: "association", voice_prompt: "Comunidad tecnológica abierta. Entusiasta, inclusiva y concreta.", networks: ["LinkedIn", "X"] },
-  { name: "DevBcn", account_type: "association", voice_prompt: "Tono profesional y acogedor. Destaca la comunidad y el aprendizaje.", networks: ["LinkedIn", "Bluesky"] },
+  { name: "Personal", account_type: "personal", voice_prompt: "Cercano, curioso y directo. Primera persona. Evita sonar promocional.", networks: ["LinkedIn", "X", "Bluesky"] },
+  { name: "Barcelona JUG", account_type: "association", voice_prompt: "Comunidad tecnológica abierta. Entusiasta, inclusiva y concreta.", networks: ["LinkedIn", "X"] },
+  { name: "Software Crafters Barcelona", account_type: "association", voice_prompt: "Tono profesional y acogedor. Destaca la comunidad y el aprendizaje.", networks: ["LinkedIn", "Bluesky"] },
 ] as const;
-const ACCOUNT_COLORS = ["violet", "orange", "green"];
 const NETWORKS: SocialNetwork[] = ["LinkedIn", "X", "Bluesky"];
 
 async function authorizedClient() {
@@ -89,13 +92,19 @@ async function authorizedClient() {
 }
 
 function accountView(row: { id: string; name: string; account_type: string; voice_prompt: string; networks: string[] }, index: number, bufferChannels: Partial<Record<SocialNetwork, string>> = {}, styleExampleCount = 0): AccountView {
+  const managed = managedAccount(row.name) ?? MANAGED_ACCOUNTS[index % MANAGED_ACCOUNTS.length];
+  if (!managedAccount(row.name)) throw new Error(`La cuenta «${row.name}» no pertenece a las tres cuentas configuradas.`);
+  const credential = bufferCredentialForAccount(managed.name);
   const networks = row.networks.filter((network): network is SocialNetwork => NETWORKS.includes(network as SocialNetwork));
   return {
     id: row.id,
-    name: row.name,
-    kind: row.account_type === "personal" ? "Cuenta personal" : "Asociación",
-    initials: row.name.trim().slice(0, 1).toUpperCase(),
-    color: ACCOUNT_COLORS[index % ACCOUNT_COLORS.length],
+    name: managed.name,
+    kind: managed.kind,
+    initials: managed.initials,
+    color: managed.color,
+    logo: managed.logo,
+    bufferApiKeyEnv: managed.apiKeyEnv,
+    bufferApiKeyConfigured: Boolean(credential.apiKey),
     prompt: row.voice_prompt,
     networks,
     bufferChannels,
@@ -194,7 +203,7 @@ export async function loadWorkspace(): Promise<WorkspaceSnapshot> {
     if (row.source_type !== "luma_ical" && row.source_type !== "meetup") return [];
     return [{ id: row.id, name: row.name, type: row.source_type, url: row.feed_url ?? "", enabled: row.enabled, accountIds: accountIdsBySource.get(row.id) ?? [] }];
   });
-  return { accounts: accountsWithChannels, events, posts, sources, mode: settings?.mode === "automatic" ? "automatic" : "review", bufferApiKeyConfigured: Boolean(process.env.BUFFER_API_KEY?.trim()) };
+  return { accounts: accountsWithChannels, events, posts, sources, mode: settings?.mode === "automatic" ? "automatic" : "review" };
 }
 
 function validateSource(input: SourceInput): SourceInput {
@@ -373,9 +382,8 @@ export async function generateReviewPosts(eventId: string): Promise<PostView[]> 
     insertedIds = (inserted ?? []).map((row) => row.id);
   }
   if (automatic) {
-    const apiKey = process.env.BUFFER_API_KEY ?? "";
     for (const postId of insertedIds) {
-      await schedulePostWithSupabase(postId, supabase, ownerId, apiKey);
+      await schedulePostWithSupabase(postId, supabase, ownerId);
     }
   }
 
@@ -424,13 +432,13 @@ export async function approvePost(postId: string, content: string): Promise<Post
   }
   const validation = validatePost(validationNetwork.data.network as SocialNetwork, content);
   if (!validation.valid) throw new Error(validation.message);
-  return approveAndSchedulePost(postId, content, supabase, ownerId, process.env.BUFFER_API_KEY ?? "");
+  return approveAndSchedulePost(postId, content, supabase, ownerId);
 }
 
 export async function retryFailedPost(postId: string): Promise<PostPublishingOutcome> {
   const { supabase, ownerId } = await authorizedClient();
   if (!/^[0-9a-f-]{36}$/i.test(postId)) throw new Error("Solicitud de publicación no válida.");
-  return schedulePostWithSupabase(postId, supabase, ownerId, process.env.BUFFER_API_KEY ?? "");
+  return schedulePostWithSupabase(postId, supabase, ownerId);
 }
 
 export async function reconcileScheduledPost(postId: string, bufferPostId: string): Promise<void> {

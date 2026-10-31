@@ -84,7 +84,7 @@ export async function POST(request: Request): Promise<Response> {
         .eq("owner_id", ownerId).eq("event_id", eventId).eq("status", "approved");
       if (error) throw new Error("Unable to read generated posts ready for Buffer");
       for (const row of data ?? []) {
-        await schedulePostWithSupabase(row.id, supabase, ownerId, process.env.BUFFER_API_KEY ?? "");
+        await schedulePostWithSupabase(row.id, supabase, ownerId);
       }
     },
   };

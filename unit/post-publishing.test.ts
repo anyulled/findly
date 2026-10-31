@@ -20,6 +20,7 @@ function bufferResponse(body: unknown, status = 200): Response {
 
 function fakeSupabase(options: { channelId?: string; status?: string; confirmedPersistenceFails?: boolean; scheduledPost?: PostToSchedule } = {}) {
   const calls: string[] = [];
+  process.env.BUFFER_API_KEY_PERSONAL = "mock-buffer-key";
   const rpcArguments: Array<{ name: string; args: Record<string, unknown> }> = [];
   let status = options.status ?? "approved";
   let bufferPostId: string | null = null;
@@ -51,18 +52,16 @@ function fakeSupabase(options: { channelId?: string; status?: string; confirmedP
   }
 
   const supabase = {
-    from: (table: string) => {
-      assert.equal(table, "account_buffer_channels");
-      return {
-        select: () => ({
+    from: () => ({
+      select: () => ({
+        eq: () => ({
           eq: () => ({
-            eq: () => ({
-              eq: () => ({ maybeSingle: async () => ({ data: options.channelId ? { buffer_channel_id: options.channelId } : null, error: null }) }),
-            }),
+            eq: () => ({ maybeSingle: async () => ({ data: options.channelId ? { buffer_channel_id: options.channelId } : null, error: null }) }),
+            maybeSingle: async () => ({ data: { name: "Personal" }, error: null }),
           }),
         }),
-      };
-    },
+      }),
+    }),
     rpc,
   };
 
@@ -81,7 +80,6 @@ test("review approval records approval before Buffer scheduling and stores confi
     post.content,
     database.supabase,
     "owner-uuid",
-    "mock-buffer-key",
     async (_url, request) => {
       assert.equal(request?.headers && new Headers(request.headers).get("Authorization"), "Bearer mock-buffer-key");
       const body = JSON.parse(String(request?.body)) as { variables: { input: { channelId: string; dueAt: string; mode: string; text: string } } };
@@ -106,7 +104,6 @@ test("automatic dispatch claims a generated post without invoking review approva
     post.id,
     database.supabase,
     "owner-uuid",
-    "mock-buffer-key",
     async () => bufferResponse({ data: { createPost: { __typename: "PostActionSuccess", post: { id: "buffer-post-2", text: post.content } } } }),
   );
   assert.equal(result.kind, "scheduled");
@@ -121,8 +118,8 @@ test("a database failure after Buffer confirmation requires reconciliation, neve
     requests += 1;
     return bufferResponse({ data: { createPost: { __typename: "PostActionSuccess", post: { id: "buffer-post-3", text: post.content } } } });
   };
-  const first = await schedulePostWithSupabase(post.id, database.supabase, "owner-uuid", "mock-buffer-key", fetchImpl);
-  const second = await schedulePostWithSupabase(post.id, database.supabase, "owner-uuid", "mock-buffer-key", fetchImpl);
+  const first = await schedulePostWithSupabase(post.id, database.supabase, "owner-uuid", fetchImpl);
+  const second = await schedulePostWithSupabase(post.id, database.supabase, "owner-uuid", fetchImpl);
   assert.equal(first.kind, "needs_reconciliation");
   assert.equal(second.kind, "not_claimed");
   assert.equal(database.state.status, "needs_reconciliation");
@@ -135,7 +132,6 @@ test("Buffer rejection is stored as failed and can be safely retried after corre
     post.id,
     database.supabase,
     "owner-uuid",
-    "mock-buffer-key",
     async () => bufferResponse({ data: { createPost: { __typename: "MutationError", message: "Channel rejected this post" } } }),
   );
   assert.equal(result.kind, "failed");
@@ -150,8 +146,8 @@ test("a transport timeout becomes reconciliation-required and a second dispatch 
     requests += 1;
     throw new Error("connection reset");
   };
-  const first = await schedulePostWithSupabase(post.id, database.supabase, "owner-uuid", "mock-buffer-key", fetchImpl);
-  const second = await schedulePostWithSupabase(post.id, database.supabase, "owner-uuid", "mock-buffer-key", fetchImpl);
+  const first = await schedulePostWithSupabase(post.id, database.supabase, "owner-uuid", fetchImpl);
+  const second = await schedulePostWithSupabase(post.id, database.supabase, "owner-uuid", fetchImpl);
   assert.equal(first.kind, "needs_reconciliation");
   assert.equal(second.kind, "not_claimed");
   assert.equal(database.state.status, "needs_reconciliation");
@@ -161,7 +157,7 @@ test("a transport timeout becomes reconciliation-required and a second dispatch 
 test("a missing account/network channel fails before calling Buffer", async () => {
   const database = fakeSupabase();
   let requests = 0;
-  const result = await schedulePostWithSupabase(post.id, database.supabase, "owner-uuid", "mock-buffer-key", async () => {
+  const result = await schedulePostWithSupabase(post.id, database.supabase, "owner-uuid", async () => {
     requests += 1;
     return bufferResponse({});
   });
@@ -174,7 +170,7 @@ test("persisted text is validated deterministically before Buffer is called", as
   const tooLongPost = { ...post, network: "X", content: "x".repeat(281) };
   const database = fakeSupabase({ channelId: "buffer-channel-1", scheduledPost: tooLongPost });
   let requests = 0;
-  const result = await schedulePostWithSupabase(post.id, database.supabase, "owner-uuid", "mock-buffer-key", async () => {
+  const result = await schedulePostWithSupabase(post.id, database.supabase, "owner-uuid", async () => {
     requests += 1;
     return bufferResponse({});
   });
