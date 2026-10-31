@@ -18,6 +18,8 @@ Every TypeScript business-logic module directly under `src/lib/` must maintain a
 
 The gate measures `src/lib/*.ts`, where deterministic domain and provider logic belongs. UI components and Next.js route wiring are exercised by the Playwright E2E suite; Supabase client construction wrappers are configuration glue rather than domain logic. Keep route handlers thin and move testable rules into `src/lib/` so the coverage gate sees them.
 
+The required `Database migrations` CI check uses an isolated local Postgres database to apply all Supabase migrations in order and lint the resulting schema and functions. It does not connect to the hosted project; deployment happens only after a migration reaches `main`. See [database migrations](database-migrations.md) for the local command and deployment configuration.
+
 The iCalendar parser reads event `UID`, `SUMMARY`, `DESCRIPTION`, `LOCATION`, `URL`, and `DTSTART`. It relies on ical.js for RFC 5545 content-line folding and escaped text. UTC, embedded `VTIMEZONE`, IANA `TZID`, floating Madrid times, and date-only events are normalized to Madrid date/time. Malformed events produce per-event issues while valid events in the same calendar remain available. The parser does not fetch feeds, expand `RRULE` recurrences, or reconcile cancellation and date changes.
 
 The browser uses the `Europe/Madrid` time zone. The test server binds to localhost port 3100 and receives empty Supabase settings to select demo mode.
@@ -30,6 +32,9 @@ npm run test:unit
 npm run test:coverage
 npx playwright install chromium
 npm run test:e2e
+supabase db start
+supabase db reset --local --no-seed
+supabase db lint --local --fail-on error
 ```
 
-CI installs Chromium and its system dependencies with `npx playwright install --with-deps chromium`. A failed run uploads the Playwright report and test results as a GitHub Actions artifact. The coverage job is an independent required check for pull requests; a failure blocks merge even if the regular unit test job passes.
+CI installs Chromium and its system dependencies with `npx playwright install --with-deps chromium`. A failed run uploads the Playwright report and test results as a GitHub Actions artifact. The `Coverage (80%)` and `Database migrations` jobs are independent required checks for pull requests; a failure blocks merge even if the regular unit test job passes. The database commands require Docker and the Supabase CLI.

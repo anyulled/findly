@@ -27,7 +27,7 @@ npm ci
 npm run dev
 ```
 
-Abre http://localhost:3000. Sin variables de Supabase, la aplicación inicia en modo demo. Para configurar persistencia y acceso con Google, sigue [docs/setup.md](docs/setup.md) y usa `.env.example` como referencia; las credenciales reales no deben añadirse al repositorio.
+Abre http://localhost:3000. Sin variables de Supabase, la aplicación inicia en modo demo. Para configurar persistencia y acceso con Google, sigue [docs/setup.md](docs/setup.md) y usa `.env.example` como referencia; las credenciales reales no deben añadirse al repositorio. La validación y aplicación automática de migraciones se describe en [docs/database-migrations.md](docs/database-migrations.md).
 
 ## Comprobaciones
 
@@ -39,4 +39,4 @@ npx playwright install chromium
 npm run test:e2e
 ```
 
-Los tests unitarios usan fixtures y `fetch` simulado; los E2E usan el modo demo local. Ninguno verifica integraciones reales con Supabase, Groq, Buffer, Luma ni Meetup. CI ejecuta lint, tests unitarios, build y Playwright. El checklist de Documentación y Sincronización de la plantilla de PR ya se valida en CI, y la protección de `main` debe exigir este check junto a `E2E (Playwright)`.
+Los tests unitarios usan fixtures y `fetch` simulado; los E2E usan el modo demo local. Ninguno verifica integraciones reales con Supabase, Groq, Buffer, Luma ni Meetup. CI ejecuta lint, tests unitarios, build, cobertura de lógica, migraciones contra Postgres local y Playwright. Después de fusionar cambios de migración a `main`, GitHub Actions aplica las migraciones pendientes si las credenciales de despliegue están configuradas. La protección de `main` debe exigir `Coverage (80%)`, `Database migrations`, `Documentation and Sync` y `E2E (Playwright)`.
