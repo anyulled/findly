@@ -2,9 +2,9 @@
 
 ## Continuous integration
 
-`.github/workflows/ci.yml` runs for pull requests targeting `main` and pushes to `main`. It installs the lockfile dependencies with `npm ci`, runs ESLint, unit tests and a production build on Node.js 22, validates the mandatory Documentation and Sync checklist on pull requests, enforces per-file business logic coverage (80%) and the CRAP metric threshold (P20 / score <= 20) via `scripts/check-crap-score.mjs`, then runs the Playwright E2E happy paths in Chromium. Dependabot and Renovate dependency-update PRs skip the human-authored checklist; all required CI checks still run. GitHub Actions cancels an older run for the same branch when a newer commit arrives. The workflow has read-only repository permissions and needs no secrets. The required checks are `Documentation and Sync` and `E2E (Playwright)`.
+`.github/workflows/ci.yml` runs for pull requests targeting `main` and pushes to `main`. It installs the lockfile dependencies with `npm ci`, runs ESLint, unit tests and a production build on Node.js 22, validates the mandatory Documentation and Sync checklist on pull requests, enforces per-file business logic coverage (80%) and the CRAP metric threshold (P20 / score <= 20) via `scripts/check-crap-score.mjs`, then runs the Playwright E2E happy paths in Chromium. Dependabot and Renovate dependency-update PRs skip the human-authored checklist; all required CI checks still run. GitHub Actions cancels an older run for the same branch when a newer commit arrives. The workflow has read-only repository permissions and needs no secrets. The required checks are `Documentation and Sync`, `Coverage (80%)`, and `E2E (Playwright)`.
 
-The public repository is configured to allow rebase merges only. The `main` branch requires the `E2E (Playwright)` check, and auto-merge is enabled in repository settings. Select rebase when enabling auto-merge on a pull request.
+The public repository is configured to allow rebase merges only. The `main` branch requires the `Coverage (80%)` and `E2E (Playwright)` checks, and auto-merge is enabled in repository settings. Select rebase when enabling auto-merge on a pull request.
 
 ## Continuous deployment
 
