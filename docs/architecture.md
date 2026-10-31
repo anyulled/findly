@@ -11,7 +11,8 @@ flowchart LR
   owner[Owner in browser] -->|Google sign-in| auth[Supabase Auth]
   owner -->|authenticated UI| app[Next.js application]
   timer[cron-job.org every six hours] -->|Bearer secret| sync[Authenticated sync endpoint]
-  app --> db[(Supabase Postgres)]
+  app -->|authenticated server actions| actions[Workspace actions]
+  actions --> db[(Supabase Postgres)]
   sync --> db
   sync -->|read calendar feed| luma[Luma iCal]
   sync -->|fetch event URL| meetup[Meetup or other event page]
@@ -21,7 +22,7 @@ flowchart LR
   auth -. session validation .-> app
 ```
 
-The browser contains no provider secrets. Next.js server routes authenticate browser requests with Supabase and call Groq or Buffer. The scheduled invocation uses a separate random secret and the same server-side sync flow as the manual action. Database permissions should scope normal user access to the one configured owner; elevated service credentials stay in server-only runtime configuration.
+The browser contains no provider secrets. Workspace writes go through Next.js Server Actions that verify the Google-authenticated owner; Supabase RLS independently scopes rows to that user. Approval and style-example insertion use a transactional database function. Groq/Buffer calls and the scheduled endpoint are still planned boundaries, not implemented integrations. The scheduled invocation will use a separate random secret and the same server-side sync flow as the manual action. Elevated service credentials stay in server-only runtime configuration.
 
 ## Event-to-publication lifecycle
 

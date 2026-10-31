@@ -53,7 +53,7 @@ Supabase free projects may pause after a week of sufficiently low activity. This
 
 ## Secret inventory
 
-Exact names must follow the application implementation. The deployment will need secret values for Supabase server access, Google OAuth (configured in Supabase), Buffer API access, Groq API access and the scheduled endpoint secret. Public Supabase URL and publishable key are configuration values, not secrets, but browser access still depends on database access policies. Never place Buffer/Groq/service-role/cron values in a `NEXT_PUBLIC_` variable.
+Use the names in `.env.example`. The deployment will need Supabase URL/publishable key and owner email, plus server-side Buffer, Groq and cron secrets as their integrations are implemented. The public Supabase URL and publishable key are configuration values, not privileged credentials; browser database access remains protected by RLS. Never place Buffer/Groq/service-role/cron values in a `NEXT_PUBLIC_` variable. `JEV_API_KEY` is a reserved empty placeholder; the application does not call Jev.
 
 ## Review and automatic modes
 
