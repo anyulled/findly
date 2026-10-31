@@ -4,6 +4,8 @@ import { createClient } from "@/lib/supabase/server";
 import { formatMadridDateTime, madridDateTimeToIso } from "@/lib/madrid-time";
 import { validatePost, type SocialNetwork } from "@/lib/social-validation";
 import { detectTitleLanguage, type PostLanguage } from "@/lib/language";
+import { generateSocialPost } from "@/lib/groq";
+import { generateEventDrafts } from "@/lib/groq-workflow";
 
 export type AccountView = {
   id?: string;
@@ -270,41 +272,84 @@ export async function createEvent(input: Omit<EventView, "id">): Promise<EventVi
   };
 }
 
-export async function createReviewPosts(eventId: string, posts: PostView[]): Promise<PostView[]> {
+export async function generateReviewPosts(eventId: string): Promise<PostView[]> {
   const { supabase, ownerId } = await authorizedClient();
-  if (!/^[0-9a-f-]{36}$/i.test(eventId) || posts.length > 24) throw new Error("Solicitud de publicaciones no válida.");
-  const rows = posts.map((post) => {
-    if (!post.accountId || !NETWORKS.includes(post.network) || ![14, 7, 1].includes(post.leadDays ?? 0)) {
-      throw new Error("Faltan datos de cuenta, red o fecha para una publicación.");
-    }
-    if (post.time !== "13:00") throw new Error("Las publicaciones deben programarse a las 13:00 de Madrid.");
+  if (!/^[0-9a-f-]{36}$/i.test(eventId)) throw new Error("Solicitud de publicaciones no válida.");
+
+  const [eventResult, accountResult, existingResult] = await Promise.all([
+    supabase.from("events").select("id,title,starts_at,location,description,event_url,detected_language")
+      .eq("id", eventId).eq("owner_id", ownerId).single(),
+    supabase.from("accounts").select("id,name,voice_prompt,networks").eq("owner_id", ownerId).eq("enabled", true).order("created_at"),
+    supabase.from("posts").select("account_id,network,lead_days").eq("owner_id", ownerId).eq("event_id", eventId),
+  ]);
+  if (eventResult.error || !eventResult.data) throw new Error("No se encontró el evento en este espacio.");
+  if (accountResult.error || !accountResult.data) throw new Error("No se pudieron cargar las cuentas.");
+  if (existingResult.error || !existingResult.data) throw new Error("No se pudo comprobar si ya existen recordatorios.");
+
+  const accountIds = accountResult.data.map((account) => account.id);
+  const exampleResult = accountIds.length === 0
+    ? { data: [], error: null }
+    : await supabase.from("style_examples").select("content,account_id,network,language")
+      .eq("owner_id", ownerId).in("account_id", accountIds).order("created_at", { ascending: false }).limit(72);
+  if (exampleResult.error || !exampleResult.data) throw new Error("No se pudieron cargar los ejemplos de estilo aprobados.");
+
+  const eventTime = formatMadridDateTime(eventResult.data.starts_at);
+  const drafts = await generateEventDrafts({
+    event: {
+      id: eventResult.data.id,
+      title: eventResult.data.title,
+      date: eventTime.date,
+      time: eventTime.time,
+      place: eventResult.data.location,
+      description: eventResult.data.description,
+      url: eventResult.data.event_url ?? undefined,
+      language: eventResult.data.detected_language as PostLanguage,
+    },
+    accounts: accountResult.data.map((account) => ({
+      id: account.id,
+      name: account.name,
+      voice: account.voice_prompt,
+      networks: account.networks.filter((network: string): network is SocialNetwork => NETWORKS.includes(network as SocialNetwork)),
+    })),
+    approvedExamples: exampleResult.data.flatMap((example) => {
+      if (!NETWORKS.includes(example.network as SocialNetwork) || !["en", "es", "ca"].includes(example.language)) return [];
+      return [{ accountId: example.account_id, network: example.network as SocialNetwork, language: example.language as PostLanguage, text: example.content }];
+    }),
+    existing: existingResult.data.flatMap((post) => {
+      if (!NETWORKS.includes(post.network as SocialNetwork)) return [];
+      return [{ accountId: post.account_id, network: post.network as SocialNetwork, leadDays: post.lead_days }];
+    }),
+    generate: generateSocialPost,
+  });
+
+  const rows = drafts.map((post) => {
     const validation = validatePost(post.network, post.text);
     if (!validation.valid) throw new Error(validation.message);
-    const dueAt = madridDateTimeToIso(post.date, post.time);
-    if (Date.parse(dueAt) <= Date.now()) throw new Error("No se guardan recordatorios cuya hora de publicación ya ha pasado.");
     return {
       owner_id: ownerId,
       event_id: eventId,
       account_id: post.accountId,
       network: post.network,
       lead_days: post.leadDays,
-      due_at: dueAt,
+      due_at: madridDateTimeToIso(post.date, post.time),
       timezone: "Europe/Madrid",
       content: post.text,
       status: "review",
-      language: post.language ?? "en",
+      language: post.language,
     };
   });
-  if (rows.length === 0) return [];
-  const { error: upsertError } = await supabase.from("posts").upsert(rows, {
-    onConflict: "event_id,account_id,network,lead_days",
-    ignoreDuplicates: true,
-  });
-  if (upsertError) throw new Error("No se pudieron guardar las publicaciones pendientes.");
+  if (rows.length > 0) {
+    const { error: upsertError } = await supabase.from("posts").upsert(rows, {
+      onConflict: "event_id,account_id,network,lead_days",
+      ignoreDuplicates: true,
+    });
+    if (upsertError) throw new Error("No se pudieron guardar las publicaciones pendientes.");
+  }
+
   const { data, error } = await supabase.from("posts").select("id,event_id,account_id,network,lead_days,due_at,content,status,language")
-    .eq("event_id", eventId).order("due_at");
+    .eq("owner_id", ownerId).eq("event_id", eventId).order("due_at");
   if (error || !data) throw new Error("No se pudieron recuperar las publicaciones pendientes.");
-  const accountNames = new Map(posts.map((post) => [post.accountId, post.account]));
+  const accountNames = new Map(accountResult.data.map((account) => [account.id, account.name]));
   return data.flatMap((row) => {
     const network = NETWORKS.find((value) => value === row.network);
     if (!network) return [];

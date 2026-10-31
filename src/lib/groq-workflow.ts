@@ -1,0 +1,144 @@
+import { detectTitleLanguage, type PostLanguage } from "./language";
+import { madridDateTimeToIso } from "./madrid-time";
+import type { ApprovedStyleExample, GeneratedPost, PostGenerationInput } from "./groq";
+import type { SocialNetwork } from "./social-validation";
+
+const REMINDER_DAYS = [14, 7, 1] as const;
+const MAX_GENERATED_POSTS = 24;
+const GENERATION_CONCURRENCY = 4;
+
+export type GenerationAccount = {
+  id: string;
+  name: string;
+  voice: string;
+  networks: SocialNetwork[];
+};
+
+export type GenerationEvent = {
+  id: string;
+  title: string;
+  date: string;
+  time: string;
+  place: string;
+  description: string;
+  url?: string;
+  language?: PostLanguage;
+};
+
+export type GeneratedReviewDraft = {
+  id: string;
+  eventId: string;
+  date: string;
+  time: "13:00";
+  account: string;
+  accountId: string;
+  network: SocialNetwork;
+  text: string;
+  status: "review";
+  leadDays: 14 | 7 | 1;
+  language: PostLanguage;
+};
+
+export type ExistingReminder = {
+  accountId: string;
+  network: SocialNetwork;
+  leadDays: number;
+};
+
+type GenerateEventDraftsInput = {
+  event: GenerationEvent;
+  accounts: GenerationAccount[];
+  approvedExamples: ApprovedStyleExample[];
+  existing: ExistingReminder[];
+  now?: Date;
+  generate: (input: PostGenerationInput) => Promise<GeneratedPost | { text: string }>;
+};
+
+function dateMinusDays(date: string, days: number): string {
+  if (!/^\d{4}-\d{2}-\d{2}$/u.test(date)) throw new Error("Event date must use YYYY-MM-DD.");
+  const value = new Date(`${date}T00:00:00.000Z`);
+  if (!Number.isFinite(value.getTime())) throw new Error("Event date is invalid.");
+  value.setUTCDate(value.getUTCDate() - days);
+  return value.toISOString().slice(0, 10);
+}
+
+function reminderKey(accountId: string, network: SocialNetwork, leadDays: number): string {
+  return `${accountId}:${network}:${leadDays}`;
+}
+
+async function mapWithConcurrency<T, R>(items: T[], concurrency: number, run: (item: T) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  async function worker() {
+    while (true) {
+      const index = next;
+      next += 1;
+      if (index >= items.length) return;
+      results[index] = await run(items[index]);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, worker));
+  return results;
+}
+
+/** Generate future, missing reminders from trusted event/account data. */
+export async function generateEventDrafts({
+  event,
+  accounts,
+  approvedExamples,
+  existing,
+  now = new Date(),
+  generate,
+}: GenerateEventDraftsInput): Promise<GeneratedReviewDraft[]> {
+  const language = event.language ?? detectTitleLanguage(event.title);
+  const existingKeys = new Set(existing.map(({ accountId, network, leadDays }) => reminderKey(accountId, network, leadDays)));
+  const candidates = REMINDER_DAYS.flatMap((leadDays) => {
+    const date = dateMinusDays(event.date, leadDays);
+    const dueAt = madridDateTimeToIso(date, "13:00");
+    if (Date.parse(dueAt) <= now.getTime()) return [];
+    return accounts.flatMap((account) => account.networks.flatMap((network) => {
+      if (existingKeys.has(reminderKey(account.id, network, leadDays))) return [];
+      const matchingExamples = approvedExamples
+        .filter((example) => example.accountId === account.id && example.network === network && example.language === language)
+        .slice(0, 3);
+      return [{ account, network, leadDays, date, matchingExamples }];
+    }));
+  });
+
+  if (candidates.length > MAX_GENERATED_POSTS) {
+    throw new Error(`This event would create too many posts (maximum ${MAX_GENERATED_POSTS} per request).`);
+  }
+
+  return mapWithConcurrency(candidates, GENERATION_CONCURRENCY, async ({ account, network, leadDays, date, matchingExamples }) => {
+    const generated = await generate({
+      accountId: account.id,
+      accountName: account.name,
+      accountVoice: account.voice,
+      network,
+      language,
+      event: {
+        title: event.title,
+        date: event.date,
+        time: event.time,
+        place: event.place,
+        description: event.description,
+        url: event.url,
+      },
+      reminderDays: leadDays,
+      approvedExamples: matchingExamples,
+    });
+    return {
+      id: `${event.id}-${date}-${account.id}-${network}`,
+      eventId: event.id,
+      date,
+      time: "13:00" as const,
+      account: account.name,
+      accountId: account.id,
+      network,
+      text: generated.text,
+      status: "review" as const,
+      leadDays,
+      language,
+    };
+  });
+}
