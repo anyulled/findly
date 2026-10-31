@@ -35,6 +35,7 @@ Supabase free projects may pause after a week of sufficiently low activity. This
 2. Configure a production model ID explicitly rather than relying on an implicit default.
 3. Expect account-specific rate limits. A throttled or failed request should leave a visible retryable item and must not create a partial schedule.
 4. Account voice instructions belong to the per-account system prompt. Only final texts approved in review mode are added as style examples; generated text must still pass deterministic length checks.
+5. Persistent-mode event creation requires `GROQ_API_KEY` and `GROQ_MODEL`; without them, the event remains saved and its reminders can be retried after configuration. Local demo mode uses deterministic templates without calling Groq.
 
 ### Luma and event links
 
@@ -53,12 +54,12 @@ Supabase free projects may pause after a week of sufficiently low activity. This
 
 ## Secret inventory
 
-Use the names in `.env.example`. The deployment will need Supabase URL/publishable key and owner email, plus server-side Supabase service-role, cron, Buffer and Groq secrets as their integrations are used. The public Supabase URL and publishable key are configuration values, not privileged credentials; browser database access remains protected by RLS. Never place Buffer/Groq/service-role/cron values in a `NEXT_PUBLIC_` variable. `JEV_API_KEY` is a reserved empty placeholder; the application does not call Jev.
+Use the names in `.env.example`. Persistent-mode Groq draft generation needs `GROQ_API_KEY` and `GROQ_MODEL`; the deployment also needs Supabase URL/publishable key and owner email. The Luma sync endpoint needs server-side Supabase service-role and cron secrets. Buffer credentials are needed when dashboard scheduling is implemented. The public Supabase URL and publishable key are configuration values, not privileged credentials; browser database access remains protected by RLS. Never place Buffer/Groq/service-role/cron values in a `NEXT_PUBLIC_` variable. `JEV_API_KEY` is a reserved empty placeholder; the application does not call Jev.
 
 ## Review and automatic modes
 
-- **Review:** the system prepares a draft for each applicable reminder, account and channel. The owner can edit and approve; approval both records the final version as a style example and schedules it.
-- **Automatic:** valid generated posts are scheduled without approval. Invalid copy and incomplete event data should stay visible as blocked work. Automatically scheduled text is not an approved style example.
+- **Review:** the system prepares a draft for each applicable reminder, account and channel. The owner can edit and approve; approval also records the final version as a style example. Buffer scheduling is not connected to the dashboard yet.
+- **Automatic:** the preference is stored globally, but generated drafts still remain in review until Buffer scheduling is integrated. Selecting this mode does not currently publish or schedule content.
 - The setting is global across all accounts. Enable automatic mode only after feed, identity, scheduling and character-count behavior have been checked with real provider accounts.
 
 ## Calendar and dates
