@@ -8,6 +8,7 @@ import type { SocialNetwork } from "@/lib/social-validation";
 import { schedulePostWithSupabase } from "@/lib/post-publishing";
 import { createClient } from "@/lib/supabase/server";
 import { isSameOriginSessionRequest } from "@/lib/sync-request-auth";
+import { selectEventAccounts } from "@/lib/event-targets";
 
 const NETWORKS: SocialNetwork[] = ["LinkedIn", "X", "Bluesky"];
 
@@ -57,13 +58,13 @@ export async function POST(request: Request): Promise<Response> {
       const { data: links, error: linkError } = await supabase.from("source_accounts")
         .select("account_id").eq("owner_id", ownerId).eq("source_id", sourceId);
       if (linkError) throw new Error("Unable to read source account links");
-      const accountIds = [...new Set((links ?? []).map((link) => link.account_id))];
-      if (accountIds.length === 0) return [];
+      const sourceLinks = (links ?? []).map((link) => ({ sourceId, accountId: link.account_id }));
+      if (sourceLinks.length === 0) return [];
       const { data, error } = await supabase.from("accounts")
         .select("id,name,voice_prompt,networks").eq("owner_id", ownerId).eq("enabled", true)
-        .in("id", accountIds).order("created_at");
+        .order("created_at");
       if (error) throw new Error("Unable to read linked accounts");
-      return (data ?? []).map((account) => ({
+      return selectEventAccounts(data ?? [], sourceId, sourceLinks).map((account) => ({
         id: account.id,
         name: account.name,
         voice: account.voice_prompt,
@@ -100,9 +101,9 @@ export async function POST(request: Request): Promise<Response> {
       if (error) throw new Error("Unable to persist generated drafts");
       return data?.length ?? 0;
     },
-    async scheduleAutomaticPosts(ownerId, eventId) {
+    async scheduleAutomaticPosts(ownerId, eventId, accountIds) {
       const { data, error } = await supabase.from("posts").select("id")
-        .eq("owner_id", ownerId).eq("event_id", eventId).eq("status", "approved");
+        .eq("owner_id", ownerId).eq("event_id", eventId).eq("status", "approved").in("account_id", accountIds);
       if (error) throw new Error("Unable to read generated posts ready for Buffer");
       for (const row of data ?? []) {
         await schedulePostWithSupabase(row.id, supabase, ownerId);

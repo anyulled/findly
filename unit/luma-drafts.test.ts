@@ -3,6 +3,7 @@ import { test } from "node:test";
 import { generateLumaEventDrafts, type ImportedLumaEvent, type LumaDraftRepository, type LumaDraftRow } from "../src/lib/luma-drafts";
 import type { GenerationAccount } from "../src/lib/groq-workflow";
 import type { ApprovedStyleExample, PostGenerationInput } from "../src/lib/groq";
+import { selectEventAccounts } from "../src/lib/event-targets";
 
 const event: ImportedLumaEvent = {
   id: "event-1",
@@ -83,9 +84,10 @@ test("automatic Luma drafts are approved for dispatch, not added as style exampl
       for (const row of rows) inserted.set(`${row.event_id}:${row.network}:${row.lead_days}`, row);
       return rows.length;
     },
-    async scheduleAutomaticPosts(ownerId, eventId) {
+    async scheduleAutomaticPosts(ownerId, eventId, accountIds) {
       assert.equal(ownerId, event.owner_id);
       assert.equal(eventId, event.id);
+      assert.deepEqual(accountIds, ["account-1"]);
       schedulingPasses += 1;
     },
   };
@@ -114,4 +116,41 @@ test("Luma event with no linked accounts is persisted without requesting text", 
   });
   assert.equal(count, 0);
   assert.equal(generationCalled, false);
+});
+
+test("source sync and automatic retries restrict generation and dispatch to source-linked accounts", async () => {
+  const allAccounts: GenerationAccount[] = [
+    { id: "jug", name: "Barcelona JUG", voice: "community", networks: ["LinkedIn", "X"] },
+    { id: "personal", name: "Personal", voice: "personal", networks: ["LinkedIn"] },
+    { id: "crafters", name: "Crafters", voice: "community", networks: ["Bluesky"] },
+  ];
+  for (const mode of ["review", "automatic"] as const) {
+    const inserted: LumaDraftRow[] = [];
+    const dispatched: string[] = [];
+    const sentKeys = new Set<string>();
+    const generatorAccounts: string[] = [];
+    const repository: LumaDraftRepository = {
+      async getPublishingMode() { return mode; },
+      async listLinkedAccounts(_ownerId, sourceId) {
+        return selectEventAccounts(allAccounts, sourceId, [{ sourceId: event.source_id, accountId: "jug" }]);
+      },
+      async listExistingReminders() { return inserted.map((row) => ({ accountId: row.account_id, network: row.network, leadDays: row.lead_days })); },
+      async listApprovedExamples(_ownerId, accountIds) { assert.deepEqual(accountIds, ["jug"]); return []; },
+      async insertDrafts(rows) { inserted.push(...rows); return rows.length; },
+      async scheduleAutomaticPosts(_ownerId, _eventId, accountIds) {
+        assert.deepEqual(accountIds, ["jug"]);
+        for (const row of inserted.filter((post) => accountIds.includes(post.account_id))) {
+          const key = `${row.account_id}:${row.network}:${row.lead_days}`;
+          if (!sentKeys.has(key)) { sentKeys.add(key); dispatched.push(row.account_id); }
+        }
+      },
+    };
+    const generate = async (input: PostGenerationInput) => { generatorAccounts.push(input.accountId); return { text: "Join us!" }; };
+    assert.equal(await generateLumaEventDrafts(event, repository, generate, new Date("2029-12-01T00:00:00.000Z")), 6);
+    assert.equal(await generateLumaEventDrafts(event, repository, generate, new Date("2029-12-01T00:00:00.000Z")), 0);
+    assert.deepEqual(new Set(generatorAccounts), new Set(["jug"]));
+    assert.deepEqual(new Set(inserted.map((row) => row.account_id)), new Set(["jug"]));
+    assert.equal(dispatched.every((id) => id === "jug"), true);
+    assert.equal(dispatched.length, mode === "automatic" ? 6 : 0);
+  }
 });

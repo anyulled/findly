@@ -10,9 +10,11 @@ import { approveAndSchedulePost, schedulePostWithSupabase, type PostPublishingOu
 import { MANAGED_ACCOUNTS, managedAccount } from "@/lib/managed-accounts";
 import { bufferCredentialForAccount } from "@/lib/buffer-account-credentials";
 import { sourceForEventUrl } from "@/lib/event-source";
+import { selectEventAccounts } from "@/lib/event-targets";
 
 export type AccountView = {
   id?: string;
+  enabled?: boolean;
   name: string;
   kind: string;
   initials: string;
@@ -34,6 +36,7 @@ export type EventView = {
   place: string;
   description: string;
   source: string;
+  sourceId?: string | null;
   url?: string;
   language?: PostLanguage;
 };
@@ -92,13 +95,14 @@ async function authorizedClient() {
   return { supabase, ownerId: user.id };
 }
 
-function accountView(row: { id: string; name: string; account_type: string; voice_prompt: string; networks: string[] }, index: number, bufferChannels: Partial<Record<SocialNetwork, string>> = {}, styleExampleCount = 0): AccountView {
+function accountView(row: { id: string; name: string; account_type: string; voice_prompt: string; networks: string[]; enabled: boolean }, index: number, bufferChannels: Partial<Record<SocialNetwork, string>> = {}, styleExampleCount = 0): AccountView {
   const managed = managedAccount(row.name) ?? MANAGED_ACCOUNTS[index % MANAGED_ACCOUNTS.length];
   if (!managedAccount(row.name)) throw new Error(`La cuenta «${row.name}» no pertenece a las tres cuentas configuradas.`);
   const credential = bufferCredentialForAccount(managed.name);
   const networks = row.networks.filter((network): network is SocialNetwork => NETWORKS.includes(network as SocialNetwork));
   return {
     id: row.id,
+    enabled: row.enabled,
     name: managed.name,
     kind: managed.kind,
     initials: managed.initials,
@@ -119,11 +123,11 @@ function sourceForUrl(value: string | null): string {
 
 export async function loadWorkspace(): Promise<WorkspaceSnapshot> {
   const { supabase, ownerId } = await authorizedClient();
-  let accountResult = await supabase.from("accounts").select("id,name,account_type,voice_prompt,networks").order("created_at");
+  let accountResult = await supabase.from("accounts").select("id,name,account_type,voice_prompt,networks,enabled").order("created_at");
   if (accountResult.error) throw new Error("No se pudieron cargar las cuentas.");
   if ((accountResult.data ?? []).length === 0) {
     accountResult = await supabase.from("accounts").insert(DEFAULT_ACCOUNTS.map((account) => ({ ...account, owner_id: ownerId })))
-      .select("id,name,account_type,voice_prompt,networks").order("created_at");
+      .select("id,name,account_type,voice_prompt,networks,enabled").order("created_at");
     if (accountResult.error) throw new Error("No se pudieron crear las cuentas iniciales.");
   }
   const rows = accountResult.data ?? [];
@@ -131,7 +135,7 @@ export async function loadWorkspace(): Promise<WorkspaceSnapshot> {
   const accountNames = new Map(accounts.map((account) => [account.id, account.name]));
 
   const [eventsResult, postsResult, settingsResult, sourcesResult, sourceAccountsResult, channelResult, examplesResult] = await Promise.all([
-    supabase.from("events").select("id,title,starts_at,location,description,event_url,detected_language").order("starts_at"),
+    supabase.from("events").select("id,title,starts_at,location,description,event_url,detected_language,source_id").order("starts_at"),
     supabase.from("posts").select("id,event_id,account_id,network,lead_days,due_at,content,status,language,last_error,buffer_post_id").order("due_at"),
     supabase.from("app_settings").select("value").eq("key", "publishing_mode").maybeSingle(),
     supabase.from("sources").select("id,name,source_type,feed_url,enabled").order("created_at"),
@@ -153,6 +157,7 @@ export async function loadWorkspace(): Promise<WorkspaceSnapshot> {
       place: row.location,
       description: row.description,
       source: sourceForUrl(row.event_url),
+      sourceId: row.source_id,
       url: row.event_url ?? undefined,
       language: row.detected_language as PostLanguage,
     };
@@ -282,7 +287,7 @@ export async function createEvent(input: Omit<EventView, "id">): Promise<EventVi
     description: input.description.trim(),
     event_url: url,
     detected_language: detectTitleLanguage(title),
-  }).select("id,title,starts_at,location,description,event_url,detected_language").single();
+  }).select("id,title,starts_at,location,description,event_url,detected_language,source_id").single();
   if (error || !data) throw new Error("No se pudo guardar el evento en Supabase.");
   const scheduled = formatMadridDateTime(data.starts_at);
   return {
@@ -293,6 +298,7 @@ export async function createEvent(input: Omit<EventView, "id">): Promise<EventVi
     place: data.location,
     description: data.description,
     source: sourceForUrl(data.event_url),
+    sourceId: data.source_id,
     url: data.event_url ?? undefined,
     language: data.detected_language as PostLanguage,
   };
@@ -303,7 +309,7 @@ export async function generateReviewPosts(eventId: string): Promise<PostView[]> 
   if (!/^[0-9a-f-]{36}$/i.test(eventId)) throw new Error("Solicitud de publicaciones no válida.");
 
   const [eventResult, accountResult, existingResult, settingsResult] = await Promise.all([
-    supabase.from("events").select("id,title,starts_at,location,description,event_url,detected_language")
+    supabase.from("events").select("id,title,starts_at,location,description,event_url,detected_language,source_id")
       .eq("id", eventId).eq("owner_id", ownerId).single(),
     supabase.from("accounts").select("id,name,voice_prompt,networks").eq("owner_id", ownerId).eq("enabled", true).order("created_at"),
     supabase.from("posts").select("account_id,network,lead_days").eq("owner_id", ownerId).eq("event_id", eventId),
@@ -314,7 +320,15 @@ export async function generateReviewPosts(eventId: string): Promise<PostView[]> 
   if (existingResult.error || !existingResult.data) throw new Error("No se pudo comprobar si ya existen recordatorios.");
   if (settingsResult.error) throw new Error("No se pudo cargar el modo de publicación.");
 
-  const accountIds = accountResult.data.map((account) => account.id);
+  let sourceLinks: { sourceId: string; accountId: string }[] = [];
+  if (eventResult.data.source_id) {
+    const { data, error } = await supabase.from("source_accounts").select("source_id,account_id")
+      .eq("owner_id", ownerId).eq("source_id", eventResult.data.source_id);
+    if (error) throw new Error("No se pudieron cargar las cuentas asociadas a la fuente.");
+    sourceLinks = (data ?? []).map((link) => ({ sourceId: link.source_id, accountId: link.account_id }));
+  }
+  const eligibleAccounts = selectEventAccounts(accountResult.data, eventResult.data.source_id, sourceLinks);
+  const accountIds = eligibleAccounts.map((account) => account.id);
   const exampleResult = accountIds.length === 0
     ? { data: [], error: null }
     : await supabase.from("style_examples").select("content,account_id,network,language")
@@ -333,7 +347,7 @@ export async function generateReviewPosts(eventId: string): Promise<PostView[]> 
       url: eventResult.data.event_url ?? undefined,
       language: eventResult.data.detected_language as PostLanguage,
     },
-    accounts: accountResult.data.map((account) => ({
+    accounts: eligibleAccounts.map((account) => ({
       id: account.id,
       name: account.name,
       voice: account.voice_prompt,
