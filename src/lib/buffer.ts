@@ -166,12 +166,9 @@ export class BufferClient {
     }
   }
 
-  async schedulePost(input: ScheduleBufferPostInput): Promise<ScheduleBufferPostResult> {
-    validateInput(input);
-
-    let response: Response;
+  private async postMutation(input: ScheduleBufferPostInput): Promise<Response> {
     try {
-      response = await this.fetchImpl(BUFFER_API_URL, {
+      return await this.fetchImpl(BUFFER_API_URL, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -197,7 +194,9 @@ export class BufferClient {
         { cause },
       );
     }
+  }
 
+  private async parseResponseEnvelope(response: Response): Promise<GraphQLEnvelope> {
     if (response.status >= 500) {
       throw new BufferUncertainResultError(
         "Buffer returned a server error. Reconcile the channel queue before retrying this post.",
@@ -242,10 +241,42 @@ export class BufferClient {
         { httpStatus: response.status },
       );
     }
+    return envelope;
+  }
 
-    const errors = parseGraphQLErrors(envelope.errors);
-    const payload = asRecord(asRecord(envelope.data)?.createPost);
+  private handleBufferErrors(response: Response, errors: BufferGraphQLError[]): never {
+    if (!response.ok) {
+      throw new BufferApiError({
+        message: errors[0]?.message ?? `Buffer rejected the request with HTTP ${response.status}.`,
+        code: errors[0]?.code,
+        httpStatus: response.status,
+        outcome: "rejected",
+        errors,
+      });
+    }
 
+    if (errors.length > 0) {
+      const outcome = errors.some((error) => error.code === "UNEXPECTED") ? "unknown" : "rejected";
+      throw new BufferApiError({
+        message: errors[0].message,
+        code: errors[0].code,
+        httpStatus: response.status,
+        outcome,
+        errors,
+      });
+    }
+
+    throw new BufferUncertainResultError(
+      "Buffer returned no recognizable createPost result. Reconcile the channel queue before retrying.",
+      { httpStatus: response.status },
+    );
+  }
+
+  private processCreatePostPayload(
+    response: Response,
+    payload: Record<string, unknown> | null,
+    errors: BufferGraphQLError[],
+  ): ScheduleBufferPostResult {
     if (payload && payload.__typename === "PostActionSuccess") {
       if (!response.ok) {
         throw new BufferApiError({
@@ -283,30 +314,15 @@ export class BufferClient {
       };
     }
 
-    if (!response.ok) {
-      throw new BufferApiError({
-        message: errors[0]?.message ?? `Buffer rejected the request with HTTP ${response.status}.`,
-        code: errors[0]?.code,
-        httpStatus: response.status,
-        outcome: "rejected",
-        errors,
-      });
-    }
+    this.handleBufferErrors(response, errors);
+  }
 
-    if (errors.length > 0) {
-      const outcome = errors.some((error) => error.code === "UNEXPECTED") ? "unknown" : "rejected";
-      throw new BufferApiError({
-        message: errors[0].message,
-        code: errors[0].code,
-        httpStatus: response.status,
-        outcome,
-        errors,
-      });
-    }
-
-    throw new BufferUncertainResultError(
-      "Buffer returned no recognizable createPost result. Reconcile the channel queue before retrying.",
-      { httpStatus: response.status },
-    );
+  async schedulePost(input: ScheduleBufferPostInput): Promise<ScheduleBufferPostResult> {
+    validateInput(input);
+    const response = await this.postMutation(input);
+    const envelope = await this.parseResponseEnvelope(response);
+    const errors = parseGraphQLErrors(envelope.errors);
+    const payload = asRecord(asRecord(envelope.data)?.createPost);
+    return this.processCreatePostPayload(response, payload, errors);
   }
 }

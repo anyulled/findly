@@ -61,6 +61,9 @@ jobs:
       - name: Enforce per-file business logic coverage
         run: npm run test:coverage
 
+      - name: Enforce CRAP metric threshold (P20)
+        run: npm run test:crap
+
   database-migrations:
     name: Database migrations
     runs-on: ubuntu-latest

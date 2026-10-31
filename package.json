@@ -9,7 +9,8 @@
     "lint": "eslint",
     "test:e2e": "playwright test",
     "test:unit": "tsx --test unit/*.test.ts",
-    "test:coverage": "c8 --all --include='src/lib/*.ts' --per-file --reporter=text --check-coverage --lines=80 tsx --test unit/*.test.ts"
+    "test:coverage": "c8 --all --include='src/lib/*.ts' --per-file --reporter=text --reporter=json --check-coverage --lines=80 tsx --test unit/*.test.ts",
+    "test:crap": "node scripts/check-crap-score.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.7",
