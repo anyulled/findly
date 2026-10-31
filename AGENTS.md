@@ -10,8 +10,10 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 ## Project workflow
 
-- Follow the RSI cycle for each workstream: Research current repository state and requirements, write a concise plan in the pull request description or a relevant `docs/` note, implement, and verify the result.
-- Before finishing a workstream, update relevant documentation and synchronize with the current `main` branch. Resolve conflicts without discarding another workstream’s changes.
+- Follow the RSI cycle for each workstream in order: Research current repository state and requirements; write a concise plan in the pull request description or a relevant `docs/` note; implement and verify; then complete the mandatory final Documentation and Sync stage.
+- Documentation and Sync is part of implementation completion, not follow-up work. Before requesting merge, update the README and relevant docs to match user-visible behavior, environment/configuration changes, test coverage, and known limitations. If no docs need changing, explain why in the pull request checklist.
+- In the same final stage, rebase onto the latest `origin/main`, resolve conflicts without discarding another workstream’s changes, rerun the applicable checks, and confirm the pull request contains the documentation update. Do not mark a workstream complete while this stage remains unchecked.
+- Use the repository pull request template and complete its documentation and synchronization checklist before merge.
 - Use Conventional Commits for every commit, for example `feat: add calendar view`, `ci: validate pull requests`, or `docs: document architecture`.
 - Keep workstreams isolated in their own branches/worktrees and pull requests. Avoid editing files owned by another workstream; coordinate shared files before changes.
 - Keep the solution within free tiers where practical. Do not enable paid services or incur costs.
