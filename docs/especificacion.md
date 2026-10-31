@@ -11,7 +11,8 @@ Detectar eventos y preparar anuncios para las cuentas personales y de asociacion
 - Un evento también puede añadirse por URL, con extracción y corrección manual de sus datos.
 - Las publicaciones se generan con Groq para cada cuenta, canal y fecha aplicable. El idioma se infiere del título; si no es claro se usa inglés.
 - Las fechas previstas son 14, 7 y 1 día antes del evento, a las 13:00 en Europe/Madrid. Se omiten las fechas que ya hayan pasado.
-- Un ajuste global selecciona revisión o programación automática. En revisión, una aprobación guarda la versión final como ejemplo de estilo y la prepara para programar. Los ejemplos se filtran por cuenta, idioma y red; cada cuenta dispone de su propio system prompt.
+- Un ajuste global selecciona revisión o programación automática. En revisión, una aprobación guarda atómicamente el texto final como ejemplo de estilo y programa ese post. En automático, los borradores nuevos se programan al generarse y no se convierten en ejemplos. Los ejemplos se filtran por cuenta, idioma y red; cada cuenta dispone de su propio system prompt.
+- Cada cuenta configura un ID de canal de Buffer por red conectada. La hora `due_at` de Madrid se convierte a un instante UTC para `customScheduled`.
 - La validación de límites de las redes es determinista. Las ejecuciones repetidas y concurrentes no deben crear publicaciones duplicadas; un resultado remoto incierto requiere reconciliación antes de reintentar.
 - La vista de calendario permite semanas, quincenas y meses; por defecto muestra la semana actual y la siguiente, empezando el lunes, en hora de Madrid. Incluye estados y detalle de publicaciones.
 - Una tarea invocable mediante endpoint autenticado consulta las fuentes cada seis horas mediante cron-job.org. La aplicación permite iniciar la misma tarea manualmente.
@@ -30,7 +31,8 @@ Detectar eventos y preparar anuncios para las cuentas personales y de asociacion
 - Definir y probar reglas de longitud por red, incluidas URLs y Unicode, con las capacidades reales de Buffer.
 - Verificar condiciones de uso y límites del plan de alojamiento para actividades de asociaciones.
 - Concretar el uso de Jev solo si aporta valor medible en decisiones no deterministas.
-- Establecer un mecanismo seguro de conciliación de resultados inciertos de Buffer y comprobación de estados publicados.
+- Comprobar las organizaciones, canales, permisos, cuotas y programación exacta con las cuentas reales de Buffer. El estado programado confirma aceptación de Buffer, no publicación social.
+- Integrar comprobación posterior de publicaciones sociales; la primera fase no marca publicaciones como `published`.
 
 ## Infraestructura propuesta
 
