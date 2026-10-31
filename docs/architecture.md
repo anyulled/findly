@@ -15,14 +15,14 @@ flowchart LR
   actions --> db[(Supabase Postgres)]
   sync --> db
   sync -->|read calendar feed| luma[Luma iCal]
-  sync -->|fetch event URL| meetup[Meetup or other event page]
   app -->|generate per account and channel| groq[Groq API]
-  sync -->|schedule exact time| buffer[Buffer API]
-  buffer --> social[LinkedIn · X · Bluesky]
+  sync -->|generate drafts when configured| groq
+  app -. future scheduling .-> buffer[Buffer API]
+  buffer -. future publishing .-> social[LinkedIn · X · Bluesky]
   auth -. session validation .-> app
 ```
 
-The browser contains no provider secrets. Workspace writes go through Next.js Server Actions that verify the Google-authenticated owner; Supabase RLS independently scopes rows to that user. Approval and style-example insertion use a transactional database function. Groq/Buffer calls and the scheduled endpoint are still planned boundaries, not implemented integrations. The scheduled invocation will use a separate random secret and the same server-side sync flow as the manual action. Elevated service credentials stay in server-only runtime configuration.
+The browser contains no provider secrets. Workspace writes go through Next.js Server Actions that verify the Google-authenticated owner; Supabase RLS independently scopes rows to that user. Approval and style-example insertion use a transactional database function. Persistent event creation and newly imported Luma events use Groq when its server configuration is present; the authenticated cron endpoint imports Luma events and leaves them saved without drafts when Groq is unavailable. Only the exact `POST /api/cron/sync` request bypasses browser-session middleware; the route validates its bearer secret and uses a server-only Supabase service-role key. Meetup sync and Buffer scheduling/publication are not implemented.
 
 ## Event-to-publication lifecycle
 

@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { isAuthorizedCronRequest } from "../src/lib/cron-auth";
+import { isAuthorizedCronRequest, isCronSyncRequest } from "../src/lib/cron-auth";
 import { syncLumaSources, type PersistableEvent, type SyncRepository } from "../src/lib/luma-sync";
+import type { ImportedLumaEvent } from "../src/lib/luma-drafts";
 
 const fixture = readFileSync(new URL("./fixtures/luma-sample.ics", import.meta.url), "utf8");
 
@@ -12,28 +13,47 @@ test("cron bearer authentication requires an exact constant-time comparable toke
   assert.equal(isAuthorizedCronRequest(new Request("https://example.test"), "secret"), false);
 });
 
+test("only POST to the exact cron endpoint bypasses browser-session auth", () => {
+  assert.equal(isCronSyncRequest("POST", "/api/cron/sync"), true);
+  assert.equal(isCronSyncRequest("GET", "/api/cron/sync"), false);
+  assert.equal(isCronSyncRequest("POST", "/api/cron/sync/other"), false);
+  assert.equal(isCronSyncRequest("POST", "/api/other"), false);
+});
+
 test("repeated sync inserts only new events and does not overwrite stored data", async () => {
-  const stored = new Map<string, PersistableEvent>();
+  const stored = new Map<string, ImportedLumaEvent>();
   let feedReads = 0;
+  const generatedEvents: string[] = [];
   const repository: SyncRepository = {
     async listEnabledLumaSources() { return [{ id: "source-1", ownerId: "owner-1", name: "Luma", feedUrl: "https://example.test/feed.ics" }]; },
     async insertEvents(events) {
-      let inserted = 0;
+      const inserted: ImportedLumaEvent[] = [];
       for (const event of events) {
         const key = `${event.owner_id}:${event.source_id}:${event.external_id}`;
-        if (!stored.has(key)) { stored.set(key, event); inserted += 1; }
+        if (!stored.has(key)) {
+          const imported = { ...event, id: `event-${event.external_id}` };
+          stored.set(key, imported);
+          inserted.push(imported);
+        }
       }
       return inserted;
     },
   };
   const fetchFeed = async () => { feedReads += 1; return fixture; };
-  const first = await syncLumaSources(repository, fetchFeed);
+  const generateDrafts = async (_source: { id: string }, event: ImportedLumaEvent) => {
+    generatedEvents.push(event.id);
+    return 2;
+  };
+  const first = await syncLumaSources(repository, fetchFeed, generateDrafts);
   const original = [...stored.values()][0];
-  const second = await syncLumaSources(repository, fetchFeed);
+  const second = await syncLumaSources(repository, fetchFeed, generateDrafts);
   assert.equal(first.eventsInserted, 3);
+  assert.equal(first.draftsCreated, 6);
   assert.equal(second.eventsInserted, 0);
+  assert.equal(second.draftsCreated, 0);
   assert.equal(stored.size, 3);
   assert.equal(stored.values().next().value, original);
+  assert.equal(generatedEvents.length, 3);
   assert.equal(feedReads, 2);
 });
 
@@ -44,7 +64,7 @@ test("a failed feed does not prevent other sources from importing", async () => 
       { id: "bad", ownerId: "owner-1", name: "Bad", feedUrl: "https://example.test/bad.ics" },
       { id: "good", ownerId: "owner-1", name: "Good", feedUrl: "https://example.test/good.ics" },
     ]; },
-    async insertEvents(events) { inserted.push(...events); return events.length; },
+    async insertEvents(events) { inserted.push(...events); return events.map((event) => ({ ...event, id: `event-${event.external_id}` })); },
   };
   const result = await syncLumaSources(repository, async (url) => {
     if (url.endsWith("bad.ics")) throw new Error("network failure");
@@ -61,10 +81,40 @@ test("a failed feed does not prevent other sources from importing", async () => 
 test("malformed event records are reported without rejecting valid records", async () => {
   const repository: SyncRepository = {
     async listEnabledLumaSources() { return [{ id: "source", ownerId: "owner", name: "Luma", feedUrl: "https://example.test/feed.ics" }]; },
-    async insertEvents(events) { return events.length; },
+    async insertEvents(events) { return events.map((event) => ({ ...event, id: `event-${event.external_id}` })); },
   };
   const result = await syncLumaSources(repository, async () => fixture.replace("SUMMARY:AI Builders\\, Madrid", "SUMMARY:"));
   assert.equal(result.feedsSucceeded, 1);
   assert.equal(result.eventsInserted, 2);
   assert.deepEqual(result.issues, [{ sourceId: "source", code: "invalid_calendar", skippedEvents: 1 }]);
+});
+
+test("new events stay persisted without drafts when Groq is not configured", async () => {
+  const repository: SyncRepository = {
+    async listEnabledLumaSources() { return [{ id: "source", ownerId: "owner", name: "Luma", feedUrl: "https://example.test/feed.ics" }]; },
+    async insertEvents(events) { return events.map((event) => ({ ...event, id: `event-${event.external_id}` })); },
+  };
+  const result = await syncLumaSources(repository, async () => fixture);
+  assert.equal(result.eventsInserted, 3);
+  assert.equal(result.draftEventsSkipped, 3);
+  assert.equal(result.draftsCreated, 0);
+  assert.deepEqual(result.issues, []);
+});
+
+test("one event draft failure does not roll back imported events or stop later events", async () => {
+  const repository: SyncRepository = {
+    async listEnabledLumaSources() { return [{ id: "source", ownerId: "owner", name: "Luma", feedUrl: "https://example.test/feed.ics" }]; },
+    async insertEvents(events) { return events.map((event) => ({ ...event, id: `event-${event.external_id}` })); },
+  };
+  const generated: string[] = [];
+  const result = await syncLumaSources(repository, async () => fixture, async (_source, event) => {
+    generated.push(event.id);
+    if (generated.length === 1) throw new Error("provider response contains private details");
+    return 1;
+  });
+  assert.equal(result.eventsInserted, 3);
+  assert.equal(result.draftEventsFailed, 1);
+  assert.equal(result.draftsCreated, 2);
+  assert.equal(generated.length, 3);
+  assert.deepEqual(result.issues, [{ sourceId: "source", eventId: "event-utc-event@example.test", code: "draft_generation_failed" }]);
 });
