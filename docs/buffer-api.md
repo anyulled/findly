@@ -40,3 +40,7 @@ Use this module only from server-side code. Callers should persist a local corre
 1. Research Buffer's official create-post, scheduling, and error-handling documentation.
 2. Define a small injected-fetch adapter for one UTC-scheduled post per channel, with typed mutation/API failures and a separate uncertain-result signal.
 3. Verify request construction and error cases with mocked fetch; run lint, unit tests, and the production build; update this document and synchronize the branch before merging.
+
+## Documentation and sync checklist
+
+Before merging this adapter, confirm this guide remains aligned with the implementation and that the PR description records the completed documentation and synchronization stage.
