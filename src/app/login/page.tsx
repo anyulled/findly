@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Suspense } from "react";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import { GoogleSignInButton } from "./sign-in-button";
+import { BrandIcon } from "../brand-icon";
 import styles from "./login.module.css";
 
 export default function LoginPage(props: PageProps<"/login">) {
@@ -12,8 +13,8 @@ async function LoginContent({ searchParams }: Pick<PageProps<"/login">, "searchP
   const { error } = await searchParams;
   const configured = isSupabaseConfigured();
   return <main className={styles.page}><section className={styles.card}>
-    <Link href="/" className={styles.brand}><span>f</span> findly<span className={styles.dot}>.</span></Link>
-    <div className={styles.mark}>✳</div><p className={styles.eyebrow}>TU ESPACIO DE PUBLICACIONES</p>
+    <Link href="/" className={styles.brand}><BrandIcon size={26} /> findly<span className={styles.dot}>.</span></Link>
+    <div className={styles.mark}><BrandIcon size={38} /></div><p className={styles.eyebrow}>TU ESPACIO DE PUBLICACIONES</p>
     <h1>Bienvenido</h1><p className={styles.description}>Inicia sesión con la cuenta de Google autorizada para gestionar tus eventos.</p>
     {error === "owner" && <p className={styles.error}>Esta cuenta no tiene acceso a este espacio.</p>}
     {error === "setup" && <p className={styles.error}>La aplicación requiere configurar Supabase antes de habilitar el acceso.</p>}

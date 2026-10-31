@@ -10,6 +10,7 @@ import { SourceSettings } from "./source-settings";
 import Image from "next/image";
 import { sourceForEventUrl } from "@/lib/event-source";
 import { hasMissingReminders, selectEventAccounts } from "@/lib/event-targets";
+import { BrandIcon } from "./brand-icon";
 
 type Range = "Quincena" | "Semana" | "Mes";
 type Status = "review" | "approved" | "scheduling" | "scheduled" | "published" | "failed" | "needs_reconciliation";
@@ -394,7 +395,7 @@ function Dashboard() {
 
   return <main className={styles.shell}>
     <aside className={styles.sidebar}>
-      <div className={styles.brand}><span className={styles.brandMark}>f</span><span>findly<span className={styles.brandDot}>.</span></span></div>
+      <div className={styles.brand}><BrandIcon size={28} /><span>findly<span className={styles.brandDot}>.</span></span></div>
       <div className={styles.workspace}><div className={styles.workspaceIcon}>✳</div><div><b>Mi espacio</b><small>3 cuentas conectadas</small></div><span className={styles.chevron}>⌄</span></div>
       <p className={styles.navLabel}>ESPACIO DE TRABAJO</p>
       <nav>{side.map((item, i) => <button key={item} onClick={() => setTab(item)} className={tab === item ? styles.navActive : styles.navItem}><span className={styles.navIcon}>{["▦", "◷", "♙", "⚙"][i]}</span>{item}{item === "Eventos" && <span className={styles.navCount}>{events.length}</span>}{item === "Calendario" && reviewCount > 0 && <span className={styles.navCount}>{reviewCount}</span>}</button>)}</nav>
