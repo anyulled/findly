@@ -7,6 +7,14 @@ export async function updateSession(request: NextRequest) {
     return NextResponse.next({ request });
   }
 
+  if (request.nextUrl.searchParams.has("code") && !request.nextUrl.pathname.startsWith("/auth/")) {
+    const callbackUrl = new URL("/auth/callback", request.url);
+    for (const [key, value] of request.nextUrl.searchParams.entries()) {
+      callbackUrl.searchParams.set(key, value);
+    }
+    return NextResponse.redirect(callbackUrl);
+  }
+
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
   if (!url || !key) {
