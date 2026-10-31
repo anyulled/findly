@@ -6,6 +6,7 @@ import { validatePost, type SocialNetwork } from "@/lib/social-validation";
 import { detectTitleLanguage, type PostLanguage } from "@/lib/language";
 import { generateSocialPost } from "@/lib/groq";
 import { generateEventDrafts } from "@/lib/groq-workflow";
+import { dispatchApprovedPostsWithSupabase } from "@/lib/approved-dispatch";
 import { approveAndSchedulePost, schedulePostWithSupabase, type PostPublishingOutcome } from "@/lib/post-publishing";
 import { MANAGED_ACCOUNTS, managedAccount } from "@/lib/managed-accounts";
 import { bufferCredentialForAccount } from "@/lib/buffer-account-credentials";
@@ -381,19 +382,15 @@ export async function generateReviewPosts(eventId: string): Promise<PostView[]> 
       language: post.language,
     };
   });
-  let insertedIds: string[] = [];
   if (rows.length > 0) {
-    const { data: inserted, error: upsertError } = await supabase.from("posts").upsert(rows, {
+    const { error: upsertError } = await supabase.from("posts").upsert(rows, {
       onConflict: "event_id,account_id,network,lead_days",
       ignoreDuplicates: true,
-    }).select("id");
+    });
     if (upsertError) throw new Error("No se pudieron guardar las publicaciones pendientes.");
-    insertedIds = (inserted ?? []).map((row) => row.id);
   }
   if (automatic) {
-    for (const postId of insertedIds) {
-      await schedulePostWithSupabase(postId, supabase, ownerId);
-    }
+    await dispatchApprovedPostsWithSupabase(supabase, ownerId, eventId);
   }
 
   const { data, error } = await supabase.from("posts").select("id,event_id,account_id,network,lead_days,due_at,content,status,language,last_error,buffer_post_id")

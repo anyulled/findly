@@ -83,11 +83,13 @@ export function SourceSettings({ accounts, sources, persistent, onSourcesChange,
     setMessage("");
     try {
       const response = await fetch("/api/cron/sync", { method: "POST" });
-      const result = await response.json() as { sources?: number; feedsSucceeded?: number; feedsFailed?: number; eventsInserted?: number; draftsCreated?: number; issues?: unknown[]; error?: string };
+      const result = await response.json() as { sources?: number; feedsSucceeded?: number; feedsFailed?: number; eventsInserted?: number; draftsCreated?: number; issues?: unknown[]; error?: string; approvedRecovery?: { scheduled: number; failed: number; needsReconciliation: number; errors: number; selected: number } };
       if (!response.ok) throw new Error(result.error === "unauthorized" ? "Vuelve a iniciar sesión para sincronizar." : "No se pudo completar la sincronización. Comprueba la configuración del servidor.");
       await onSyncComplete();
       const issueCount = result.issues?.length ?? 0;
-      setMessage(`Sincronización terminada: ${result.feedsSucceeded ?? 0} fuentes consultadas, ${result.eventsInserted ?? 0} eventos nuevos y ${result.draftsCreated ?? 0} borradores creados.${issueCount ? ` Hay ${issueCount} incidencias que revisar.` : ""}`);
+      const recovery = result.approvedRecovery;
+      const deliveryIssues = (recovery?.failed ?? 0) + (recovery?.needsReconciliation ?? 0) + (recovery?.errors ?? 0);
+      setMessage(`Sincronización terminada: ${result.feedsSucceeded ?? 0} fuentes consultadas, ${result.eventsInserted ?? 0} eventos nuevos, ${result.draftsCreated ?? 0} borradores creados y ${recovery?.scheduled ?? 0} aprobados programados.${issueCount || deliveryIssues ? ` Hay ${issueCount + deliveryIssues} incidencias que revisar.` : ""}${(recovery?.selected ?? 0) >= 50 ? " Puede haber más aprobados pendientes; vuelve a sincronizar." : ""}`);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "No se pudo completar la sincronización.");
     } finally {
@@ -119,9 +121,9 @@ export function SourceSettings({ accounts, sources, persistent, onSourcesChange,
     </div>}
 
     <div className={styles.sourceActions}>
-      <button type="button" className={styles.approveButton} disabled={!persistent || pending || !sources.some((source) => source.enabled && source.type === "luma_ical")} onClick={() => { void syncNow(); }}>{pending ? "Sincronizando…" : "Sincronizar ahora"}</button>
+      <button type="button" className={styles.approveButton} disabled={!persistent || pending} onClick={() => { void syncNow(); }}>{pending ? "Sincronizando…" : "Sincronizar ahora"}</button>
       {!persistent && <small>La sincronización requiere Supabase configurado e iniciar sesión como propietario.</small>}
-      {persistent && !sources.some((source) => source.enabled && source.type === "luma_ical") && <small>Activa al menos una fuente Luma iCal.</small>}
+      {persistent && !sources.some((source) => source.enabled && source.type === "luma_ical") && <small>Sin fuentes activas, se recuperan las publicaciones aprobadas pendientes.</small>}
     </div>
 
     <form className={styles.sourceForm} onSubmit={(event) => { void addSource(event); }}>
