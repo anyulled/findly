@@ -12,7 +12,7 @@ La aplicación incluye:
 - Modos globales de revisión y automático en la interfaz. Aprobar un borrador lo guarda también como ejemplo de estilo.
 - Un modo demo que guarda datos en el navegador y una ruta de persistencia con Supabase, autenticación de Google y acceso restringido al correo propietario.
 
-La generación actual del dashboard usa plantillas locales y no utiliza los prompts de voz ni los ejemplos aprobados. Hay un adaptador Groq validado con respuestas simuladas, pero todavía no está conectado al flujo de creación de borradores. **Buffer no recibe ni programa contenido y el modo automático no publica.** El parser iCal está probado con fixtures, pero los eventos se introducen manualmente: la aplicación aún no obtiene calendarios Luma ni extrae eventos de Meetup. Tampoco hay endpoint de sincronización ni tarea cron configurados.
+La generación actual del dashboard usa plantillas locales y no utiliza los prompts de voz ni los ejemplos aprobados. Hay un adaptador Groq validado con respuestas simuladas, pero todavía no está conectado al flujo de creación de borradores. **Buffer no recibe ni programa contenido y el modo automático no publica.** La ruta `POST /api/cron/sync` permite importar eventos nuevos desde fuentes Luma iCal habilitadas; requiere el bearer secret `CRON_SECRET` y acceso servidor a Supabase. Meetup no se sincroniza ni se extrae. No hay una tarea cron externa configurada.
 
 El código de autenticación y persistencia está preparado, pero este repositorio no incluye credenciales, configuración de proveedores ni un despliegue de producción. La aplicación no está lista para publicación automática hasta conectar y validar esos servicios. La sincronización de cambios de fecha y cancelaciones queda fuera de la primera fase.
 
