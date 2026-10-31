@@ -38,7 +38,7 @@ export type LumaDraftRepository = {
   listApprovedExamples(ownerId: string, accountIds: string[]): Promise<ApprovedStyleExample[]>;
   insertDrafts(rows: LumaDraftRow[]): Promise<number>;
   getPublishingMode?(ownerId: string): Promise<"review" | "automatic">;
-  scheduleAutomaticPosts?(ownerId: string, eventId: string): Promise<void>;
+  scheduleAutomaticPosts?(ownerId: string, eventId: string, accountIds: string[]): Promise<void>;
 };
 
 export type SocialPostGenerator = (input: Parameters<typeof generateSocialPost>[0]) => Promise<GeneratedPost | { text: string }>;
@@ -98,7 +98,7 @@ export async function generateLumaEventDrafts(
   });
   const inserted = rows.length > 0 ? await repository.insertDrafts(rows) : 0;
   if (publishingMode === "automatic") {
-    await repository.scheduleAutomaticPosts?.(event.owner_id, event.id);
+    await repository.scheduleAutomaticPosts?.(event.owner_id, event.id, accountIds);
   }
   return inserted;
 }

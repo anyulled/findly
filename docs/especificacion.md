@@ -7,7 +7,7 @@ Detectar eventos y preparar anuncios para las cuentas personales y de asociacion
 ## Alcance acordado
 
 - Un usuario autorizado inicia sesión con Google mediante Supabase.
-- Las fuentes pueden asociarse a varias cuentas de Buffer y a sus canales. Luma se consulta mediante suscripción iCal; Meetup queda pendiente de verificar con una fuente real.
+- Las fuentes pueden asociarse a varias cuentas de Buffer y a sus canales. Luma se consulta mediante suscripción iCal; Meetup queda pendiente de verificar con una fuente real. Los eventos importados solo generan y programan recordatorios para las cuentas habilitadas vinculadas a su fuente, también al completar recordatorios o reintentar; si no hay cuentas vinculadas no se generan publicaciones. Los eventos manuales usan todas las cuentas habilitadas.
 - Un evento también puede añadirse por URL, con extracción y corrección manual de sus datos.
 - Las publicaciones se generan con Groq para cada cuenta, canal y fecha aplicable. El idioma se infiere del título; si no es claro se usa inglés.
 - Las fechas previstas son 14, 7 y 1 día antes del evento, a las 13:00 en Europe/Madrid. Se omiten las fechas que ya hayan pasado.
