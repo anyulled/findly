@@ -177,3 +177,15 @@ test("a slow delivery defers remaining approved posts to the next run", async ()
   assert.equal(second.scheduled, 1);
   assert.equal(second.deferred, 0);
 });
+
+
+test("an already exhausted shared deadline defers a later event batch", async () => {
+  let sent = 0;
+  const result = await dispatchApprovedPosts(
+    async () => ["later-event"],
+    async () => { sent += 1; return { kind: "scheduled", bufferPostId: "remote" }; },
+    { now: () => 20_000, deadlineMs: 10_000 },
+  );
+  assert.equal(sent, 0);
+  assert.equal(result.deferred, 1);
+});
