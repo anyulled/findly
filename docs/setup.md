@@ -40,8 +40,8 @@ Supabase free projects may pause after a week of sufficiently low activity. This
 ### Luma and event links
 
 1. Save the Luma iCal subscription URL in **Settings → Event sources**, then associate it with one or more accounts.
-2. Invoke `POST /api/cron/sync` with `Authorization: Bearer <CRON_SECRET>` to fetch enabled Luma feeds and insert newly discovered events. The route is safe to retry: existing `(owner, source, external ID)` records are ignored and never updated.
-3. The route does not create drafts or posts yet. Meetup synchronization and scraping are unsupported; add those events through the manual event form.
+2. Invoke `POST /api/cron/sync` with `Authorization: Bearer <CRON_SECRET>` to fetch enabled Luma feeds and insert newly discovered events. This exact POST path bypasses browser-session middleware and is authenticated by its constant-time bearer-secret check. When both `GROQ_API_KEY` and `GROQ_MODEL` are configured, newly inserted events also generate review drafts for accounts linked to that source, using the account voice and matching approved examples.
+3. The route is safe to retry: existing `(owner, source, external ID)` records are ignored and never updated, so existing reminder drafts are not regenerated. If Groq is unconfigured or draft generation fails, the event remains saved; use the event's **Crear recordatorios** action after Groq is available. Meetup synchronization and scraping are unsupported; add those events through the manual event form.
 4. Feed fetches require HTTPS, reject redirects, time out after 10 seconds, and cap response bodies at 2 MB. Feed URLs are not included in the response. Date changes and cancellations remain out of scope.
 
 ### Scheduled sync

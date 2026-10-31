@@ -1,6 +1,12 @@
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
-import { fetchLumaFeed, syncLumaSources, type SyncRepository } from "@/lib/luma-sync";
+import { fetchLumaFeed, syncLumaSources, type DraftGenerator, type SyncRepository } from "@/lib/luma-sync";
 import { isAuthorizedCronRequest } from "@/lib/cron-auth";
+import { generateSocialPost } from "@/lib/groq";
+import { generateLumaEventDrafts, type LumaDraftRepository } from "@/lib/luma-drafts";
+import type { PostLanguage } from "@/lib/language";
+import type { SocialNetwork } from "@/lib/social-validation";
+
+const NETWORKS: SocialNetwork[] = ["LinkedIn", "X", "Bluesky"];
 
 export async function POST(request: Request): Promise<Response> {
   const secret = process.env.CRON_SECRET;
@@ -18,6 +24,56 @@ export async function POST(request: Request): Promise<Response> {
   const owner = userData.users.find((user) => user.email?.toLowerCase() === ownerEmail);
   if (!owner) return Response.json({ error: "sync_not_configured" }, { status: 503 });
 
+  const draftRepository: LumaDraftRepository = {
+    async listLinkedAccounts(ownerId, sourceId) {
+      const { data: links, error: linkError } = await supabase.from("source_accounts")
+        .select("account_id").eq("owner_id", ownerId).eq("source_id", sourceId);
+      if (linkError) throw new Error("Unable to read source account links");
+      const accountIds = [...new Set((links ?? []).map((link) => link.account_id))];
+      if (accountIds.length === 0) return [];
+      const { data, error } = await supabase.from("accounts")
+        .select("id,name,voice_prompt,networks").eq("owner_id", ownerId).eq("enabled", true)
+        .in("id", accountIds).order("created_at");
+      if (error) throw new Error("Unable to read linked accounts");
+      return (data ?? []).map((account) => ({
+        id: account.id,
+        name: account.name,
+        voice: account.voice_prompt,
+        networks: account.networks.filter((network: string): network is SocialNetwork => NETWORKS.includes(network as SocialNetwork)),
+      }));
+    },
+    async listExistingReminders(ownerId, eventId) {
+      const { data, error } = await supabase.from("posts").select("account_id,network,lead_days")
+        .eq("owner_id", ownerId).eq("event_id", eventId);
+      if (error) throw new Error("Unable to read existing reminders");
+      return (data ?? []).flatMap((post) => NETWORKS.includes(post.network as SocialNetwork)
+        ? [{ accountId: post.account_id, network: post.network as SocialNetwork, leadDays: post.lead_days }]
+        : []);
+    },
+    async listApprovedExamples(ownerId, accountIds) {
+      const { data, error } = await supabase.from("style_examples")
+        .select("content,account_id,network,language").eq("owner_id", ownerId)
+        .in("account_id", accountIds).order("created_at", { ascending: false }).limit(72);
+      if (error) throw new Error("Unable to read approved style examples");
+      return (data ?? []).flatMap((example) => {
+        if (!NETWORKS.includes(example.network as SocialNetwork) || !["en", "es", "ca"].includes(example.language)) return [];
+        return [{
+          text: example.content,
+          accountId: example.account_id,
+          network: example.network as SocialNetwork,
+          language: example.language as PostLanguage,
+        }];
+      });
+    },
+    async insertDrafts(rows) {
+      const { data, error } = await supabase.from("posts").upsert(rows, {
+        onConflict: "event_id,account_id,network,lead_days", ignoreDuplicates: true,
+      }).select("id");
+      if (error) throw new Error("Unable to persist generated drafts");
+      return data?.length ?? 0;
+    },
+  };
+
   const repository: SyncRepository = {
     async listEnabledLumaSources() {
       const { data, error } = await supabase.from("sources").select("id,owner_id,name,feed_url")
@@ -29,14 +85,18 @@ export async function POST(request: Request): Promise<Response> {
     async insertEvents(events) {
       const { data, error } = await supabase.from("events").upsert(events, {
         onConflict: "owner_id,source_id,external_id", ignoreDuplicates: true,
-      }).select("id");
+      }).select("id,owner_id,source_id,external_id,title,starts_at,location,description,event_url,detected_language");
       if (error) throw new Error("Unable to save imported events");
-      return data?.length ?? 0;
+      return data ?? [];
     },
   };
 
   try {
-    const result = await syncLumaSources(repository, fetchLumaFeed);
+    const groqConfigured = Boolean(process.env.GROQ_API_KEY?.trim() && process.env.GROQ_MODEL?.trim());
+    const generateDrafts: DraftGenerator | undefined = groqConfigured
+      ? (_source, event) => generateLumaEventDrafts(event, draftRepository, generateSocialPost)
+      : undefined;
+    const result = await syncLumaSources(repository, fetchLumaFeed, generateDrafts);
     return Response.json(result, { status: 200 });
   } catch {
     return Response.json({ error: "sync_unavailable" }, { status: 503 });

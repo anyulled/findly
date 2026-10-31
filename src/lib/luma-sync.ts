@@ -1,5 +1,6 @@
 import { detectTitleLanguage } from "./language";
 import { parseLumaIcal, type LumaCalendarEvent } from "./luma-ical";
+import type { ImportedLumaEvent } from "./luma-drafts";
 
 export type LumaSource = { id: string; ownerId: string; name: string; feedUrl: string };
 export type PersistableEvent = {
@@ -9,18 +10,27 @@ export type PersistableEvent = {
 };
 export type SyncRepository = {
   listEnabledLumaSources(): Promise<LumaSource[]>;
-  insertEvents(events: PersistableEvent[]): Promise<number>;
+  insertEvents(events: PersistableEvent[]): Promise<ImportedLumaEvent[]>;
 };
 export type FeedFetcher = (url: string) => Promise<string>;
+export type DraftGenerator = (source: LumaSource, event: ImportedLumaEvent) => Promise<number>;
 
 export type SyncResult = {
   sources: number; feedsSucceeded: number; feedsFailed: number; eventsInserted: number;
-  issues: Array<{ sourceId: string; code: "feed_unavailable" | "invalid_calendar" | "database_error"; skippedEvents?: number }>;
+  draftsCreated: number; draftEventsSkipped: number; draftEventsFailed: number;
+  issues: Array<{ sourceId: string; eventId?: string; code: "feed_unavailable" | "invalid_calendar" | "database_error" | "draft_generation_failed"; skippedEvents?: number }>;
 };
 
-export async function syncLumaSources(repository: SyncRepository, fetchFeed: FeedFetcher): Promise<SyncResult> {
+export async function syncLumaSources(
+  repository: SyncRepository,
+  fetchFeed: FeedFetcher,
+  generateDrafts?: DraftGenerator,
+): Promise<SyncResult> {
   const sources = await repository.listEnabledLumaSources();
-  const result: SyncResult = { sources: sources.length, feedsSucceeded: 0, feedsFailed: 0, eventsInserted: 0, issues: [] };
+  const result: SyncResult = {
+    sources: sources.length, feedsSucceeded: 0, feedsFailed: 0, eventsInserted: 0,
+    draftsCreated: 0, draftEventsSkipped: 0, draftEventsFailed: 0, issues: [],
+  };
   for (const source of sources) {
     let parsed: ReturnType<typeof parseLumaIcal>;
     try {
@@ -38,8 +48,25 @@ export async function syncLumaSources(repository: SyncRepository, fetchFeed: Fee
       description: event.description, event_url: event.url, detected_language: detectTitleLanguage(event.title),
     }));
     if (!rows.length) continue;
-    try { result.eventsInserted += await repository.insertEvents(rows); }
-    catch { result.issues.push({ sourceId: source.id, code: "database_error" }); }
+    let inserted: ImportedLumaEvent[];
+    try {
+      inserted = await repository.insertEvents(rows);
+      result.eventsInserted += inserted.length;
+    } catch {
+      result.issues.push({ sourceId: source.id, code: "database_error" });
+      continue;
+    }
+    for (const event of inserted) {
+      if (!generateDrafts) {
+        result.draftEventsSkipped += 1;
+        continue;
+      }
+      try { result.draftsCreated += await generateDrafts(source, event); }
+      catch {
+        result.draftEventsFailed += 1;
+        result.issues.push({ sourceId: source.id, eventId: event.id, code: "draft_generation_failed" });
+      }
+    }
   }
   return result;
 }
