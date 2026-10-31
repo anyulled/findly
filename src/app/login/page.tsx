@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { Suspense } from "react";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import { GoogleSignInButton } from "./sign-in-button";
@@ -10,7 +11,12 @@ export default function LoginPage(props: PageProps<"/login">) {
 }
 
 async function LoginContent({ searchParams }: Pick<PageProps<"/login">, "searchParams">) {
-  const { error } = await searchParams;
+  const params = await searchParams;
+  const { error, code, next } = params as Record<string, string | undefined>;
+  if (typeof code === "string" && code.length > 0) {
+    const targetNext = typeof next === "string" ? next : "/";
+    redirect(`/auth/callback?code=${encodeURIComponent(code)}&next=${encodeURIComponent(targetNext)}`);
+  }
   const configured = isSupabaseConfigured();
   return <main className={styles.page}><section className={styles.card}>
     <Link href="/" className={styles.brand}><BrandIcon size={26} /> findly<span className={styles.dot}>.</span></Link>
