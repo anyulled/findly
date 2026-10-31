@@ -78,4 +78,23 @@ describe("generateEventDrafts", () => {
     assert.deepEqual(drafts.map(({ leadDays }) => leadDays), [1, 1]);
     assert.deepEqual(drafts.map(({ date }) => date), ["2026-12-11", "2026-12-11"]);
   });
+
+  it("stops starting more Groq requests after a generation fails", async () => {
+    let started = 0;
+    await assert.rejects(generateEventDrafts({
+      event,
+      accounts: [accounts[0]],
+      approvedExamples: [],
+      existing: [],
+      now: new Date("2026-12-01T00:00:00.000Z"),
+      generate: async () => {
+        started += 1;
+        if (started === 1) throw new Error("mock failure");
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        return { text: "draft" };
+      },
+    }), /mock failure/u);
+
+    assert.equal(started, 4);
+  });
 });

@@ -69,15 +69,24 @@ function reminderKey(accountId: string, network: SocialNetwork, leadDays: number
 async function mapWithConcurrency<T, R>(items: T[], concurrency: number, run: (item: T) => Promise<R>): Promise<R[]> {
   const results = new Array<R>(items.length);
   let next = 0;
+  let stopped = false;
+  let failure: unknown;
   async function worker() {
-    while (true) {
+    while (!stopped) {
       const index = next;
       next += 1;
       if (index >= items.length) return;
-      results[index] = await run(items[index]);
+      try {
+        results[index] = await run(items[index]);
+      } catch (error) {
+        failure ??= error;
+        stopped = true;
+        return;
+      }
     }
   }
   await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, worker));
+  if (failure) throw failure;
   return results;
 }
 
