@@ -46,6 +46,12 @@ Supabase free projects may pause after a week of sufficiently low activity. This
 3. The route is safe to retry: existing `(owner, source, external ID)` records are ignored and never updated, and only missing reminder drafts are generated. If Groq is unconfigured or draft generation fails, the event remains saved; later syncs retry its missing reminders, and the event's **Crear recordatorios** action is also available. Meetup feed synchronization and API/OAuth integration remain unsupported. For a single public event, use the manual form URL extractor; it reads available public metadata and leaves missing values for review.
 4. Feed fetches require HTTPS, reject redirects, time out after 10 seconds, and cap response bodies at 2 MB. Feed URLs are not included in the response. Date changes and cancellations remain out of scope.
 
+### Recovering approved posts
+
+The authenticated sync endpoint first scans up to 50 already-approved posts in due-time order, including posts from manual events and when Groq or Luma feeds are unavailable. For imported events it only selects accounts still linked to the event source. Each delivery uses the existing atomic claim, and confirmed, failed, in-flight, and uncertain results are not automatically resubmitted. A failed provider response remains visible for an explicit retry; an uncertain response requires reconciliation. A new run continues the backlog, and the sync response reports the selected, scheduled, failed, uncertain, and unexpected-error counts. This also resumes a post approved before the global mode was changed to review: the approval was already granted. Recovery never creates another style example.
+
+A connected owner can run **Ajustes → Fuentes → Sincronizar ahora** even without an active feed. If the response reports a full batch, run it again or wait for the next scheduled invocation. This requires the database migrations and the same server-only Buffer, Supabase service-role and authentication configuration as scheduled sync.
+
 ### Scheduled sync
 
 1. Deploy the application to an eligible hosting plan and confirm its HTTPS URL.

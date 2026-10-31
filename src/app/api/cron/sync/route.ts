@@ -9,6 +9,7 @@ import { schedulePostWithSupabase } from "@/lib/post-publishing";
 import { createClient } from "@/lib/supabase/server";
 import { isSameOriginSessionRequest } from "@/lib/sync-request-auth";
 import { selectEventAccounts } from "@/lib/event-targets";
+import { dispatchApprovedPostsWithSupabase } from "@/lib/approved-dispatch";
 
 const NETWORKS: SocialNetwork[] = ["LinkedIn", "X", "Bluesky"];
 
@@ -134,12 +135,15 @@ export async function POST(request: Request): Promise<Response> {
   };
 
   try {
+    // Recover persisted approval intents even when there are no feeds or Groq
+    // is unavailable. Failed and uncertain posts are never selected here.
+    const approvedRecovery = await dispatchApprovedPostsWithSupabase(supabase, ownerId);
     const groqConfigured = Boolean(process.env.GROQ_API_KEY?.trim() && process.env.GROQ_MODEL?.trim());
     const generateDrafts: DraftGenerator | undefined = groqConfigured
       ? (_source, event) => generateLumaEventDrafts(event, draftRepository, generateSocialPost)
       : undefined;
     const result = await syncLumaSources(repository, fetchLumaFeed, generateDrafts);
-    return Response.json(result, { status: 200 });
+    return Response.json({ ...result, approvedRecovery }, { status: 200 });
   } catch {
     return Response.json({ error: "sync_unavailable" }, { status: 503 });
   }
