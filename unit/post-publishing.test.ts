@@ -18,19 +18,21 @@ function bufferResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 }
 
-function fakeSupabase(options: { channelId?: string; status?: string; confirmedPersistenceFails?: boolean } = {}) {
+function fakeSupabase(options: { channelId?: string; status?: string; confirmedPersistenceFails?: boolean; scheduledPost?: PostToSchedule } = {}) {
   const calls: string[] = [];
+  const rpcArguments: Array<{ name: string; args: Record<string, unknown> }> = [];
   let status = options.status ?? "approved";
   let bufferPostId: string | null = null;
   let lastError: string | null = null;
 
   function rpc(name: string, args: Record<string, unknown>) {
     calls.push(name);
+    rpcArguments.push({ name, args });
     const execute = async () => {
       if (name === "claim_post_for_scheduling") {
         if ((status !== "approved" && status !== "failed") || bufferPostId) return { data: null, error: null };
         status = "scheduling";
-        return { data: post, error: null };
+        return { data: options.scheduledPost ?? post, error: null };
       }
       if (name === "mark_post_scheduled") {
         if (options.confirmedPersistenceFails) return { data: null, error: { message: "database unavailable" } };
@@ -67,6 +69,7 @@ function fakeSupabase(options: { channelId?: string; status?: string; confirmedP
   return {
     supabase: supabase as unknown as Parameters<typeof schedulePostWithSupabase>[1],
     calls,
+    rpcArguments,
     get state() { return { status, bufferPostId, lastError }; },
   };
 }
@@ -92,6 +95,8 @@ test("review approval records approval before Buffer scheduling and stores confi
 
   assert.equal(result.kind, "scheduled");
   assert.deepEqual(database.calls, ["approve_post", "claim_post_for_scheduling", "mark_post_scheduled"]);
+  assert.equal(database.rpcArguments.find((call) => call.name === "claim_post_for_scheduling")?.args.p_owner_id, "owner-uuid");
+  assert.equal(database.rpcArguments.find((call) => call.name === "mark_post_scheduled")?.args.p_owner_id, "owner-uuid");
   assert.deepEqual(database.state, { status: "scheduled", bufferPostId: "buffer-post-1", lastError: null });
 });
 
@@ -155,6 +160,19 @@ test("a transport timeout becomes reconciliation-required and a second dispatch 
 
 test("a missing account/network channel fails before calling Buffer", async () => {
   const database = fakeSupabase();
+  let requests = 0;
+  const result = await schedulePostWithSupabase(post.id, database.supabase, "owner-uuid", "mock-buffer-key", async () => {
+    requests += 1;
+    return bufferResponse({});
+  });
+  assert.equal(result.kind, "failed");
+  assert.equal(database.state.status, "failed");
+  assert.equal(requests, 0);
+});
+
+test("persisted text is validated deterministically before Buffer is called", async () => {
+  const tooLongPost = { ...post, network: "X", content: "x".repeat(281) };
+  const database = fakeSupabase({ channelId: "buffer-channel-1", scheduledPost: tooLongPost });
   let requests = 0;
   const result = await schedulePostWithSupabase(post.id, database.supabase, "owner-uuid", "mock-buffer-key", async () => {
     requests += 1;

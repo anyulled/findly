@@ -27,7 +27,7 @@ alter table public.posts drop constraint posts_status_check;
 alter table public.posts add constraint posts_status_check
   check (status in ('review','approved','scheduling','scheduled','published','failed','needs_reconciliation'));
 
-create or replace function public.claim_post_for_scheduling(p_post_id uuid)
+create or replace function public.claim_post_for_scheduling(p_post_id uuid, p_owner_id uuid)
 returns table (id uuid, account_id uuid, network text, due_at timestamptz, content text)
 language sql
 security invoker
@@ -36,13 +36,14 @@ as $$
   update public.posts as post
   set status = 'scheduling', last_error = null
   where post.id = p_post_id
-    and post.owner_id = (select auth.uid())
+    and post.owner_id = p_owner_id
+    and ((select auth.uid()) = p_owner_id or current_user = 'service_role')
     and post.status in ('approved','failed')
     and post.buffer_post_id is null
   returning post.id, post.account_id, post.network, post.due_at, post.content;
 $$;
 
-create or replace function public.mark_post_scheduled(p_post_id uuid, p_buffer_post_id text)
+create or replace function public.mark_post_scheduled(p_post_id uuid, p_buffer_post_id text, p_owner_id uuid)
 returns void
 language plpgsql
 security invoker
@@ -54,7 +55,9 @@ begin
   end if;
   update public.posts
   set status = 'scheduled', buffer_post_id = p_buffer_post_id, last_error = null
-  where id = p_post_id and owner_id = (select auth.uid()) and status = 'scheduling';
+  where id = p_post_id and owner_id = p_owner_id
+    and ((select auth.uid()) = p_owner_id or current_user = 'service_role')
+    and status = 'scheduling';
   if not found then raise exception 'Post is not held for scheduling'; end if;
 end;
 $$;
@@ -62,7 +65,8 @@ $$;
 create or replace function public.mark_post_scheduling_failure(
   p_post_id uuid,
   p_error text,
-  p_needs_reconciliation boolean
+  p_needs_reconciliation boolean,
+  p_owner_id uuid
 )
 returns void
 language plpgsql
@@ -73,17 +77,19 @@ begin
   update public.posts
   set status = case when p_needs_reconciliation then 'needs_reconciliation' else 'failed' end,
       last_error = left(coalesce(nullif(btrim(p_error), ''), 'Buffer scheduling failed.'), 500)
-  where id = p_post_id and owner_id = (select auth.uid()) and status = 'scheduling';
+  where id = p_post_id and owner_id = p_owner_id
+    and ((select auth.uid()) = p_owner_id or current_user = 'service_role')
+    and status = 'scheduling';
   if not found then raise exception 'Post is not held for scheduling'; end if;
 end;
 $$;
 
-revoke all on function public.claim_post_for_scheduling(uuid) from public, anon;
-revoke all on function public.mark_post_scheduled(uuid, text) from public, anon;
-revoke all on function public.mark_post_scheduling_failure(uuid, text, boolean) from public, anon;
-grant execute on function public.claim_post_for_scheduling(uuid) to authenticated;
-grant execute on function public.mark_post_scheduled(uuid, text) to authenticated;
-grant execute on function public.mark_post_scheduling_failure(uuid, text, boolean) to authenticated;
+revoke all on function public.claim_post_for_scheduling(uuid, uuid) from public, anon;
+revoke all on function public.mark_post_scheduled(uuid, text, uuid) from public, anon;
+revoke all on function public.mark_post_scheduling_failure(uuid, text, boolean, uuid) from public, anon;
+grant execute on function public.claim_post_for_scheduling(uuid, uuid) to authenticated, service_role;
+grant execute on function public.mark_post_scheduled(uuid, text, uuid) to authenticated, service_role;
+grant execute on function public.mark_post_scheduling_failure(uuid, text, boolean, uuid) to authenticated, service_role;
 
 -- Rejected posts may be edited and retried. Posts with uncertain outcomes stay
 -- locked in `needs_reconciliation` and cannot be edited or resubmitted here.
@@ -118,7 +124,7 @@ $$;
 revoke all on function public.update_post_content(uuid, text) from public, anon;
 grant execute on function public.update_post_content(uuid, text) to authenticated;
 
-create or replace function public.reconcile_post_scheduled(p_post_id uuid, p_buffer_post_id text)
+create or replace function public.reconcile_post_scheduled(p_post_id uuid, p_buffer_post_id text, p_owner_id uuid)
 returns void
 language plpgsql
 security invoker
@@ -131,12 +137,34 @@ begin
   update public.posts
   set status = 'scheduled', buffer_post_id = btrim(p_buffer_post_id), last_error = null
   where id = p_post_id
-    and owner_id = (select auth.uid())
+    and owner_id = p_owner_id
+    and (select auth.uid()) = p_owner_id
     and status in ('needs_reconciliation','scheduling')
     and buffer_post_id is null;
   if not found then raise exception 'Post is not awaiting reconciliation'; end if;
 end;
 $$;
 
-revoke all on function public.reconcile_post_scheduled(uuid, text) from public, anon;
-grant execute on function public.reconcile_post_scheduled(uuid, text) to authenticated;
+revoke all on function public.reconcile_post_scheduled(uuid, text, uuid) from public, anon;
+grant execute on function public.reconcile_post_scheduled(uuid, text, uuid) to authenticated;
+
+create or replace function public.reconcile_post_missing(p_post_id uuid, p_owner_id uuid)
+returns void
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+begin
+  update public.posts
+  set status = 'failed', last_error = 'Owner checked Buffer and confirmed no matching post was found.'
+  where id = p_post_id
+    and owner_id = p_owner_id
+    and (select auth.uid()) = p_owner_id
+    and status in ('needs_reconciliation','scheduling')
+    and buffer_post_id is null;
+  if not found then raise exception 'Post is not awaiting reconciliation'; end if;
+end;
+$$;
+
+revoke all on function public.reconcile_post_missing(uuid, uuid) from public, anon;
+grant execute on function public.reconcile_post_missing(uuid, uuid) to authenticated;

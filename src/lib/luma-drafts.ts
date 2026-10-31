@@ -28,7 +28,7 @@ export type LumaDraftRow = {
   due_at: string;
   timezone: "Europe/Madrid";
   content: string;
-  status: "review";
+  status: "review" | "approved";
   language: PostLanguage;
 };
 
@@ -37,6 +37,8 @@ export type LumaDraftRepository = {
   listExistingReminders(ownerId: string, eventId: string): Promise<ExistingReminder[]>;
   listApprovedExamples(ownerId: string, accountIds: string[]): Promise<ApprovedStyleExample[]>;
   insertDrafts(rows: LumaDraftRow[]): Promise<number>;
+  getPublishingMode?(ownerId: string): Promise<"review" | "automatic">;
+  scheduleAutomaticPosts?(ownerId: string, eventId: string): Promise<void>;
 };
 
 export type SocialPostGenerator = (input: Parameters<typeof generateSocialPost>[0]) => Promise<GeneratedPost | { text: string }>;
@@ -55,6 +57,7 @@ export async function generateLumaEventDrafts(
     repository.listExistingReminders(event.owner_id, event.id),
     repository.listApprovedExamples(event.owner_id, accountIds),
   ]);
+  const publishingMode = await repository.getPublishingMode?.(event.owner_id) ?? "review";
   const eventTime = formatMadridDateTime(event.starts_at);
   const drafts = await generateEventDrafts({
     event: {
@@ -89,9 +92,13 @@ export async function generateLumaEventDrafts(
       due_at: madridDateTimeToIso(draft.date, draft.time),
       timezone: "Europe/Madrid",
       content: draft.text,
-      status: "review",
+      status: publishingMode === "automatic" ? "approved" : "review",
       language: draft.language,
     };
   });
-  return rows.length > 0 ? repository.insertDrafts(rows) : 0;
+  const inserted = rows.length > 0 ? await repository.insertDrafts(rows) : 0;
+  if (publishingMode === "automatic") {
+    await repository.scheduleAutomaticPosts?.(event.owner_id, event.id);
+  }
+  return inserted;
 }

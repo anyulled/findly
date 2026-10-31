@@ -434,15 +434,26 @@ export async function retryFailedPost(postId: string): Promise<PostPublishingOut
 }
 
 export async function reconcileScheduledPost(postId: string, bufferPostId: string): Promise<void> {
-  const { supabase } = await authorizedClient();
+  const { supabase, ownerId } = await authorizedClient();
   if (!/^[0-9a-f-]{36}$/i.test(postId)) throw new Error("Solicitud de publicación no válida.");
   const normalizedId = bufferPostId.trim();
   if (!normalizedId || normalizedId.length > 200) throw new Error("Introduce el ID del post confirmado en Buffer.");
   const { error } = await supabase.rpc("reconcile_post_scheduled", {
     p_post_id: postId,
     p_buffer_post_id: normalizedId,
+    p_owner_id: ownerId,
   });
   if (error) throw new Error("No se pudo confirmar la programación conciliada.");
+}
+
+export async function confirmPostMissingFromBuffer(postId: string): Promise<void> {
+  const { supabase, ownerId } = await authorizedClient();
+  if (!/^[0-9a-f-]{36}$/i.test(postId)) throw new Error("Solicitud de publicación no válida.");
+  const { error } = await supabase.rpc("reconcile_post_missing", {
+    p_post_id: postId,
+    p_owner_id: ownerId,
+  });
+  if (error) throw new Error("No se pudo guardar la conciliación de ausencia.");
 }
 
 export async function saveBufferChannel(accountId: string, network: SocialNetwork, bufferChannelId: string): Promise<void> {
