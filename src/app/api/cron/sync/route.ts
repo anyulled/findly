@@ -82,12 +82,17 @@ export async function POST(request: Request): Promise<Response> {
       return (data ?? []).filter((source) => typeof source.feed_url === "string" && source.feed_url.length > 0)
         .map((source) => ({ id: source.id, ownerId: source.owner_id, name: source.name, feedUrl: source.feed_url! }));
     },
-    async insertEvents(events) {
-      const { data, error } = await supabase.from("events").upsert(events, {
+    async upsertEvents(events) {
+      const eventColumns = "id,owner_id,source_id,external_id,title,starts_at,location,description,event_url,detected_language";
+      const { data: inserted, error: insertError } = await supabase.from("events").upsert(events, {
         onConflict: "owner_id,source_id,external_id", ignoreDuplicates: true,
-      }).select("id,owner_id,source_id,external_id,title,starts_at,location,description,event_url,detected_language");
-      if (error) throw new Error("Unable to save imported events");
-      return data ?? [];
+      }).select(eventColumns);
+      if (insertError) throw new Error("Unable to save imported events");
+      const { data: available, error: selectError } = await supabase.from("events").select(eventColumns)
+        .eq("owner_id", events[0].owner_id).eq("source_id", events[0].source_id)
+        .in("external_id", events.map((event) => event.external_id));
+      if (selectError) throw new Error("Unable to load persisted source events");
+      return { inserted: inserted ?? [], available: available ?? [] };
     },
   };
 
