@@ -89,6 +89,7 @@ function Dashboard() {
   const [range, setRange] = useState<Range>("Quincena");
   const [anchor, setAnchor] = useState(() => new Date());
   const [expandedDay, setExpandedDay] = useState<string | null>(null);
+  const firstRevealedPost = useRef<HTMLButtonElement>(null);
   const [events, setEvents] = useState(initialEvents);
   const [accountList, setAccountList] = useState(accounts);
   const [sources, setSources] = useState<SourceView[]>([]);
@@ -109,6 +110,10 @@ function Dashboard() {
   const [hydrated, setHydrated] = useState(false);
   const [feedback, setFeedback] = useState("");
   const persistent = isSupabaseConfigured();
+
+  useEffect(() => {
+    if (expandedDay) firstRevealedPost.current?.focus();
+  }, [expandedDay]);
 
   function openAddForm() {
     extractionRequestId.current += 1;
@@ -402,10 +407,10 @@ function Dashboard() {
               return <div key={key} data-testid="calendar-day" data-calendar-date={key} className={`${styles.day} ${offMonth ? styles.offMonth : ""} ${key === dayKey(new Date()) ? styles.isToday : ""}`}>
                 <div className={styles.dayHeader}><span>{date.getDate()}</span>{dayPosts.length > 0 && <small>{dayPosts.length}</small>}</div>
                 <div className={styles.dayPosts} id={`posts-${key}`}>
-                  {visiblePosts.map((post) => {
+                  {visiblePosts.map((post, index) => {
                     const event = events.find((e) => e.id === post.eventId);
                     const title = event?.title ?? "Publicación";
-                    return <button key={post.id} className={`${styles.postPill} ${styles["post" + post.status]}`} onClick={() => { setSelected(post); setEditing(post.text); setReconciliationId(""); setAbsenceConfirmed(false); }} aria-label={`${title} · ${post.account} · ${post.network} · ${statusLabels[post.status]}`} title={title}>
+                    return <button key={post.id} ref={expanded && index === 3 ? firstRevealedPost : undefined} className={`${styles.postPill} ${styles["post" + post.status]}`} onClick={() => { setSelected(post); setEditing(post.text); setReconciliationId(""); setAbsenceConfirmed(false); }} aria-label={`${title} · ${post.account} · ${post.network} · ${statusLabels[post.status]}`} title={title}>
                       <span className={styles.networkDot}>{post.network === "LinkedIn" ? "in" : post.network === "X" ? "𝕏" : "b"}</span>
                       <span className={styles.postDescription}><span className={styles.pillText}>{title}</span>{expanded && <span className={styles.postMeta}>{post.account} · {post.network} · {statusLabels[post.status]}</span>}</span>
                     </button>;

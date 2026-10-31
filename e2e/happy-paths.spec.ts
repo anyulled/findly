@@ -76,12 +76,19 @@ test("expands a crowded day and opens every account's publication, including an 
   await page.getByRole("button", { name: "Calendario" }).click();
 
   const reminderDay = page.locator(`[data-testid="calendar-day"][data-calendar-date="${reminderDate}"]`);
+  const periodHeading = page.getByRole("heading", { level: 2 }).first();
+  const period = await periodHeading.textContent();
+  expect(period).not.toBeNull();
   const expand = reminderDay.getByRole("button", { name: `Mostrar 4 publicaciones más del ${reminderDate}` });
   await expect(expand).toHaveAttribute("aria-expanded", "false");
   await expand.focus();
   await page.keyboard.press("Enter");
   await expect(reminderDay.getByRole("button", { name: `Mostrar menos publicaciones del ${reminderDate}` })).toHaveAttribute("aria-expanded", "true");
   await expect(page.getByRole("button", { name: "Quincena" })).toHaveAttribute("aria-pressed", "true");
+  await expect(periodHeading).toHaveText(period!);
+  await expect(reminderDay.getByRole("button", { name: "Seven channel event · Barcelona JUG · LinkedIn · Pendiente de revisión" })).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(reminderDay.getByRole("button", { name: "Seven channel event · Barcelona JUG · X · Pendiente de revisión" })).toBeFocused();
 
   const channels = [
     ["Personal", "LinkedIn"], ["Personal", "X"], ["Personal", "Bluesky"],
@@ -93,6 +100,7 @@ test("expands a crowded day and opens every account's publication, including an 
     await expect(post).toContainText(`${account} · ${network} · Pendiente de revisión`);
     await post.focus();
     await page.keyboard.press("Enter");
+    await expect(periodHeading).toHaveText(period!);
     await page.getByRole("button", { name: "✓ Aprobar y guardar ejemplo" }).click();
     await expect(reminderDay.getByRole("button", { name: `Seven channel event · ${account} · ${network} · Aprobada` })).toBeVisible();
   }
