@@ -92,7 +92,7 @@ export function SourceSettings({ accounts, sources, persistent, onSourcesChange,
       const deliveryIssues = deliveries.reduce((sum, item) => sum + item.failed + item.needsReconciliation + item.errors, 0);
       const scheduled = deliveries.reduce((sum, item) => sum + item.scheduled, 0);
       const hasMore = deliveries.some((item) => item.deferred > 0 || item.selected >= 50);
-      setMessage(`Sincronización terminada: ${result.feedsSucceeded ?? 0} fuentes consultadas, ${result.eventsInserted ?? 0} eventos nuevos, ${result.draftsCreated ?? 0} borradores creados y ${scheduled} aprobados programados.${issueCount || deliveryIssues ? ` Hay ${issueCount + deliveryIssues} incidencias que revisar.` : ""}${hasMore ? " Puede haber más aprobados pendientes; vuelve a sincronizar." : ""}`);
+      setMessage(`Sincronización terminada: ${result.feedsSucceeded ?? 0} fuentes consultadas, ${result.eventsInserted ?? 0} eventos nuevos, ${result.draftsCreated ?? 0} borradores creados y ${scheduled} aprobados programados.${issueCount || deliveryIssues ? " Hay incidencias en fuentes o envíos que revisar." : ""}${hasMore ? " Puede haber más aprobados pendientes; vuelve a sincronizar." : ""}`);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "No se pudo completar la sincronización.");
     } finally {
