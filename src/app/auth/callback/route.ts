@@ -5,7 +5,7 @@ import { createServerClient } from "@supabase/ssr";
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const code = url.searchParams.get("code");
-  const next = url.searchParams.get("next") ?? "/";
+  const next = url.searchParams.get("next") ?? "/workspace";
   const targetPath = next.startsWith("/") && !next.startsWith("//") ? next : "/";
 
   const forwardedHost = request.headers.get("x-forwarded-host");
