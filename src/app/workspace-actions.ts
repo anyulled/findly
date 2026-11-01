@@ -428,7 +428,16 @@ export async function createEvent(input: Omit<EventView, "id">): Promise<CreateE
       event_url: url,
       detected_language: detectTitleLanguage(title),
     }).select("id,title,starts_at,location,description,event_url,detected_language,source_id,target_account_ids").single();
-    if (error || !data) throw new UserFacingError("No se pudo guardar el evento en Supabase.");
+    if (error || !data) {
+      if (error) {
+        logger.error("Failed to insert event into Supabase", {
+          code: error.code,
+          details: error.details,
+          hint: error.hint,
+        }, new Error(error.message));
+      }
+      throw new UserFacingError("No se pudo guardar el evento en Supabase.");
+    }
     const scheduled = formatMadridDateTime(data.starts_at);
     const unpacked = unpackLocationAndImage(data.location);
     return {

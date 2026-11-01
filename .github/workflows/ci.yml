@@ -115,6 +115,16 @@ jobs:
           SUPABASE_TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:55432/postgres
         run: node scripts/test-managed-account-bootstrap-concurrency.mjs
 
+      - name: Verify remote production migration preview
+        if: env.SUPABASE_PROJECT_REF != '' && env.SUPABASE_ACCESS_TOKEN != '' && env.SUPABASE_DB_PASSWORD != ''
+        env:
+          SUPABASE_PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+        run: |
+          supabase link --project-ref "$SUPABASE_PROJECT_REF" --password "$SUPABASE_DB_PASSWORD"
+          supabase db push --linked --dry-run
+
   documentation-sync:
     name: Documentation and Sync
     needs: validate
