@@ -154,6 +154,27 @@ interface PostsData {
   };
 }
 
+const BUFFER_SYNC_CACHE_TTL_MS = 60_000;
+const bufferAccountSyncCache = new Map<string, { expiresAt: number; result: BufferAccountSyncResult }>();
+
+export function invalidateBufferSyncCache(): void {
+  bufferAccountSyncCache.clear();
+}
+
+function readBufferSyncCache(accountId: string, apiKey: string, useCache: boolean): BufferAccountSyncResult | undefined {
+  if (!useCache) return undefined;
+  const cached = bufferAccountSyncCache.get(`${accountId}:${apiKey.trim()}`);
+  return cached && cached.expiresAt > Date.now() ? cached.result : undefined;
+}
+
+function writeBufferSyncCache(accountId: string, apiKey: string, result: BufferAccountSyncResult, useCache: boolean): void {
+  if (!useCache) return;
+  bufferAccountSyncCache.set(`${accountId}:${apiKey.trim()}`, {
+    expiresAt: Date.now() + BUFFER_SYNC_CACHE_TTL_MS,
+    result,
+  });
+}
+
 export async function fetchScheduledPostsForAccount(
   apiKey: string,
   accountName: string,
@@ -161,6 +182,10 @@ export async function fetchScheduledPostsForAccount(
   fetchImpl: typeof fetch = fetch,
 ): Promise<BufferAccountSyncResult> {
   if (!apiKey?.trim()) return { posts: [], channels: [] };
+
+  const useCache = fetchImpl === fetch;
+  const cached = readBufferSyncCache(accountId, apiKey, useCache);
+  if (cached) return cached;
 
   const orgData = await queryBufferGraphql<AccountOrgData>(
     apiKey,
@@ -171,28 +196,18 @@ export async function fetchScheduledPostsForAccount(
   const orgId = orgData?.account?.organizations?.[0]?.id;
   if (!orgId) return { posts: [], channels: [] };
 
-  const channelsData = await queryBufferGraphql<ChannelsData>(
-    apiKey,
-    `query GetChannels($input: ChannelsInput!) {
+  const [channelsData, postsData] = await Promise.all([
+    queryBufferGraphql<ChannelsData>(
+      apiKey,
+      `query GetChannels($input: ChannelsInput!) {
       channels(input: $input) { id name service }
     }`,
-    { input: { organizationId: orgId } },
-    fetchImpl,
-  );
-  const rawChannels = channelsData?.channels ?? [];
-  const channels: BufferDiscoveredChannel[] = [];
-  const channelNetworkMap = new Map<string, SocialNetwork>();
-
-  for (const c of rawChannels) {
-    const network = mapServiceToNetwork(c.service);
-    if (!network) continue;
-    channelNetworkMap.set(c.id, network);
-    channels.push({ network, channelId: c.id, channelName: c.name });
-  }
-
-  const postsData = await queryBufferGraphql<PostsData>(
-    apiKey,
-    `query GetScheduledPosts($input: PostsInput!) {
+      { input: { organizationId: orgId } },
+      fetchImpl,
+    ),
+    queryBufferGraphql<PostsData>(
+      apiKey,
+      `query GetScheduledPosts($input: PostsInput!) {
       posts(first: 50, input: $input) {
         edges {
           node {
@@ -205,9 +220,21 @@ export async function fetchScheduledPostsForAccount(
         }
       }
     }`,
-    { input: { organizationId: orgId, filter: { status: ["scheduled"] } } },
-    fetchImpl,
-  );
+      { input: { organizationId: orgId, filter: { status: ["scheduled"] } } },
+      fetchImpl,
+    ),
+  ]);
+
+  const rawChannels = channelsData?.channels ?? [];
+  const channels: BufferDiscoveredChannel[] = [];
+  const channelNetworkMap = new Map<string, SocialNetwork>();
+
+  for (const c of rawChannels) {
+    const network = mapServiceToNetwork(c.service);
+    if (!network) continue;
+    channelNetworkMap.set(c.id, network);
+    channels.push({ network, channelId: c.id, channelName: c.name });
+  }
 
   const edges = postsData?.posts?.edges ?? [];
   const posts: BufferScheduledPostItem[] = [];
@@ -228,7 +255,9 @@ export async function fetchScheduledPostsForAccount(
     });
   }
 
-  return { posts, channels };
+  const result = { posts, channels };
+  writeBufferSyncCache(accountId, apiKey, result, useCache);
+  return result;
 }
 
 export async function syncBufferScheduledPosts(
@@ -239,56 +268,62 @@ export async function syncBufferScheduledPosts(
   fetchImpl: typeof fetch = fetch,
 ): Promise<BufferPostView[]> {
   const resultPosts: BufferPostView[] = [];
+  const syncedAccounts = await Promise.all(
+    accounts.map(async (account) => {
+      if (!account.apiKey?.trim()) return null;
+      try {
+        const syncResult = await fetchScheduledPostsForAccount(
+          account.apiKey,
+          account.name,
+          account.id,
+          fetchImpl,
+        );
+        return { account, syncResult };
+      } catch {
+        return null;
+      }
+    }),
+  );
 
-  for (const account of accounts) {
-    if (!account.apiKey?.trim()) continue;
+  for (const entry of syncedAccounts) {
+    if (!entry) continue;
+    const { account, syncResult } = entry;
 
-    try {
-      const syncResult = await fetchScheduledPostsForAccount(
-        account.apiKey,
-        account.name,
-        account.id,
-        fetchImpl,
-      );
-
-      for (const channel of syncResult.channels) {
-        if (!account.bufferChannels[channel.network]) {
-          account.bufferChannels[channel.network] = channel.channelId;
-          if (onChannelDiscovered) {
-            try {
-              await onChannelDiscovered(account.id, channel.network, channel.channelId);
-            } catch {
-              // Ignore failure to persist discovered channel
-            }
+    for (const channel of syncResult.channels) {
+      if (!account.bufferChannels[channel.network]) {
+        account.bufferChannels[channel.network] = channel.channelId;
+        if (onChannelDiscovered) {
+          try {
+            await onChannelDiscovered(account.id, channel.network, channel.channelId);
+          } catch {
+            // Ignore failure to persist discovered channel
           }
         }
       }
+    }
 
-      for (const p of syncResult.posts) {
-        if (existingBufferPostIds.has(p.bufferPostId)) continue;
-        existingBufferPostIds.add(p.bufferPostId);
+    for (const p of syncResult.posts) {
+      if (existingBufferPostIds.has(p.bufferPostId)) continue;
+      existingBufferPostIds.add(p.bufferPostId);
 
-        const scheduled = formatMadridDateTime(p.dueAt);
-        const matchingEvent = events.find((e) =>
-          e.title && p.text.toLowerCase().includes(e.title.toLowerCase()),
-        );
+      const scheduled = formatMadridDateTime(p.dueAt);
+      const matchingEvent = events.find((e) =>
+        e.title && p.text.toLowerCase().includes(e.title.toLowerCase()),
+      );
 
-        resultPosts.push({
-          id: `buffer-${p.id}`,
-          eventId: matchingEvent?.id ?? "",
-          date: scheduled.date,
-          time: scheduled.time,
-          account: p.accountName,
-          accountId: p.accountId,
-          network: p.network,
-          text: p.text,
-          status: "scheduled",
-          bufferPostId: p.bufferPostId,
-          language: detectTitleLanguage(p.text),
-        });
-      }
-    } catch {
-      // Continue to next account if one fails
+      resultPosts.push({
+        id: `buffer-${p.id}`,
+        eventId: matchingEvent?.id ?? "",
+        date: scheduled.date,
+        time: scheduled.time,
+        account: p.accountName,
+        accountId: p.accountId,
+        network: p.network,
+        text: p.text,
+        status: "scheduled",
+        bufferPostId: p.bufferPostId,
+        language: detectTitleLanguage(p.text),
+      });
     }
   }
 

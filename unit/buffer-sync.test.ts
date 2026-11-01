@@ -4,6 +4,7 @@ import {
   computeNextSlotFromSchedule,
   fetchNextChannelSlotsForAccount,
   fetchScheduledPostsForAccount,
+  invalidateBufferSyncCache,
   mapServiceToNetwork,
   syncBufferScheduledPosts,
   type BufferSyncAccount,
@@ -336,4 +337,43 @@ test("fetchNextChannelSlotsForAccount queries Buffer schedule and scheduled post
 
   const fallbackSlots = await fetchNextChannelSlotsForAccount(null, ["X"], {}, mockFetch, now);
   assert.deepEqual(fallbackSlots.X, { date: "2026-11-01", time: "14:14" });
+});
+
+test("fetchScheduledPostsForAccount caches default fetch results and invalidateBufferSyncCache clears cache", async () => {
+  const originalFetch = globalThis.fetch;
+  let callCount = 0;
+  globalThis.fetch = async (_url, init) => {
+    callCount += 1;
+    const body = JSON.parse(init?.body as string) as { query: string };
+    if (body.query.includes("organizations")) {
+      return new Response(JSON.stringify({
+        data: { account: { organizations: [{ id: "org-cache", name: "Cache Org" }] } },
+      }), { status: 200 });
+    }
+    if (body.query.includes("GetChannels")) {
+      return new Response(JSON.stringify({
+        data: { channels: [{ id: "chan-x", name: "X", service: "twitter" }] },
+      }), { status: 200 });
+    }
+    return new Response(JSON.stringify({ data: { posts: { edges: [] } } }), { status: 200 });
+  };
+
+  try {
+    invalidateBufferSyncCache();
+    const first = await fetchScheduledPostsForAccount("cached-key", "Personal", "acc-cache");
+    assert.equal(first.channels.length, 1);
+    assert.equal(callCount, 3);
+
+    const second = await fetchScheduledPostsForAccount("cached-key", "Personal", "acc-cache");
+    assert.equal(second.channels.length, 1);
+    assert.equal(callCount, 3);
+
+    invalidateBufferSyncCache();
+    const third = await fetchScheduledPostsForAccount("cached-key", "Personal", "acc-cache");
+    assert.equal(third.channels.length, 1);
+    assert.equal(callCount, 6);
+  } finally {
+    globalThis.fetch = originalFetch;
+    invalidateBufferSyncCache();
+  }
 });

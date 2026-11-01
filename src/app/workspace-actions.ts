@@ -14,7 +14,7 @@ import { sourceForEventUrl } from "@/lib/event-source";
 import { selectEventAccounts } from "@/lib/event-targets";
 import { extractUserProfile, type UserProfile } from "@/lib/user-profile";
 import { validateSource, type SourceInput, type SourceType } from "@/lib/source-validation";
-import { fetchNextChannelSlotsForAccount, syncBufferScheduledPosts } from "@/lib/buffer-sync";
+import { fetchNextChannelSlotsForAccount, invalidateBufferSyncCache, syncBufferScheduledPosts } from "@/lib/buffer-sync";
 import { isSubstackUrl, packLocationAndImage, unpackLocationAndImage } from "@/lib/substack";
 import { fetchOpenGraphImage } from "@/lib/opengraph";
 
@@ -565,13 +565,17 @@ export async function approvePost(postId: string, content: string): Promise<Post
   }
   const validation = validatePost(validationNetwork.data.network as SocialNetwork, content);
   if (!validation.valid) throw new Error(validation.message);
-  return approveAndSchedulePost(postId, content, supabase, ownerId);
+  const outcome = await approveAndSchedulePost(postId, content, supabase, ownerId);
+  invalidateBufferSyncCache();
+  return outcome;
 }
 
 export async function retryFailedPost(postId: string): Promise<PostPublishingOutcome> {
   const { supabase, ownerId } = await authorizedClient();
   if (!/^[0-9a-f-]{36}$/i.test(postId)) throw new Error("Solicitud de publicación no válida.");
-  return schedulePostWithSupabase(postId, supabase, ownerId);
+  const outcome = await schedulePostWithSupabase(postId, supabase, ownerId);
+  invalidateBufferSyncCache();
+  return outcome;
 }
 
 export async function reconcileScheduledPost(postId: string, bufferPostId: string): Promise<void> {
@@ -606,6 +610,7 @@ export async function saveBufferChannel(accountId: string, network: SocialNetwor
     const { error } = await supabase.from("account_buffer_channels").delete()
       .eq("owner_id", ownerId).eq("account_id", accountId).eq("network", network);
     if (error) throw new Error("No se pudo eliminar el ID del canal de Buffer.");
+    invalidateBufferSyncCache();
     return;
   }
   const { error } = await supabase.from("account_buffer_channels").upsert({
@@ -615,6 +620,7 @@ export async function saveBufferChannel(accountId: string, network: SocialNetwor
     buffer_channel_id: channelId,
   }, { onConflict: "owner_id,account_id,network" });
   if (error) throw new Error("No se pudo guardar el ID del canal de Buffer.");
+  invalidateBufferSyncCache();
 }
 
 export async function updateAccountVoice(accountId: string, prompt: string): Promise<void> {
