@@ -159,44 +159,10 @@ function validDateTime(parts: LocalDateTime): boolean {
     && parts.minute >= 0 && parts.minute <= 59 && parts.second >= 0 && parts.second <= 59;
 }
 
-function rawStartValues(input: string): Array<string | null> {
-  const lines = input.replace(/\r?\n[ \t]/g, "").split(/\r?\n/);
-  const values: Array<string | null> = [];
-  const components: string[] = [];
-  let activeEvent: number | null = null;
-  for (const line of lines) {
-    const begin = /^BEGIN:([^;:\s]+)\s*$/i.exec(line);
-    if (begin) {
-      const name = begin[1].toLowerCase();
-      if (name === "vevent" && activeEvent === null && components.length === 1 && components[0] === "vcalendar") {
-        activeEvent = values.length;
-        values.push(null);
-      }
-      components.push(name);
-      continue;
-    }
-
-    const end = /^END:([^;:\s]+)\s*$/i.exec(line);
-    if (end) {
-      const name = end[1].toLowerCase();
-      if (name === "vevent" && activeEvent !== null && components.length === 2 && components[1] === "vevent") {
-        activeEvent = null;
-      }
-      if (components[components.length - 1] === name) components.pop();
-      continue;
-    }
-
-    if (activeEvent !== null && components.length === 2 && /^DTSTART(?:;[^:]*)?:(.*)$/i.test(line) && values[activeEvent] === null) {
-      values[activeEvent] = line.slice(line.indexOf(":") + 1);
-    }
-  }
-  return values;
-}
-
-function validateRawStart(value: string | null): void {
-  if (value === null) return;
-  const dateTime = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z?$/i.exec(value);
-  const date = /^(\d{4})(\d{2})(\d{2})$/.exec(value);
+function validateRawStart(value: unknown): void {
+  if (typeof value !== "string") throw new IcalParseError("DTSTART contiene una fecha u hora no válida.");
+  const dateTime = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})Z?$/i.exec(value);
+  const date = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
   const match = dateTime ?? date;
   if (!match) throw new IcalParseError("DTSTART contiene una fecha u hora no válida.");
   const [, year, month, day, hour = "0", minute = "0", second = "0"] = match;
@@ -230,8 +196,7 @@ export function parseLumaIcal(input: string): LumaCalendarParseResult {
   const events: LumaCalendarEvent[] = [];
   const issues: CalendarParseIssue[] = [];
   const components = calendar.getAllSubcomponents("vevent");
-  const starts = rawStartValues(input);
-  for (const [index, component] of components.entries()) {
+  for (const component of components) {
     let uid: string | null = null;
     try {
       uid = textValue(component, "uid") || null;
@@ -241,7 +206,7 @@ export function parseLumaIcal(input: string): LumaCalendarParseResult {
         issues.push({ uid, message: "Se omite el evento porque falta UID, SUMMARY o DTSTART." });
         continue;
       }
-      validateRawStart(starts[index] ?? null);
+      validateRawStart(startProperty.toJSON()[3]);
       const start = component.getFirstPropertyValue("dtstart");
       if (!(start instanceof ICAL.Time)) {
         issues.push({ uid, message: "Se omite el evento porque falta UID, SUMMARY o DTSTART." });
