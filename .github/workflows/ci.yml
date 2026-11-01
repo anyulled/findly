@@ -115,6 +115,11 @@ jobs:
           SUPABASE_TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:55432/postgres
         run: node scripts/test-managed-account-bootstrap-concurrency.mjs
 
+      - name: Verify discard and approval races
+        env:
+          SUPABASE_TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:55432/postgres
+        run: node scripts/test-discard-approval-race.mjs
+
       - name: Verify remote production migration preview
         if: env.SUPABASE_PROJECT_REF != '' && env.SUPABASE_ACCESS_TOKEN != '' && env.SUPABASE_DB_PASSWORD != ''
         env:

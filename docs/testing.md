@@ -51,3 +51,5 @@ supabase db lint --local --fail-on error
 ```
 
 CI installs Chromium and its system dependencies with `npx playwright install --with-deps chromium`. A failed run uploads the Playwright report and test results as a GitHub Actions artifact. The `Coverage (80%)` and `Database migrations` jobs are independent required checks for pull requests; a failure blocks merge even if the regular unit test job passes. The database commands require Docker and the Supabase CLI.
+
+El descarte de borradores conserva la identidad del recordatorio y borra su contenido: `supabase/tests/discard_draft.sql` comprueba aislamiento de propietario, estados protegidos, imposibilidad de aprobar o enviar y protección frente a la regeneración. El CI ejecuta `scripts/test-discard-approval-race.mjs` con dos sesiones simultáneas y prueba ambos órdenes de aprobación y descarte. El E2E cubre la eliminación y la ausencia de la acción para una publicación programada.

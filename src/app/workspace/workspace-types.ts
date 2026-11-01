@@ -8,7 +8,8 @@ export type Status =
   | "scheduled"
   | "published"
   | "failed"
-  | "needs_reconciliation";
+  | "needs_reconciliation"
+  | "discarded";
 export type Network = "LinkedIn" | "X" | "Bluesky";
 
 export type EventItem = EventView;
@@ -38,6 +39,7 @@ export const statusLabels: Record<Status, string> = {
   published: "Publicada",
   failed: "Fallida",
   needs_reconciliation: "Pendiente de conciliación",
+  discarded: "Descartada",
 };
 
 export const defaultAccounts: Account[] = [

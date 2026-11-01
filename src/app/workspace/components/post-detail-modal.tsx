@@ -4,6 +4,9 @@ import { dateAt } from "../workspace-calendar-dates";
 
 interface PostDetailModalProps {
   selected: Post;
+  deletingDraft: boolean;
+  draftDeleteError: string;
+  onRemoveDraft: (post: Post) => void;
   onClose: () => void;
   currentEvent: EventItem | null | undefined;
   editing: string;
@@ -22,6 +25,9 @@ interface PostDetailModalProps {
 
 export function PostDetailModal({
   selected,
+  deletingDraft,
+  draftDeleteError,
+  onRemoveDraft,
   onClose,
   currentEvent,
   editing,
@@ -128,6 +134,11 @@ export function PostDetailModal({
           </div>
         )}
         <div className={styles.detailActions}>
+          {selected.status === "review" && (
+            <button className={styles.secondaryButton} disabled={deletingDraft} onClick={() => onRemoveDraft(selected)}>
+              {deletingDraft ? "Eliminando…" : "Eliminar borrador"}
+            </button>
+          )}
           {isEditable && (
             <button
               className={styles.secondaryButton}
@@ -160,6 +171,7 @@ export function PostDetailModal({
             </button>
           )}
         </div>
+        {draftDeleteError && <p role="alert" className={styles.deliveryError}>{draftDeleteError}</p>}
         <p className={styles.autoNote}>
           {selected.status === "scheduled"
             ? `Programada en Buffer · ID ${selected.bufferPostId ?? "guardado"}`

@@ -63,7 +63,7 @@ export type PostView = {
   accountId?: string;
   network: SocialNetwork;
   text: string;
-  status: "review" | "approved" | "scheduling" | "scheduled" | "published" | "failed" | "needs_reconciliation";
+  status: "review" | "approved" | "scheduling" | "scheduled" | "published" | "failed" | "needs_reconciliation" | "discarded";
   lastError?: string | null;
   bufferPostId?: string | null;
   leadDays?: 14 | 7 | 1;
@@ -494,6 +494,16 @@ export async function generateReviewPosts(eventId: string): Promise<GenerateRevi
 
   if (result.success) return { success: true, posts: result.data };
   return { success: false, posts: [], error: result.error };
+}
+
+export async function discardDraft(postId: string): Promise<ActionOutcome> {
+  return runVoidAction("discardDraft", async () => {
+    const { supabase } = await authorizedClient();
+    if (!/^[0-9a-f-]{36}$/i.test(postId)) throw new UserFacingError("La publicación no es válida.");
+    const { data, error } = await supabase.rpc("discard_review_post", { p_post_id: postId });
+    if (error) throw new UserFacingError("No se pudo eliminar el borrador.");
+    if (data !== true) throw new UserFacingError("El borrador ya no está disponible para eliminar. Actualiza el espacio y revisa su estado.");
+  }, { defaultErrorMessage: "No se pudo eliminar el borrador." });
 }
 
 export async function updatePostContent(postId: string, content: string): Promise<ActionOutcome> {

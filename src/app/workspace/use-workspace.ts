@@ -12,6 +12,7 @@ import {
   confirmPostMissingFromBuffer,
   createEvent,
   deleteEvent,
+  discardDraft,
   generateReviewPosts,
   loadWorkspace,
   reconcileScheduledPost,
@@ -68,6 +69,8 @@ export function useWorkspace() {
   const [bufferApiKeyConfigured, setBufferApiKeyConfigured] = useState(false);
   const [selected, setSelected] = useState<Post | null>(null);
   const [editing, setEditing] = useState("");
+  const [deletingDraft, setDeletingDraft] = useState(false);
+  const [draftDeleteError, setDraftDeleteError] = useState("");
   const [reconciliationId, setReconciliationId] = useState("");
   const [absenceConfirmed, setAbsenceConfirmed] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
@@ -547,6 +550,29 @@ export function useWorkspace() {
     }
   }
 
+  async function removeDraft(post: Post) {
+    if (deletingDraft || post.status !== "review") return;
+    if (!window.confirm("¿Eliminar este borrador? No se volverá a generar al completar los recordatorios.")) return;
+    setDeletingDraft(true);
+    setDraftDeleteError("");
+    try {
+      if (persistent) {
+        const result = await discardDraft(post.id);
+        if (!result.success) { setDraftDeleteError(result.error); return; }
+        // Keep the identity to prevent this reminder from being generated again.
+        setPosts((all) => all.map((item) => item.id === post.id ? { ...item, status: "discarded", text: "", lastError: null } : item));
+      } else {
+        setPosts((all) => all.filter((item) => item.id !== post.id));
+      }
+      setSelected(null);
+      setFeedback("Borrador eliminado.");
+    } catch {
+      setDraftDeleteError("No se pudo eliminar el borrador.");
+    } finally {
+      setDeletingDraft(false);
+    }
+  }
+
   async function removeEvent(eventId: string) {
     try {
       if (persistent) {
@@ -590,6 +616,10 @@ export function useWorkspace() {
     profile,
     bufferApiKeyConfigured,
     selected,
+    deletingDraft,
+    draftDeleteError,
+    setDraftDeleteError,
+    removeDraft,
     setSelected,
     editing,
     setEditing,
