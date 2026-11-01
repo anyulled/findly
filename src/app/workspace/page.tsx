@@ -134,6 +134,7 @@ function Dashboard() {
   const extractionRequestId = useRef(0);
   const addFormOpen = useRef(false);
   const [hydrated, setHydrated] = useState(false);
+  const [syncingWorkspace, setSyncingWorkspace] = useState(false);
   const [feedback, setFeedback] = useState("");
   const persistent = isSupabaseConfigured();
 
@@ -153,13 +154,33 @@ function Dashboard() {
     setShowAdd(false);
   }
 
-  // This effect runs once to hydrate browser-only demo state after mount.
+  // This effect runs once to hydrate browser-only demo state or cached workspace snapshot after mount.
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (persistent) {
       let active = true;
+      const cached = localStorage.getItem("findly-workspace-cache-v1");
+      if (cached) {
+        try {
+          const parsed = JSON.parse(cached);
+          if (Array.isArray(parsed.events)) setEvents(parsed.events);
+          if (Array.isArray(parsed.posts)) setPosts(parsed.posts);
+          if (parsed.mode === "review" || parsed.mode === "automatic") setMode(parsed.mode);
+          if (Array.isArray(parsed.accounts) && parsed.accounts.length > 0) {
+            setAccountList(parsed.accounts);
+            setBufferApiKeyConfigured(parsed.accounts.every((account: Account) => account.bufferApiKeyConfigured));
+          }
+          if (Array.isArray(parsed.sources)) setSources(parsed.sources);
+          if (parsed.profile) setProfile(parsed.profile);
+          setHydrated(true);
+        } catch {
+          localStorage.removeItem("findly-workspace-cache-v1");
+        }
+      }
+      setSyncingWorkspace(true);
       void loadWorkspace().then((snapshot) => {
         if (!active) return;
+        setSyncingWorkspace(false);
         if (snapshot.error) {
           setFeedback(snapshot.error);
           setHydrated(true);
@@ -172,9 +193,11 @@ function Dashboard() {
         setAccountList(snapshot.accounts);
         setSources(snapshot.sources);
         if (snapshot.profile) setProfile(snapshot.profile);
+        try { localStorage.setItem("findly-workspace-cache-v1", JSON.stringify(snapshot)); } catch { /* Ignore quota errors */ }
         setHydrated(true);
       }).catch((error: unknown) => {
         if (!active) return;
+        setSyncingWorkspace(false);
         setFeedback(error instanceof Error ? error.message : "No se pudieron cargar los datos.");
         setHydrated(true);
       });
@@ -204,12 +227,16 @@ function Dashboard() {
   const dates = useMemo(() => makeDates(anchor, range), [anchor, range]);
   const first = dates[0];
   const last = dates[dates.length - 1];
-  const monthLabel = range === "Mes" ? first.toLocaleDateString("es-ES", { month: "long", year: "numeric" }) : `${first.toLocaleDateString("es-ES", { day: "numeric", month: "short" })} – ${last.toLocaleDateString("es-ES", { day: "numeric", month: "short", year: "numeric" })}`;
+  const monthLabel = range === "Mes" ? anchor.toLocaleDateString("es-ES", { month: "long", year: "numeric" }) : `${first.toLocaleDateString("es-ES", { day: "numeric", month: "short" })} – ${last.toLocaleDateString("es-ES", { day: "numeric", month: "short", year: "numeric" })}`;
   const reviewCount = posts.filter((p) => p.status === "review").length;
 
   function navigate(direction: number) {
+    if (range === "Mes") {
+      setAnchor(new Date(anchor.getFullYear(), anchor.getMonth() + direction, 1));
+      return;
+    }
     const next = new Date(anchor);
-    next.setDate(next.getDate() + (range === "Mes" ? 28 : range === "Quincena" ? 14 : 7) * direction);
+    next.setDate(next.getDate() + (range === "Quincena" ? 14 : 7) * direction);
     setAnchor(next);
   }
   async function updatePost(post: Post, next: Partial<Post>) {
@@ -341,7 +368,9 @@ function Dashboard() {
   }
 
   async function refreshWorkspaceAfterSync() {
+    setSyncingWorkspace(true);
     const snapshot = await loadWorkspace();
+    setSyncingWorkspace(false);
     if (snapshot.error) {
       setFeedback(snapshot.error);
       return;
@@ -349,8 +378,11 @@ function Dashboard() {
     setEvents(snapshot.events);
     setPosts(snapshot.posts);
     setMode(snapshot.mode);
+    setBufferApiKeyConfigured(snapshot.accounts.every((account) => account.bufferApiKeyConfigured));
     setAccountList(snapshot.accounts);
     setSources(snapshot.sources);
+    if (snapshot.profile) setProfile(snapshot.profile);
+    try { localStorage.setItem("findly-workspace-cache-v1", JSON.stringify(snapshot)); } catch { /* Ignore quota errors */ }
   }
 
   async function changeMode(nextMode: "review" | "automatic") {
@@ -473,7 +505,7 @@ function Dashboard() {
     </aside>
 
     <section className={styles.main}>
-      <header className={styles.topbar}><div className={styles.breadcrumb}>Workspace <span>/</span> <b>{tab}</b></div><div className={styles.topActions}><span className={styles.tz}>◷ &nbsp;Europe/Madrid</span><button className={styles.helpBtn}>? <span>Ayuda</span></button><button className={styles.addButton} onClick={openAddForm}><span>＋</span> Añadir evento</button></div></header>
+      <header className={styles.topbar}><div className={styles.breadcrumb}>Workspace <span>/</span> <b>{tab}</b></div><div className={styles.topActions}>{syncingWorkspace && <span className={styles.tz} role="status">Actualizando…</span>}<span className={styles.tz}>◷ &nbsp;Europe/Madrid</span><button className={styles.helpBtn}>? <span>Ayuda</span></button><button className={styles.addButton} onClick={openAddForm}><span>＋</span> Añadir evento</button></div></header>
       <div className={styles.content}>
         {feedback && <p role="alert" style={{ color: "#a43a32", background: "#fff1f0", borderRadius: 8, padding: "10px 14px", marginBottom: 16 }}>{feedback}</p>}
         {tab === "Calendario" && <><div className={styles.pageHeading}><div><div className={styles.eyebrow}>TU CONTENIDO, DE UN VISTAZO</div><h1>Calendario</h1><p>Todos tus anuncios, en un solo lugar.</p></div><button className={styles.mobileAdd} onClick={openAddForm}>＋ Evento</button></div>

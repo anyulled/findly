@@ -21,6 +21,19 @@ test("switches between fortnight, week, and month calendar views", async ({ page
   await month.click();
   await expect(month).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByTestId("calendar-day")).toHaveCount(42);
+
+  const now = new Date();
+  const currentMonthText = now.toLocaleDateString("es-ES", { month: "long", year: "numeric" });
+  const nextMonthDate = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+  const nextMonthText = nextMonthDate.toLocaleDateString("es-ES", { month: "long", year: "numeric" });
+  const periodHeading = page.getByRole("heading", { level: 2 }).first();
+  await expect(periodHeading).toHaveText(currentMonthText);
+
+  await page.getByRole("button", { name: "Periodo siguiente" }).click();
+  await expect(periodHeading).toHaveText(nextMonthText);
+
+  await page.getByRole("button", { name: "Periodo anterior" }).click();
+  await expect(periodHeading).toHaveText(currentMonthText);
 });
 
 test("creates an event, prepares only timely reminders, and saves approval as a style example", async ({ page }) => {
