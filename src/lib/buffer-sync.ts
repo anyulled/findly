@@ -1,6 +1,7 @@
 import { detectTitleLanguage, type PostLanguage } from "./language";
 import { formatMadridDateTime } from "./madrid-time";
 import type { SocialNetwork } from "./social-validation";
+import { logger } from "./logger";
 
 export interface BufferScheduledPostItem {
   id: string;
@@ -279,7 +280,8 @@ export async function syncBufferScheduledPosts(
           fetchImpl,
         );
         return { account, syncResult };
-      } catch {
+      } catch (error) {
+        logger.warn("Failed to fetch scheduled posts for account during Buffer sync", { accountId: account.id, accountName: account.name }, error);
         return null;
       }
     }),
@@ -295,8 +297,8 @@ export async function syncBufferScheduledPosts(
         if (onChannelDiscovered) {
           try {
             await onChannelDiscovered(account.id, channel.network, channel.channelId);
-          } catch {
-            // Ignore failure to persist discovered channel
+          } catch (error) {
+            logger.warn("Failed to persist discovered Buffer channel for account", { accountId: account.id, network: channel.network, channelId: channel.channelId }, error);
           }
         }
       }

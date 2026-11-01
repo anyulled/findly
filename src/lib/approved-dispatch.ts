@@ -1,4 +1,5 @@
 import { schedulePostWithSupabase, type PostPublishingOutcome } from "./post-publishing";
+import { logger } from "./logger";
 
 export type ApprovedDispatchResult = {
   selected: number;
@@ -56,7 +57,8 @@ export async function dispatchApprovedPosts(
       else if (outcome.kind === "failed") result.failed += 1;
       else if (outcome.kind === "needs_reconciliation") result.needsReconciliation += 1;
       else result.notClaimed += 1;
-    } catch {
+    } catch (error) {
+      logger.warn("Failed to schedule approved post during dispatch", { postId }, error);
       // The claim or its result could not be persisted. Do not retry this ID
       // here: a later run will only select it if it is still approved.
       result.errors += 1;

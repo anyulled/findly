@@ -3,6 +3,7 @@ import { parseLumaIcal, type LumaCalendarEvent } from "./luma-ical";
 import type { ImportedLumaEvent } from "./luma-drafts";
 import { isSubstackUrl, normalizeSubstackPostsApiUrl, packLocationAndImage, parseSubstackFeed } from "./substack";
 import { enrichMeetupRssItems, isMeetupUrl, normalizeMeetupRssUrl, parseMeetupFeed, parseMeetupRssFeed } from "./meetup";
+import { logger } from "./logger";
 
 export type LumaSource = { id: string; ownerId: string; name: string; feedUrl: string };
 export type PersistableEvent = {
@@ -82,6 +83,7 @@ export async function syncLumaSources(
       parsed = parseSourceRows(source, await fetchFeed(source.feedUrl));
       result.feedsSucceeded += 1;
     } catch (error) {
+      logger.warn("Failed to fetch or parse feed for source", { sourceId: source.id, feedUrl: source.feedUrl }, error);
       result.feedsFailed += 1;
       result.issues.push({ sourceId: source.id, code: error instanceof IcalParseError ? "invalid_calendar" : "feed_unavailable" });
       continue;
@@ -93,7 +95,8 @@ export async function syncLumaSources(
     try {
       persisted = await repository.upsertEvents(rows);
       result.eventsInserted += persisted.inserted.length;
-    } catch {
+    } catch (error) {
+      logger.error("Failed to persist imported events for source", { sourceId: source.id, count: rows.length }, error);
       result.issues.push({ sourceId: source.id, code: "database_error" });
       continue;
     }
@@ -104,7 +107,8 @@ export async function syncLumaSources(
         continue;
       }
       try { result.draftsCreated += await generateDrafts(source, event); }
-      catch {
+      catch (error) {
+        logger.warn("Failed to generate drafts for event during sync", { sourceId: source.id, eventId: event.id }, error);
         result.draftEventsFailed += 1;
         result.issues.push({ sourceId: source.id, eventId: event.id, code: "draft_generation_failed" });
       }
