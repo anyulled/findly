@@ -1,9 +1,10 @@
+import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
 
-export const DEFAULT_CRAP_THRESHOLD = 20;
+export const DEFAULT_CRAP_THRESHOLD = 10;
 
 /**
  * Calculates Cyclomatic Complexity (CC) for a given AST node.
@@ -203,6 +204,22 @@ export function analyzeCrapMetrics({
   };
 }
 
+export function checkCodeDuplication({
+  srcDir = "src",
+  minTokens = 50,
+  threshold = 1,
+} = {}) {
+  const jscpdBin = resolve("node_modules/.bin/jscpd");
+  try {
+    execFileSync(jscpdBin, [srcDir, "--min-tokens", String(minTokens), "--threshold", String(threshold)], {
+      stdio: "inherit",
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function main() {
   const coverageFile = process.env.COVERAGE_FILE || resolve("coverage/coverage-final.json");
   const rawThreshold = process.env.CRAP_THRESHOLD;
@@ -255,6 +272,15 @@ export function main() {
   }
 
   process.stdout.write(`\n✅ CRAP gate passed: all functions have CRAP score <= ${threshold}.\n`);
+
+  process.stdout.write("\n=== Code Duplication Analysis (jscpd) ===\n");
+  const duplicationPassed = checkCodeDuplication();
+  if (!duplicationPassed) {
+    process.stderr.write("\n❌ Code duplication gate failed: duplicate blocks found or threshold exceeded.\n");
+    process.exitCode = 1;
+    return;
+  }
+  process.stdout.write("✅ Code duplication gate passed: no duplicate clones found.\n");
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

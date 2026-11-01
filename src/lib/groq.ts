@@ -149,18 +149,24 @@ export async function generateSocialPostOrFallback(
   }
 }
 
-/** Generate and deterministically validate one platform-specific post. */
-export async function generateSocialPost(
-  input: PostGenerationInput,
-  config: GroqGenerationConfig = {},
-): Promise<GeneratedPost> {
-  const apiKey = (config.apiKey ?? process.env.GROQ_API_KEY)?.trim();
-  const model = (config.model ?? process.env.GROQ_MODEL)?.trim();
-  if (!apiKey || !model) {
-    throw new PostGenerationError("Groq API key and model must be configured on the server.", "not_configured");
+function parseGroqResponseContent(payload: unknown): string {
+  if (!payload || typeof payload !== "object") {
+    throw new PostGenerationError("Groq returned an unreadable response. The draft was not created.", "provider_error");
   }
+  const content = (payload as { choices?: Array<{ message?: { content?: unknown } }> })
+    .choices?.[0]?.message?.content;
+  if (typeof content !== "string" || !content.trim()) {
+    throw new PostGenerationError("Groq returned no post text. The draft was not created.", "empty_response");
+  }
+  return content.trim();
+}
 
-  const fetchImpl = config.fetchImpl ?? fetch;
+async function callGroqChatApi(
+  apiKey: string,
+  model: string,
+  input: PostGenerationInput,
+  fetchImpl: typeof fetch,
+): Promise<string> {
   let response: Response;
   try {
     response = await fetchImpl(GROQ_CHAT_COMPLETIONS_URL, {
@@ -191,16 +197,21 @@ export async function generateSocialPost(
   } catch {
     throw new PostGenerationError("Groq returned an unreadable response. The draft was not created.", "provider_error");
   }
-  if (!payload || typeof payload !== "object") {
-    throw new PostGenerationError("Groq returned an unreadable response. The draft was not created.", "provider_error");
-  }
-  const content = (payload as { choices?: Array<{ message?: { content?: unknown } }> })
-    .choices?.[0]?.message?.content;
-  if (typeof content !== "string" || !content.trim()) {
-    throw new PostGenerationError("Groq returned no post text. The draft was not created.", "empty_response");
+  return parseGroqResponseContent(payload);
+}
+
+/** Generate and deterministically validate one platform-specific post. */
+export async function generateSocialPost(
+  input: PostGenerationInput,
+  config: GroqGenerationConfig = {},
+): Promise<GeneratedPost> {
+  const apiKey = (config.apiKey ?? process.env.GROQ_API_KEY)?.trim();
+  const model = (config.model ?? process.env.GROQ_MODEL)?.trim();
+  if (!apiKey || !model) {
+    throw new PostGenerationError("Groq API key and model must be configured on the server.", "not_configured");
   }
 
-  const text = content.trim();
+  const text = await callGroqChatApi(apiKey, model, input, config.fetchImpl ?? fetch);
   const validation = validatePost(input.network, text);
   if (!validation.valid) {
     throw new PostGenerationError(validation.message, "over_limit", validation);

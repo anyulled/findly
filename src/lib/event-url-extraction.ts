@@ -2,6 +2,7 @@ import { formatMadridDateTime } from "@/lib/madrid-time";
 import { isSubstackUrl, normalizeSubstackPostsApiUrl, parseSubstackFeed } from "@/lib/substack";
 import { enrichMeetupRssItems, isMeetupUrl, parseMeetupRssFeed } from "@/lib/meetup";
 import { extractImageFromHtml } from "@/lib/opengraph";
+import { decodeHtmlEntities as decodeHtml, stripTagsAndClean as cleanText } from "@/lib/html-utils";
 
 const MAX_HTML_BYTES = 1_000_000;
 const MAX_REDIRECTS = 3;
@@ -45,26 +46,6 @@ function isSupportedUrl(url: URL): boolean {
   if (url.username || url.password) return false;
   if (url.port !== "" && url.port !== "443") return false;
   return Boolean(url.hostname) && !isPrivateHost(url.hostname);
-}
-
-function decodeHtml(value: string): string {
-  return value.replace(/&(#x[\da-f]+|#\d+|amp|quot|apos|#39|lt|gt|nbsp);/giu, (entity, code: string) => {
-    const normalized = code.toLowerCase();
-    if (normalized.startsWith("#x")) {
-      const point = Number.parseInt(normalized.slice(2), 16);
-      return point <= 0x10ffff ? String.fromCodePoint(point) : "";
-    }
-    if (normalized.startsWith("#")) {
-      const point = Number.parseInt(normalized.slice(1), 10);
-      return point <= 0x10ffff ? String.fromCodePoint(point) : "";
-    }
-    return ({ amp: "&", quot: '"', apos: "'", "#39": "'", lt: "<", gt: ">", nbsp: " " } as Record<string, string>)[normalized] ?? entity;
-  });
-}
-
-function cleanText(value: unknown): string {
-  if (typeof value !== "string") return "";
-  return decodeHtml(value.replace(/<[^>]*>/gu, " ")).replace(/[\s\u00a0]+/gu, " ").trim();
 }
 
 function attributes(tag: string): Record<string, string> {
@@ -350,12 +331,36 @@ async function parseFetchedResponse(response: Response, current: URL, fetchImpl:
   return parseEventPage(await readHtml(response), urlString);
 }
 
-export async function extractEventPageDetails(input: string, fetchImpl: typeof fetch = fetch): Promise<EventPageExtraction> {
-  if (typeof input !== "string" || input.length > 2_048) throw new EventUrlExtractionError("El enlace del evento debe tener menos de 2048 caracteres.");
+function parseAndValidateExtractionUrl(input: string): URL {
+  if (typeof input !== "string" || input.length > 2_048) {
+    throw new EventUrlExtractionError("El enlace del evento debe tener menos de 2048 caracteres.");
+  }
   let current: URL;
-  try { current = new URL(input.trim()); }
-  catch { throw new EventUrlExtractionError("Introduce una URL HTTPS válida."); }
-  if (!isSupportedUrl(current)) throw new EventUrlExtractionError("La extracción solo admite enlaces web públicos HTTPS.");
+  try {
+    current = new URL(input.trim());
+  } catch {
+    throw new EventUrlExtractionError("Introduce una URL HTTPS válida.");
+  }
+  if (!isSupportedUrl(current)) {
+    throw new EventUrlExtractionError("La extracción solo admite enlaces web públicos HTTPS.");
+  }
+  return current;
+}
+
+function handleExtractionRedirect(response: Response, current: URL, redirects: number): URL {
+  const location = response.headers.get("location");
+  if (!location || redirects === MAX_REDIRECTS) {
+    throw new EventUrlExtractionError("La página redirigió demasiadas veces.");
+  }
+  const next = new URL(location, current);
+  if (!isSupportedUrl(next)) {
+    throw new EventUrlExtractionError("La página redirige a un dominio o protocolo no admitido.");
+  }
+  return next;
+}
+
+export async function extractEventPageDetails(input: string, fetchImpl: typeof fetch = fetch): Promise<EventPageExtraction> {
+  let current = parseAndValidateExtractionUrl(input);
 
   for (let redirects = 0; redirects <= MAX_REDIRECTS; redirects += 1) {
     let response: Response;
@@ -363,16 +368,16 @@ export async function extractEventPageDetails(input: string, fetchImpl: typeof f
       response = await fetchImpl(current, {
         redirect: "manual",
         signal: AbortSignal.timeout(8_000),
-        headers: { accept: "text/html,application/xhtml+xml,application/json,application/rss+xml,application/xml,text/xml;q=0.9", "user-agent": "Mozilla/5.0 (compatible; Findly/1.0; +https://findly.vercel.app)" },
+        headers: {
+          accept: "text/html,application/xhtml+xml,application/json,application/rss+xml,application/xml,text/xml;q=0.9",
+          "user-agent": "Mozilla/5.0 (compatible; Findly/1.0; +https://findly.vercel.app)",
+        },
       });
     } catch {
       throw new EventUrlExtractionError("No se pudo leer la página del evento. Comprueba el enlace e inténtalo de nuevo.");
     }
     if ([301, 302, 303, 307, 308].includes(response.status)) {
-      const location = response.headers.get("location");
-      if (!location || redirects === MAX_REDIRECTS) throw new EventUrlExtractionError("La página redirigió demasiadas veces.");
-      current = new URL(location, current);
-      if (!isSupportedUrl(current)) throw new EventUrlExtractionError("La página redirige a un dominio o protocolo no admitido.");
+      current = handleExtractionRedirect(response, current, redirects);
       continue;
     }
     if (!response.ok) throw new EventUrlExtractionError("El proveedor no pudo cargar esa página del evento.");

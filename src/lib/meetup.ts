@@ -1,6 +1,7 @@
 import { parseLumaIcal } from "./luma-ical";
 import { madridDateTimeToIso } from "./madrid-time";
 import { extractImageFromHtml } from "./opengraph";
+import { extractXmlTag, decodeHtmlEntities as decodeEntities, unwrapCdata } from "./html-utils";
 
 export type MeetupEventItem = {
   uid: string;
@@ -55,29 +56,8 @@ export function normalizeMeetupIcalUrl(inputUrl: string): string {
   return `https://www.meetup.com/${slug}/events/ical/`;
 }
 
-function decodeEntities(value: string): string {
-  return value.replace(/&(#x[\da-f]+|#\d+|amp|quot|apos|#39|lt|gt|nbsp);/giu, (entity, code: string) => {
-    const normalized = code.toLowerCase();
-    if (normalized.startsWith("#x")) {
-      const point = Number.parseInt(normalized.slice(2), 16);
-      return point <= 0x10ffff ? String.fromCodePoint(point) : "";
-    }
-    if (normalized.startsWith("#")) {
-      const point = Number.parseInt(normalized.slice(1), 10);
-      return point <= 0x10ffff ? String.fromCodePoint(point) : "";
-    }
-    return ({ amp: "&", quot: '"', apos: "'", "#39": "'", lt: "<", gt: ">", nbsp: " " } as Record<string, string>)[normalized] ?? entity;
-  });
-}
-
-function extractXmlTag(block: string, tag: string): string {
-  const match = new RegExp(`<${tag}\\b[^>]*>([\\s\\S]*?)<\\/${tag}>`, "iu").exec(block);
-  if (!match) return "";
-  return match[1].trim().replace(/^<!\[CDATA\[([\s\S]*?)\]\]>$/u, "$1").trim();
-}
-
 export function cleanMeetupDescription(raw: string): string {
-  const unwrapped = raw.replace(/^<!\[CDATA\[([\s\S]*?)\]\]>$/u, "$1");
+  const unwrapped = unwrapCdata(raw);
   const withoutTags = decodeEntities(unwrapped.replace(/<[^>]*>/gu, " "));
   const simplifiedLinks = withoutTags.replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/gu, (_m, label: string, url: string) =>
     label.trim() === url.trim() ? url.trim() : `${label.trim()} (${url.trim()})`,
@@ -174,6 +154,20 @@ function extractLdJsonImage(imageValue: unknown): string | undefined {
   return images.find((img): img is string => typeof img === "string" && /^https:\/\//iu.test(img.trim()));
 }
 
+function parseEventDetailsFromJsonLdNode(
+  obj: Record<string, unknown>,
+  fallbackImage?: string,
+): { startsAt?: string; location?: string; coverImage?: string } | null {
+  if (obj["@type"] !== "Event") return null;
+  const startRaw = typeof obj.startDate === "string" ? new Date(obj.startDate) : null;
+  const startsAt = startRaw && Number.isFinite(startRaw.getTime()) ? startRaw.toISOString() : undefined;
+  return {
+    startsAt,
+    location: extractLdJsonLocation(obj.location),
+    coverImage: extractLdJsonImage(obj.image) ?? fallbackImage,
+  };
+}
+
 function parseEventPageLdJson(html: string, pageUrl?: string): { startsAt?: string; location?: string; coverImage?: string } {
   const fallbackImage = extractImageFromHtml(html, pageUrl) ?? undefined;
   for (const match of html.matchAll(/<script\b[^>]*type\s*=\s*["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/giu)) {
@@ -181,15 +175,8 @@ function parseEventPageLdJson(html: string, pageUrl?: string): { startsAt?: stri
       const parsed: unknown = JSON.parse(match[1]);
       const record = Array.isArray(parsed) ? parsed[0] : parsed;
       if (!record || typeof record !== "object") continue;
-      const obj = record as Record<string, unknown>;
-      if (obj["@type"] !== "Event") continue;
-      const startRaw = typeof obj.startDate === "string" ? new Date(obj.startDate) : null;
-      const startsAt = startRaw && Number.isFinite(startRaw.getTime()) ? startRaw.toISOString() : undefined;
-      return {
-        startsAt,
-        location: extractLdJsonLocation(obj.location),
-        coverImage: extractLdJsonImage(obj.image) ?? fallbackImage,
-      };
+      const details = parseEventDetailsFromJsonLdNode(record as Record<string, unknown>, fallbackImage);
+      if (details) return details;
     } catch { /* Continue checking other scripts */ }
   }
   return { coverImage: fallbackImage };

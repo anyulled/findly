@@ -24,17 +24,27 @@ function parseSourceUrl(rawUrl: string, type: SourceType): string {
   return parsed.toString();
 }
 
-export function validateSource(input: SourceInput): SourceInput {
-  if (!input || typeof input !== "object" || typeof input.name !== "string" || typeof input.url !== "string" || !Array.isArray(input.accountIds)) {
+function validateSourceStructure(input: unknown): asserts input is SourceInput {
+  if (!input || typeof input !== "object") throw new Error("Los datos de la fuente no son válidos.");
+  const cand = input as Partial<SourceInput>;
+  if (typeof cand.name !== "string" || typeof cand.url !== "string" || !Array.isArray(cand.accountIds)) {
     throw new Error("Los datos de la fuente no son válidos.");
   }
+}
+
+function validateSourceAccounts(accountIds: string[]): string[] {
+  const unique = [...new Set(accountIds)];
+  const isInvalid = unique.length === 0 || unique.length > 20 || unique.some((id) => !/^[0-9a-f-]{36}$/i.test(id));
+  if (isInvalid) throw new Error("Asocia la fuente al menos con una cuenta válida.");
+  return unique;
+}
+
+export function validateSource(input: SourceInput): SourceInput {
+  validateSourceStructure(input);
   const name = input.name.trim();
   if (!name || name.length > 120) throw new Error("El nombre de la fuente debe tener entre 1 y 120 caracteres.");
   if (!VALID_SOURCE_TYPES.has(input.type)) throw new Error("El tipo de fuente no es válido.");
   const url = parseSourceUrl(input.url, input.type);
-  const accountIds = [...new Set(input.accountIds)];
-  if (accountIds.length === 0 || accountIds.length > 20 || accountIds.some((id) => !/^[0-9a-f-]{36}$/i.test(id))) {
-    throw new Error("Asocia la fuente al menos con una cuenta válida.");
-  }
+  const accountIds = validateSourceAccounts(input.accountIds);
   return { ...input, name, url, accountIds };
 }

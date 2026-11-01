@@ -3,6 +3,8 @@ import { extractEventPageDetails, EventUrlExtractionError } from "@/lib/event-ur
 import { createClient } from "@/lib/supabase/server";
 import { logger } from "@/lib/logger";
 
+import { isOwnerEmailAuthorized } from "@/lib/sync-request-auth";
+
 export async function POST(request: Request) {
   const contentLength = Number(request.headers.get("content-length"));
   if (Number.isFinite(contentLength) && contentLength > 8_192) {
@@ -43,8 +45,7 @@ export async function POST(request: Request) {
     try {
       const supabase = await createClient();
       const { data: { user }, error } = await supabase.auth.getUser();
-      const ownerEmail = process.env.OWNER_EMAIL?.trim().toLowerCase();
-      if (error || !user || !ownerEmail || user.email?.toLowerCase() !== ownerEmail) {
+      if (error || !isOwnerEmailAuthorized(user?.email, process.env.OWNER_EMAIL)) {
         return NextResponse.json({ error: "No tienes acceso a este espacio." }, { status: 401 });
       }
     } catch (authError) {

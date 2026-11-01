@@ -1,3 +1,5 @@
+import { extractXmlTag, decodeHtmlEntities as decodeEntities, stripTagsAndClean } from "./html-utils";
+
 export type SubstackPostItem = {
   uid: string;
   title: string;
@@ -40,27 +42,6 @@ export function unpackLocationAndImage(rawLocation: string): { place: string; im
     return { place, imageUrl: last };
   }
   return { place: trimmed };
-}
-
-function decodeEntities(value: string): string {
-  return value.replace(/&(#x[\da-f]+|#\d+|amp|quot|apos|#39|lt|gt|nbsp);/giu, (entity, code: string) => {
-    const normalized = code.toLowerCase();
-    if (normalized.startsWith("#x")) {
-      const point = Number.parseInt(normalized.slice(2), 16);
-      return point <= 0x10ffff ? String.fromCodePoint(point) : "";
-    }
-    if (normalized.startsWith("#")) {
-      const point = Number.parseInt(normalized.slice(1), 10);
-      return point <= 0x10ffff ? String.fromCodePoint(point) : "";
-    }
-    return ({ amp: "&", quot: '"', apos: "'", "#39": "'", lt: "<", gt: ">", nbsp: " " } as Record<string, string>)[normalized] ?? entity;
-  });
-}
-
-function stripTagsAndClean(value: unknown): string {
-  if (typeof value !== "string") return "";
-  const withoutCdata = value.replace(/^<!\[CDATA\[([\s\S]*?)\]\]>$/u, "$1");
-  return decodeEntities(withoutCdata.replace(/<[^>]*>/gu, " ")).replace(/[\s\u00a0]+/gu, " ").trim();
 }
 
 function resolvePostDescription(record: Record<string, unknown>): string {
@@ -126,12 +107,6 @@ export function parseSubstackPostsJson(rawJson: string, baseUrl: string): Substa
     const item = toSubstackItem(entry, origin);
     return item ? [item] : [];
   });
-}
-
-function extractXmlTag(block: string, tag: string): string {
-  const match = new RegExp(`<${tag}\\b[^>]*>([\\s\\S]*?)<\\/${tag}>`, "iu").exec(block);
-  if (!match) return "";
-  return match[1].trim().replace(/^<!\[CDATA\[([\s\S]*?)\]\]>$/u, "$1").trim();
 }
 
 function extractRssCoverImage(itemXml: string, channelImage: string | null): string | null {

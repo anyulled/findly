@@ -14,6 +14,7 @@ import { sourceForEventUrl } from "@/lib/event-source";
 import { extractUserProfile, type UserProfile } from "@/lib/user-profile";
 import { validateSource, type SourceInput, type SourceType } from "@/lib/source-validation";
 import { invalidateBufferSyncCache, syncBufferScheduledPosts } from "@/lib/buffer-sync";
+import { isOwnerEmailAuthorized } from "@/lib/sync-request-auth";
 import { isSubstackUrl, packLocationAndImage, unpackLocationAndImage } from "@/lib/substack";
 import { fetchOpenGraphImage } from "@/lib/opengraph";
 import { runAction, runVoidAction, UserFacingError, type ActionVoidResult } from "@/lib/action-result";
@@ -97,8 +98,7 @@ const DEFAULT_ACCOUNTS = [
 async function authorizedClient() {
   const supabase = await createClient();
   const { data: { user }, error } = await supabase.auth.getUser();
-  const ownerEmail = process.env.OWNER_EMAIL?.trim().toLowerCase();
-  if (error || !user || !ownerEmail || user.email?.toLowerCase() !== ownerEmail) {
+  if (error || !user || !isOwnerEmailAuthorized(user.email, process.env.OWNER_EMAIL)) {
     throw new UserFacingError("No tienes acceso a este espacio.");
   }
   return { supabase, ownerId: user.id, user };

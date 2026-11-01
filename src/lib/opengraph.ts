@@ -1,3 +1,5 @@
+import { decodeHtmlEntities } from "./html-utils";
+
 const PRIVATE_HOST_PATTERN = /^(?:localhost|0\.0\.0\.0|::|::1|127\.\d{1,3}\.\d{1,3}\.\d{1,3}|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}|169\.254\.\d{1,3}\.\d{1,3})$|(?:\.localhost|\.local|\.internal)$/iu;
 
 const META_IMAGE_KEYS = ["og:image:secure_url", "og:image", "og:image:url", "twitter:image", "twitter:image:src", "image"];
@@ -7,21 +9,6 @@ function isPublicHttpsUrl(url: URL): boolean {
   if (url.port !== "" && url.port !== "443") return false;
   const host = url.hostname.toLowerCase().replace(/^\[|\]$/gu, "");
   return Boolean(host) && !PRIVATE_HOST_PATTERN.test(host);
-}
-
-function decodeHtmlEntities(value: string): string {
-  return value.replace(/&(#x[\da-f]+|#\d+|amp|quot|apos|#39|lt|gt|nbsp);/giu, (entity, code: string) => {
-    const normalized = code.toLowerCase();
-    if (normalized.startsWith("#x")) {
-      const point = Number.parseInt(normalized.slice(2), 16);
-      return point <= 0x10ffff ? String.fromCodePoint(point) : "";
-    }
-    if (normalized.startsWith("#")) {
-      const point = Number.parseInt(normalized.slice(1), 10);
-      return point <= 0x10ffff ? String.fromCodePoint(point) : "";
-    }
-    return ({ amp: "&", quot: '"', apos: "'", "#39": "'", lt: "<", gt: ">", nbsp: " " } as Record<string, string>)[normalized] ?? entity;
-  });
 }
 
 function toHttpsImageUrl(candidate: string | undefined | null, baseUrl?: string): string | null {
@@ -105,6 +92,50 @@ export function extractImageFromHtml(html: string, baseUrl?: string): string | n
   return extractMetaImage(html, baseUrl) ?? extractJsonLdImage(html, baseUrl);
 }
 
+function resolveRedirectUrl(response: Response, current: URL): URL | null {
+  if (![301, 302, 303, 307, 308].includes(response.status)) return null;
+  const location = response.headers.get("location");
+  if (!location) return null;
+  try {
+    const next = new URL(location, current);
+    return isPublicHttpsUrl(next) ? next : null;
+  } catch {
+    return null;
+  }
+}
+
+async function fetchHtmlBodyWithRedirects(
+  initialUrl: URL,
+  fetchImpl: typeof fetch,
+): Promise<{ html: string; finalUrl: string } | null> {
+  let current = initialUrl;
+  for (let redirects = 0; redirects <= 3; redirects += 1) {
+    try {
+      const response = await fetchImpl(current, {
+        redirect: "manual",
+        signal: AbortSignal.timeout(6_000),
+        headers: {
+          accept: "text/html,application/xhtml+xml;q=0.9,*/*;q=0.5",
+          "user-agent": "Mozilla/5.0 (compatible; Findly/1.0; +https://findly.vercel.app)",
+        },
+      });
+      if ([301, 302, 303, 307, 308].includes(response.status)) {
+        if (redirects === 3) return null;
+        const next = resolveRedirectUrl(response, current);
+        if (!next) return null;
+        current = next;
+        continue;
+      }
+      if (!response.ok) return null;
+      const html = (await response.text()).slice(0, 512_000);
+      return { html, finalUrl: current.toString() };
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
 export async function fetchOpenGraphImage(
   pageUrl: string | null | undefined,
   fetchImpl: typeof fetch = fetch,
@@ -118,29 +149,6 @@ export async function fetchOpenGraphImage(
   }
   if (!isPublicHttpsUrl(current)) return null;
 
-  for (let redirects = 0; redirects <= 3; redirects += 1) {
-    try {
-      const response = await fetchImpl(current, {
-        redirect: "manual",
-        signal: AbortSignal.timeout(6_000),
-        headers: {
-          accept: "text/html,application/xhtml+xml;q=0.9,*/*;q=0.5",
-          "user-agent": "Mozilla/5.0 (compatible; Findly/1.0; +https://findly.vercel.app)",
-        },
-      });
-      if ([301, 302, 303, 307, 308].includes(response.status)) {
-        const location = response.headers.get("location");
-        if (!location || redirects === 3) return null;
-        current = new URL(location, current);
-        if (!isPublicHttpsUrl(current)) return null;
-        continue;
-      }
-      if (!response.ok) return null;
-      const html = (await response.text()).slice(0, 512_000);
-      return extractImageFromHtml(html, current.toString());
-    } catch {
-      return null;
-    }
-  }
-  return null;
+  const fetched = await fetchHtmlBodyWithRedirects(current, fetchImpl);
+  return fetched ? extractImageFromHtml(fetched.html, fetched.finalUrl) : null;
 }
