@@ -42,7 +42,8 @@ function parseSourceRows(source: LumaSource, rawContent: string): { rows: Persis
   }
   if (isMeetupUrl(source.feedUrl)) {
     const items = parseMeetupFeed(rawContent, source.feedUrl);
-    const rows = items.map((item): PersistableEvent => ({
+    const validItems = items.filter((item): item is typeof item & { startsAt: string } => Boolean(item.startsAt));
+    const rows = validItems.map((item): PersistableEvent => ({
       owner_id: source.ownerId,
       source_id: source.id,
       external_id: item.uid,
@@ -54,7 +55,7 @@ function parseSourceRows(source: LumaSource, rawContent: string): { rows: Persis
       event_url: item.url,
       detected_language: detectTitleLanguage(item.title),
     }));
-    return { rows, skippedEvents: 0 };
+    return { rows, skippedEvents: items.length - validItems.length };
   }
   const parsed = parseLumaIcal(rawContent);
   const rows = parsed.events.map((event: LumaCalendarEvent): PersistableEvent => ({
@@ -172,7 +173,7 @@ export async function fetchLumaFeed(url: string): Promise<string> {
   if (isMeetupUrl(url) && !/^BEGIN:VCALENDAR/iu.test(rawBody.trim())) {
     const items = parseMeetupRssFeed(rawBody, targetUrl.toString());
     const enriched = await enrichMeetupRssItems(items, targetUrl.toString());
-    return JSON.stringify(enriched);
+    return JSON.stringify(enriched.filter((item) => Boolean(item.startsAt)));
   }
   return rawBody;
 }

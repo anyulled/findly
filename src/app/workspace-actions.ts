@@ -16,6 +16,7 @@ import { extractUserProfile, type UserProfile } from "@/lib/user-profile";
 import { validateSource, type SourceInput, type SourceType } from "@/lib/source-validation";
 import { fetchNextChannelSlotsForAccount, syncBufferScheduledPosts } from "@/lib/buffer-sync";
 import { isSubstackUrl, packLocationAndImage, unpackLocationAndImage } from "@/lib/substack";
+import { fetchOpenGraphImage } from "@/lib/opengraph";
 
 export type { UserProfile } from "@/lib/user-profile";
 export type { SourceInput, SourceType } from "@/lib/source-validation";
@@ -350,12 +351,13 @@ export async function createEvent(input: Omit<EventView, "id">): Promise<EventVi
   const eventDate = input.date || fallbackNow.date;
   const eventTime = input.time || fallbackNow.time;
   const startsAt = madridDateTimeToIso(eventDate, eventTime);
+  const resolvedImageUrl = input.imageUrl?.trim() || (url ? await fetchOpenGraphImage(url) : null);
   const { data, error } = await supabase.from("events").insert({
     owner_id: ownerId,
     title,
     starts_at: startsAt,
     timezone: "Europe/Madrid",
-    location: packLocationAndImage(input.place.trim(), input.imageUrl),
+    location: packLocationAndImage(input.place.trim(), resolvedImageUrl),
     description: input.description.trim(),
     event_url: url,
     detected_language: detectTitleLanguage(title),
