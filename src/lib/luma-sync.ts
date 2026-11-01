@@ -112,6 +112,9 @@ export async function fetchLumaFeed(url: string): Promise<string> {
   });
   if (!response.ok) throw new Error("Feed request failed");
   const declaredLength = Number(response.headers.get("content-length"));
-  if (Number.isFinite(declaredLength) && declaredLength > MAX_FEED_BYTES) throw new Error("Feed is too large");
+  if (Number.isFinite(declaredLength) && declaredLength > MAX_FEED_BYTES) {
+    try { await response.body?.cancel(); } catch { /* Preserve the size rejection. */ }
+    throw new Error("Feed is too large");
+  }
   return readLimitedFeedBody(response);
 }
