@@ -1,5 +1,7 @@
 import { detectTitleLanguage, type PostLanguage } from "./language";
 import { madridDateTimeToIso } from "./madrid-time";
+import { computeNextSlotFromSchedule } from "./buffer-sync";
+import { isSubstackUrl } from "./substack";
 import type { ApprovedStyleExample, GeneratedPost, PostGenerationInput } from "./groq";
 import type { SocialNetwork } from "./social-validation";
 
@@ -30,7 +32,7 @@ export type GeneratedReviewDraft = {
   id: string;
   eventId: string;
   date: string;
-  time: "13:00";
+  time: string;
   account: string;
   accountId: string;
   network: SocialNetwork;
@@ -52,6 +54,7 @@ type GenerateEventDraftsInput = {
   approvedExamples: ApprovedStyleExample[];
   existing: ExistingReminder[];
   now?: Date;
+  slotByAccountNetwork?: Record<string, { date: string; time: string }>;
   generate: (input: PostGenerationInput) => Promise<GeneratedPost | { text: string }>;
 };
 
@@ -98,28 +101,41 @@ export async function generateEventDrafts({
   approvedExamples,
   existing,
   now = new Date(),
+  slotByAccountNetwork,
   generate,
 }: GenerateEventDraftsInput): Promise<GeneratedReviewDraft[]> {
   const language = event.language ?? detectTitleLanguage(event.title);
   const existingKeys = new Set(existing.map(({ accountId, network, leadDays }) => reminderKey(accountId, network, leadDays)));
-  const candidates = REMINDER_DAYS.flatMap((leadDays) => {
-    const date = dateMinusDays(event.date, leadDays);
-    const dueAt = madridDateTimeToIso(date, "13:00");
-    if (Date.parse(dueAt) <= now.getTime()) return [];
-    return accounts.flatMap((account) => account.networks.flatMap((network) => {
-      if (existingKeys.has(reminderKey(account.id, network, leadDays))) return [];
-      const matchingExamples = approvedExamples
-        .filter((example) => example.accountId === account.id && example.network === network && example.language === language)
-        .slice(0, 3);
-      return [{ account, network, leadDays, date, matchingExamples }];
-    }));
-  });
+  const isSubstack = isSubstackUrl(event.url);
+  const candidates = isSubstack
+    ? accounts.flatMap((account) => account.networks.flatMap((network) => {
+        const leadDays = 1 as const;
+        if (existingKeys.has(reminderKey(account.id, network, leadDays))) return [];
+        const slot = slotByAccountNetwork?.[`${account.id}:${network}`]
+          ?? computeNextSlotFromSchedule(network, undefined, new Set(), now);
+        const matchingExamples = approvedExamples
+          .filter((example) => example.accountId === account.id && example.network === network && example.language === language)
+          .slice(0, 3);
+        return [{ account, network, leadDays, date: slot.date, time: slot.time, matchingExamples }];
+      }))
+    : REMINDER_DAYS.flatMap((leadDays) => {
+        const date = dateMinusDays(event.date, leadDays);
+        const dueAt = madridDateTimeToIso(date, "13:00");
+        if (Date.parse(dueAt) <= now.getTime()) return [];
+        return accounts.flatMap((account) => account.networks.flatMap((network) => {
+          if (existingKeys.has(reminderKey(account.id, network, leadDays))) return [];
+          const matchingExamples = approvedExamples
+            .filter((example) => example.accountId === account.id && example.network === network && example.language === language)
+            .slice(0, 3);
+          return [{ account, network, leadDays, date, time: "13:00", matchingExamples }];
+        }));
+      });
 
   if (candidates.length > MAX_GENERATED_POSTS) {
     throw new Error(`This event would create too many posts (maximum ${MAX_GENERATED_POSTS} per request).`);
   }
 
-  return mapWithConcurrency(candidates, GENERATION_CONCURRENCY, async ({ account, network, leadDays, date, matchingExamples }) => {
+  return mapWithConcurrency(candidates, GENERATION_CONCURRENCY, async ({ account, network, leadDays, date, time, matchingExamples }) => {
     const generated = await generate({
       accountId: account.id,
       accountName: account.name,
@@ -141,7 +157,7 @@ export async function generateEventDrafts({
       id: `${event.id}-${date}-${account.id}-${network}`,
       eventId: event.id,
       date,
-      time: "13:00" as const,
+      time,
       account: account.name,
       accountId: account.id,
       network,

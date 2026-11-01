@@ -206,5 +206,49 @@ test("rejects invalid inputs and missing credentials before sending a request", 
   await assert.rejects(client.schedulePost({ ...input, dueAt: "2026-11-07T13:00:00+01:00" }), BufferInputError);
   await assert.rejects(client.schedulePost({ ...input, dueAt: "2026-02-30T12:00:00.000Z" }), BufferInputError);
   await assert.rejects(client.schedulePost({ ...input, channelId: " " }), BufferInputError);
+  await assert.rejects(client.schedulePost({ ...input, imageUrl: "http://insecure.example.com/img.png" }), BufferInputError);
   assert.equal(calls, 0);
+});
+
+test("supports addToQueue mode without dueAt and attaches imageUrl as ImageAsset", async () => {
+  let requestBody: Record<string, unknown> | undefined;
+  const client = new BufferClient({
+    apiKey: "test-api-key",
+    fetchImpl: async (_url, init) => {
+      requestBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      return response({
+        data: {
+          createPost: {
+            __typename: "PostActionSuccess",
+            post: { id: "buffer-post-queue", text: "Substack post", dueAt: scheduledAt },
+          },
+        },
+      });
+    },
+  });
+
+  const result = await client.schedulePost({
+    channelId: "channel-123",
+    text: "Substack post",
+    mode: "addToQueue",
+    imageUrl: "https://substackcdn.com/image/cover.jpg",
+  });
+
+  assert.equal(result.kind, "scheduled");
+  assert.deepEqual(requestBody?.variables, {
+    input: {
+      channelId: "channel-123",
+      text: "Substack post",
+      schedulingType: "automatic",
+      mode: "addToQueue",
+      assets: [
+        {
+          image: {
+            url: "https://substackcdn.com/image/cover.jpg",
+            thumbnailUrl: "https://substackcdn.com/image/cover.jpg",
+          },
+        },
+      ],
+    },
+  });
 });

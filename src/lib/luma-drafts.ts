@@ -3,6 +3,9 @@ import { generateEventDrafts, type ExistingReminder, type GenerationAccount } fr
 import { formatMadridDateTime, madridDateTimeToIso } from "./madrid-time";
 import { validatePost, type SocialNetwork } from "./social-validation";
 import type { PostLanguage } from "./language";
+import { isSubstackUrl, unpackLocationAndImage } from "./substack";
+import { fetchNextChannelSlotsForAccount } from "./buffer-sync";
+import { bufferCredentialForAccount } from "./buffer-account-credentials";
 
 const NETWORKS: SocialNetwork[] = ["LinkedIn", "X", "Bluesky"];
 
@@ -59,13 +62,25 @@ export async function generateLumaEventDrafts(
   ]);
   const publishingMode = await repository.getPublishingMode?.(event.owner_id) ?? "review";
   const eventTime = formatMadridDateTime(event.starts_at);
+  const { place } = unpackLocationAndImage(event.location);
+  const slotByAccountNetwork: Record<string, { date: string; time: string }> = {};
+  if (isSubstackUrl(event.event_url)) {
+    for (const account of accounts) {
+      const networks = account.networks.filter((network): network is SocialNetwork => NETWORKS.includes(network));
+      const apiKey = bufferCredentialForAccount(account.name).apiKey;
+      const slots = await fetchNextChannelSlotsForAccount(apiKey, networks, {}, fetch, now);
+      for (const network of networks) {
+        slotByAccountNetwork[`${account.id}:${network}`] = slots[network];
+      }
+    }
+  }
   const drafts = await generateEventDrafts({
     event: {
       id: event.id,
       title: event.title,
       date: eventTime.date,
       time: eventTime.time,
-      place: event.location,
+      place,
       description: event.description,
       url: event.event_url ?? undefined,
       language: event.detected_language,
@@ -77,6 +92,7 @@ export async function generateLumaEventDrafts(
     approvedExamples,
     existing,
     now,
+    slotByAccountNetwork,
     generate,
   });
 

@@ -256,3 +256,34 @@ test("fetchLumaFeed rejects invalid, private, unsuccessful, and oversized feeds"
     globalThis.fetch = originalFetch;
   }
 });
+
+test("syncLumaSources imports Substack sources and packs cover image in location", async () => {
+  const inserted: PersistableEvent[] = [];
+  const repository: SyncRepository = {
+    async listEnabledLumaSources() {
+      return [{ id: "sub-1", ownerId: "owner-1", name: "Substack", feedUrl: "https://etsideusnondaretur.substack.com/feed" }];
+    },
+    async upsertEvents(events) {
+      inserted.push(...events);
+      const available = events.map((event) => ({ ...event, id: `event-${event.external_id}` }));
+      return { inserted: available, available };
+    },
+  };
+  const substackJson = JSON.stringify([
+    {
+      id: 192356480,
+      title: "La eternidad está en el presente",
+      description: "De la cinta de Moebius al presente continuo",
+      canonical_url: "https://etsideusnondaretur.substack.com/p/la-eternidad",
+      post_date: "2026-03-28T09:15:10.742Z",
+      cover_image: "https://substackcdn.com/image/cover.jpg",
+    },
+  ]);
+
+  const result = await syncLumaSources(repository, async () => substackJson);
+  assert.equal(result.feedsSucceeded, 1);
+  assert.equal(result.eventsInserted, 1);
+  assert.equal(inserted[0]?.title, "La eternidad está en el presente");
+  assert.equal(inserted[0]?.location, "https://substackcdn.com/image/cover.jpg");
+  assert.equal(inserted[0]?.event_url, "https://etsideusnondaretur.substack.com/p/la-eternidad");
+});

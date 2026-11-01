@@ -1,4 +1,5 @@
 import { formatMadridDateTime } from "@/lib/madrid-time";
+import { isSubstackUrl, normalizeSubstackPostsApiUrl, parseSubstackFeed } from "@/lib/substack";
 
 const MAX_HTML_BYTES = 1_000_000;
 const MAX_REDIRECTS = 3;
@@ -18,6 +19,7 @@ export type EventPageDetails = {
   place: string;
   description: string;
   url: string;
+  imageUrl?: string;
 };
 
 export type EventPageExtraction = {
@@ -202,6 +204,11 @@ function resolveDescription(structured: Record<string, unknown> | undefined, met
   return cleanText(meta["og:description"] || meta.description || meta["twitter:description"]);
 }
 
+function resolveImage(meta: Record<string, string>): string | undefined {
+  const candidate = (meta["og:image"] || meta["twitter:image"] || "").trim();
+  return /^https:\/\//iu.test(candidate) ? candidate : undefined;
+}
+
 export function parseEventPage(html: string, pageUrl: string): EventPageExtraction {
   const meta = readMeta(html);
   const structured = structuredEvents(html)[0];
@@ -211,11 +218,64 @@ export function parseEventPage(html: string, pageUrl: string): EventPageExtracti
   const dateTime = resolveDateTime(structured, meta, html);
   const place = resolvePlace(structured, meta, html);
   const description = resolveDescription(structured, meta);
+  const imageUrl = resolveImage(meta);
   const url = new URL(pageUrl);
-  const event: EventPageDetails = { title, ...dateTime, place, description, url: url.toString() };
+  const event: EventPageDetails = {
+    title,
+    ...dateTime,
+    place,
+    description,
+    url: url.toString(),
+    ...(imageUrl ? { imageUrl } : {}),
+  };
 
-  const missingFields = (["date", "time", "place", "description"] as const).filter((field) => !event[field]);
+  const requiredFields = isSubstackUrl(url.toString())
+    ? (["description"] as const)
+    : (["date", "time", "place", "description"] as const);
+  const missingFields = requiredFields.filter((field) => !event[field]);
   return { event, missingFields };
+}
+
+function parseSubstackFeedExtraction(body: string, pageUrl: string): EventPageExtraction {
+  let items: ReturnType<typeof parseSubstackFeed>;
+  try {
+    items = parseSubstackFeed(body, pageUrl);
+  } catch {
+    throw new EventUrlExtractionError("No se pudieron leer las publicaciones de Substack.");
+  }
+  const latest = items[0];
+  if (!latest) throw new EventUrlExtractionError("No se encontraron publicaciones en ese feed de Substack.");
+  const event: EventPageDetails = {
+    title: latest.title,
+    date: "",
+    time: "",
+    place: "",
+    description: latest.description,
+    url: latest.url,
+    ...(latest.coverImage ? { imageUrl: latest.coverImage } : {}),
+  };
+  return {
+    event,
+    missingFields: event.description ? [] : ["description"],
+  };
+}
+
+async function enrichSubstackCoverFromApi(extraction: EventPageExtraction, feedUrl: string, fetchImpl: typeof fetch): Promise<EventPageExtraction> {
+  if (extraction.event.imageUrl) return extraction;
+  try {
+    const apiUrl = normalizeSubstackPostsApiUrl(feedUrl);
+    const response = await fetchImpl(apiUrl, {
+      signal: AbortSignal.timeout(6_000),
+      headers: { accept: "application/json" },
+    });
+    if (!response.ok) return extraction;
+    const items = parseSubstackFeed(await readHtml(response), apiUrl);
+    const matching = items.find((item) => item.url === extraction.event.url || item.title === extraction.event.title) ?? items[0];
+    if (matching?.coverImage) {
+      return { ...extraction, event: { ...extraction.event, imageUrl: matching.coverImage } };
+    }
+  } catch { /* Preserve RSS extraction if cover API enrichment is unavailable. */ }
+  return extraction;
 }
 
 async function readHtml(response: Response): Promise<string> {
@@ -252,7 +312,7 @@ export async function extractEventPageDetails(input: string, fetchImpl: typeof f
       response = await fetchImpl(current, {
         redirect: "manual",
         signal: AbortSignal.timeout(8_000),
-        headers: { accept: "text/html,application/xhtml+xml", "user-agent": "Mozilla/5.0 (compatible; Findly/1.0; +https://findly.vercel.app)" },
+        headers: { accept: "text/html,application/xhtml+xml,application/json,application/rss+xml,application/xml,text/xml;q=0.9", "user-agent": "Mozilla/5.0 (compatible; Findly/1.0; +https://findly.vercel.app)" },
       });
     } catch {
       throw new EventUrlExtractionError("No se pudo leer la página del evento. Comprueba el enlace e inténtalo de nuevo.");
@@ -266,6 +326,11 @@ export async function extractEventPageDetails(input: string, fetchImpl: typeof f
     }
     if (!response.ok) throw new EventUrlExtractionError("El proveedor no pudo cargar esa página del evento.");
     const contentType = response.headers.get("content-type") ?? "";
+    const isSubstack = isSubstackUrl(current.toString());
+    if (isSubstack && (/json|xml|rss/iu.test(contentType) || /\/(?:feed|api\/v1\/posts)\b/iu.test(current.pathname))) {
+      const extracted = parseSubstackFeedExtraction(await readHtml(response), current.toString());
+      return enrichSubstackCoverFromApi(extracted, current.toString(), fetchImpl);
+    }
     if (!/text\/html|application\/xhtml\+xml/iu.test(contentType)) throw new EventUrlExtractionError("La URL no devolvió una página HTML de evento.");
     return parseEventPage(await readHtml(response), current.toString());
   }

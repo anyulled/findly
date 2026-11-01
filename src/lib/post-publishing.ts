@@ -2,11 +2,13 @@ import {
   BufferApiError,
   BufferClient,
   BufferUncertainResultError,
+  type ScheduleBufferPostInput,
   type ScheduleBufferPostResult,
 } from "@/lib/buffer";
 import type { SocialNetwork } from "@/lib/social-validation";
 import { validatePost } from "@/lib/social-validation";
 import { bufferCredentialForAccount } from "@/lib/buffer-account-credentials";
+import { isSubstackUrl, unpackLocationAndImage } from "@/lib/substack";
 
 type DatabaseError = { message: string };
 type DatabaseResult<T> = { data: T | null; error: DatabaseError | null };
@@ -20,10 +22,16 @@ export interface PostToSchedule {
   content: string;
 }
 
+export interface PostContext {
+  eventUrl?: string | null;
+  imageUrl?: string | null;
+}
+
 export interface PostPublishingRepository {
   claim(postId: string): Promise<PostToSchedule | null>;
   accountName(accountId: string): Promise<string | null>;
   bufferChannelId(accountId: string, network: SocialNetwork): Promise<string | null>;
+  postContext?(postId: string): Promise<PostContext | null>;
   markScheduled(postId: string, attemptId: string, bufferPostId: string): Promise<void>;
   markFailure(postId: string, attemptId: string, message: string, needsReconciliation: boolean): Promise<void>;
 }
@@ -48,6 +56,20 @@ type SupabasePublisherClient = {
         eq(column: string, value: string): {
           eq(column: string, value: string): { maybeSingle(): PromiseLike<DatabaseResult<{ buffer_channel_id: string }>> };
         };
+      };
+    };
+  };
+  from(table: "posts"): {
+    select(columns: "event_id"): {
+      eq(column: string, value: string): {
+        eq(column: string, value: string): { maybeSingle(): PromiseLike<DatabaseResult<{ event_id: string | null }>> };
+      };
+    };
+  };
+  from(table: "events"): {
+    select(columns: "event_url,location"): {
+      eq(column: string, value: string): {
+        eq(column: string, value: string): { maybeSingle(): PromiseLike<DatabaseResult<{ event_url: string | null; location: string }>> };
       };
     };
   };
@@ -104,6 +126,24 @@ export class SupabasePostPublishingRepository implements PostPublishingRepositor
     return data?.name ?? null;
   }
 
+  async postContext(postId: string): Promise<PostContext | null> {
+    const postQuery = (this.supabase as Partial<SupabasePublisherClient>).from?.("posts");
+    if (!postQuery) return null;
+    const { data: postRow } = await postQuery.select("event_id")
+      .eq("owner_id", this.ownerId).eq("id", postId).maybeSingle();
+    if (!postRow?.event_id) return null;
+    const eventQuery = (this.supabase as Partial<SupabasePublisherClient>).from?.("events");
+    if (!eventQuery) return null;
+    const { data: eventRow } = await eventQuery.select("event_url,location")
+      .eq("owner_id", this.ownerId).eq("id", postRow.event_id).maybeSingle();
+    if (!eventRow) return null;
+    const unpacked = unpackLocationAndImage(eventRow.location);
+    return {
+      eventUrl: eventRow.event_url,
+      imageUrl: unpacked.imageUrl ?? null,
+    };
+  }
+
   async markScheduled(postId: string, attemptId: string, bufferPostId: string): Promise<void> {
     const { error } = await this.supabase.rpc("mark_post_scheduled", {
       p_post_id: postId,
@@ -124,6 +164,32 @@ export class SupabasePostPublishingRepository implements PostPublishingRepositor
     });
     if (error) throw new Error(`No se pudo guardar el resultado de Buffer: ${error.message}`);
   }
+}
+
+function buildSchedulePayload(
+  post: PostToSchedule,
+  channelId: string,
+  context: PostContext | null,
+): { ok: true; input: ScheduleBufferPostInput } | { ok: false; message: string } {
+  const useQueueSlot = isSubstackUrl(context?.eventUrl);
+  const dueAt = new Date(post.due_at);
+  if (!useQueueSlot) {
+    if (!Number.isFinite(dueAt.getTime())) {
+      return { ok: false, message: "La fecha de publicación guardada no es válida." };
+    }
+    if (dueAt.getTime() <= Date.now()) {
+      return { ok: false, message: "La hora programada en Europe/Madrid ya pasó; esta publicación no se enviará." };
+    }
+  }
+  return {
+    ok: true,
+    input: {
+      channelId,
+      text: post.content,
+      ...(useQueueSlot ? { mode: "addToQueue" as const } : { dueAt: dueAt.toISOString() }),
+      ...(context?.imageUrl ? { imageUrl: context.imageUrl } : {}),
+    },
+  };
 }
 
 export async function schedulePostWithBuffer(
@@ -160,16 +226,11 @@ export async function schedulePostWithBuffer(
     return { kind: "failed", message };
   }
 
-  const dueAt = new Date(post.due_at);
-  if (!Number.isFinite(dueAt.getTime())) {
-    const message = "La fecha de publicación guardada no es válida.";
-    await repository.markFailure(post.id, post.attempt_id, message, false);
-    return { kind: "failed", message };
-  }
-  if (dueAt.getTime() <= Date.now()) {
-    const message = "La hora programada en Europe/Madrid ya pasó; esta publicación no se enviará.";
-    await repository.markFailure(post.id, post.attempt_id, message, false);
-    return { kind: "failed", message };
+  const context = await repository.postContext?.(post.id).catch(() => null) ?? null;
+  const payload = buildSchedulePayload(post, channelId, context);
+  if (!payload.ok) {
+    await repository.markFailure(post.id, post.attempt_id, payload.message, false);
+    return { kind: "failed", message: payload.message };
   }
 
   let client: BufferClient;
@@ -183,11 +244,7 @@ export async function schedulePostWithBuffer(
 
   let result: ScheduleBufferPostResult;
   try {
-    result = await client.schedulePost({
-      channelId,
-      text: post.content,
-      dueAt: dueAt.toISOString(),
-    });
+    result = await client.schedulePost(payload.input);
   } catch (error) {
     const message = errorMessage(error);
     const needsReconciliation = isUncertain(error);
