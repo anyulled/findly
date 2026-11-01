@@ -94,6 +94,60 @@ function buildMessages(input: PostGenerationInput) {
   ];
 }
 
+const REMINDER_LABELS: Record<PostLanguage, Record<14 | 7 | 1, string>> = {
+  en: { 14: "in two weeks", 7: "next week", 1: "tomorrow" },
+  es: { 14: "dentro de dos semanas", 7: "dentro de una semana", 1: "mañana" },
+  ca: { 14: "d’aquí a dues setmanes", 7: "d’aquí a una setmana", 1: "demà" },
+};
+
+function formatReminderCandidate(language: PostLanguage, until: string, title: string, place: string, url: string): string {
+  const templates: Record<PostLanguage, string> = {
+    en: place ? `Join us ${until} for ${title} in ${place}. See you there! ${url}` : `Join us ${until} for ${title}! ${url}`,
+    es: place ? `¡Nos vemos ${until} en ${title}! Te esperamos en ${place}. ${url}` : `¡Nos vemos ${until} en ${title}! ${url}`,
+    ca: place ? `Ens veiem ${until} a ${title}! T’hi esperem a ${place}. ${url}` : `Ens veiem ${until} a ${title}! ${url}`,
+  };
+  return templates[language].trim();
+}
+
+/** Build a deterministic fallback post that always passes platform validation. */
+export function buildFallbackDraftText(input: PostGenerationInput): string {
+  const { language, network, reminderDays, event } = input;
+  const title = event.title.trim();
+  const url = event.url?.trim() ?? "";
+  if (isSubstackUrl(url)) {
+    const desc = event.description.trim();
+    const candidates = [
+      desc ? `${title} — ${desc} ${url}`.trim() : `${title} ${url}`.trim(),
+      `${title.slice(0, 180)} ${url}`.trim(),
+    ];
+    return candidates.find((text) => validatePost(network, text).valid) ?? title.slice(0, 200);
+  }
+
+  const until = REMINDER_LABELS[language][reminderDays];
+  const candidates = [
+    formatReminderCandidate(language, until, title, event.place.trim(), url),
+    formatReminderCandidate(language, until, title, "", url),
+    `${title.slice(0, 140)} ${url}`.trim(),
+  ];
+  return candidates.find((text) => validatePost(network, text).valid) ?? title.slice(0, 200);
+}
+
+/** Generate a platform-specific post with Groq, falling back deterministically if Groq fails or exceeds the limit. */
+export async function generateSocialPostOrFallback(
+  input: PostGenerationInput,
+  config: GroqGenerationConfig = {},
+): Promise<GeneratedPost> {
+  try {
+    return await generateSocialPost(input, config);
+  } catch (error) {
+    if (error instanceof PostGenerationError) {
+      const text = buildFallbackDraftText(input);
+      return { text, model: "fallback", validation: validatePost(input.network, text) };
+    }
+    throw error;
+  }
+}
+
 /** Generate and deterministically validate one platform-specific post. */
 export async function generateSocialPost(
   input: PostGenerationInput,

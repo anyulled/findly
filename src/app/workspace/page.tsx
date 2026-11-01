@@ -258,7 +258,10 @@ function Dashboard() {
           : account));
         setFeedback(status === "scheduled" ? "Publicación aprobada y programada en Buffer." : status === "needs_reconciliation" ? "Buffer pudo aceptar la publicación. Comprueba su cola antes de reintentar." : status === "failed" ? `La publicación se aprobó, pero Buffer la rechazó: ${message ?? "comprueba la configuración"}` : "La publicación está en proceso de envío.");
       }
-      else if (next.text !== undefined) await updatePostContent(post.id, content);
+      else if (next.text !== undefined) {
+        const result = await updatePostContent(post.id, content);
+        if (!result.success) throw new Error(result.error);
+      }
     }
     if (!persistent && next.status === "approved") {
       setAccountList((all) => all.map((account) => account.name === post.account
@@ -291,12 +294,20 @@ function Dashboard() {
     };
     let savedEvent: EventItem | null = null;
     try {
-      const event = persistent ? await createEvent(draftEvent) : { ...draftEvent, id: "evt-" + Date.now(), language: detectTitleLanguage(draftEvent.title) };
-      if (persistent) savedEvent = event;
+      let event: EventItem;
+      if (persistent) {
+        const created = await createEvent(draftEvent);
+        if (!created.success) throw new Error(created.error);
+        event = created.event;
+        savedEvent = event;
+      } else {
+        event = { ...draftEvent, id: "evt-" + Date.now(), language: detectTitleLanguage(draftEvent.title) };
+      }
       setEvents((all) => [event, ...all]);
       if (persistent) {
-        const savedPosts = await generateReviewPosts(event.id);
-        setPosts((all) => [...all, ...savedPosts]);
+        const generated = await generateReviewPosts(event.id);
+        if (!generated.success) throw new Error(generated.error);
+        setPosts((all) => [...all, ...generated.posts]);
       } else setPosts((all) => [...all, ...starterPosts([event], accountList)]);
       setFeedback("");
     } catch (error) {
@@ -355,7 +366,12 @@ function Dashboard() {
   async function retryDrafts(event: EventItem) {
     try {
       if (!persistent) return;
-      const saved = await generateReviewPosts(event.id);
+      const result = await generateReviewPosts(event.id);
+      if (!result.success) {
+        setFeedback(result.error);
+        return;
+      }
+      const saved = result.posts;
       if (saved.length === 0) {
         setFeedback("Este evento no tiene recordatorios futuros que se puedan crear.");
         return;
@@ -387,7 +403,13 @@ function Dashboard() {
 
   async function changeMode(nextMode: "review" | "automatic") {
     try {
-      if (persistent) await updatePublishingMode(nextMode);
+      if (persistent) {
+        const result = await updatePublishingMode(nextMode);
+        if (!result.success) {
+          setFeedback(result.error);
+          return;
+        }
+      }
       setMode(nextMode);
       setFeedback("");
     } catch (error) {
@@ -399,8 +421,8 @@ function Dashboard() {
     setAccountList((all) => all.map((item) => matchesAccount(item, account) ? { ...item, prompt } : item));
     if (persistent && account.id) {
       try {
-        await updateAccountVoice(account.id, prompt);
-        setFeedback("");
+        const result = await updateAccountVoice(account.id, prompt);
+        setFeedback(result.success ? "" : result.error);
       } catch (error) {
         setFeedback(error instanceof Error ? error.message : "No se pudo guardar el tono.");
       }
@@ -410,7 +432,11 @@ function Dashboard() {
   async function changeBufferChannel(account: Account, network: Network, value: string) {
     if (persistent && account.id) {
       try {
-        await saveBufferChannel(account.id, network, value);
+        const result = await saveBufferChannel(account.id, network, value);
+        if (!result.success) {
+          setFeedback(result.error);
+          return;
+        }
         setFeedback("");
       } catch (error) {
         setFeedback(error instanceof Error ? error.message : "No se pudo guardar el canal de Buffer.");
@@ -443,7 +469,11 @@ function Dashboard() {
 
   async function confirmReconciledPost(post: Post) {
     try {
-      await reconcileScheduledPost(post.id, reconciliationId);
+      const result = await reconcileScheduledPost(post.id, reconciliationId);
+      if (!result.success) {
+        setFeedback(result.error);
+        return;
+      }
       const changes: Partial<Post> = { status: "scheduled", bufferPostId: reconciliationId.trim(), lastError: null };
       setPosts((all) => all.map((item) => item.id === post.id ? { ...item, ...changes } : item));
       setSelected({ ...post, ...changes });
@@ -456,7 +486,11 @@ function Dashboard() {
 
   async function confirmPostAbsent(post: Post) {
     try {
-      await confirmPostMissingFromBuffer(post.id);
+      const result = await confirmPostMissingFromBuffer(post.id);
+      if (!result.success) {
+        setFeedback(result.error);
+        return;
+      }
       const changes: Partial<Post> = { status: "failed", lastError: "Has confirmado que no aparece en la cola de Buffer." };
       setPosts((all) => all.map((item) => item.id === post.id ? { ...item, ...changes } : item));
       setSelected({ ...post, ...changes });
@@ -479,7 +513,13 @@ function Dashboard() {
 
   async function removeEvent(eventId: string) {
     try {
-      if (persistent) await deleteEvent(eventId);
+      if (persistent) {
+        const result = await deleteEvent(eventId);
+        if (!result.success) {
+          setFeedback(result.error);
+          return;
+        }
+      }
       setEvents((all) => all.filter((e) => e.id !== eventId));
       setPosts((all) => all.filter((p) => p.eventId !== eventId));
       setFeedback("");

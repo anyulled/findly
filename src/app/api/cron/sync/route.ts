@@ -1,7 +1,7 @@
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { fetchLumaFeed, syncLumaSources, type DraftGenerator, type SyncRepository } from "@/lib/luma-sync";
 import { isAuthorizedCronRequest } from "@/lib/cron-auth";
-import { generateSocialPost } from "@/lib/groq";
+import { generateSocialPostOrFallback } from "@/lib/groq";
 import { generateLumaEventDrafts, type LumaDraftRepository } from "@/lib/luma-drafts";
 import type { PostLanguage } from "@/lib/language";
 import type { SocialNetwork } from "@/lib/social-validation";
@@ -138,10 +138,7 @@ export async function POST(request: Request): Promise<Response> {
     // Recover persisted approval intents even when there are no feeds or Groq
     // is unavailable. Failed and uncertain posts are never selected here.
     const approvedRecovery = await dispatchApprovedPostsWithSupabase(supabase, ownerId, null, undefined, { budget: deliveryBudget });
-    const groqConfigured = Boolean(process.env.GROQ_API_KEY?.trim() && process.env.GROQ_MODEL?.trim());
-    const generateDrafts: DraftGenerator | undefined = groqConfigured
-      ? (_source, event) => generateLumaEventDrafts(event, draftRepository, generateSocialPost)
-      : undefined;
+    const generateDrafts: DraftGenerator = (_source, event) => generateLumaEventDrafts(event, draftRepository, generateSocialPostOrFallback);
     const result = await syncLumaSources(repository, fetchLumaFeed, generateDrafts);
     return Response.json({ ...result, approvedRecovery, automaticDelivery }, { status: hasDispatchFailures(approvedRecovery, automaticDelivery) ? 503 : 200 });
   } catch {

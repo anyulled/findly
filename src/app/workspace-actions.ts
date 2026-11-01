@@ -4,7 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { formatMadridDateTime, madridDateTimeToIso } from "@/lib/madrid-time";
 import { validatePost, type SocialNetwork } from "@/lib/social-validation";
 import { detectTitleLanguage, type PostLanguage } from "@/lib/language";
-import { generateSocialPost } from "@/lib/groq";
+import { generateSocialPostOrFallback } from "@/lib/groq";
 import { generateEventDrafts } from "@/lib/groq-workflow";
 import { dispatchApprovedPostsWithSupabase } from "@/lib/approved-dispatch";
 import { approveAndSchedulePost, schedulePostWithSupabase, type PostPublishingOutcome } from "@/lib/post-publishing";
@@ -363,279 +363,342 @@ export async function deleteSource(sourceId: string): Promise<ActionOutcome> {
   }
 }
 
-export async function deleteEvent(eventId: string): Promise<void> {
-  const { supabase, ownerId } = await authorizedClient();
-  if (!/^[0-9a-f-]{36}$/i.test(eventId)) throw new Error("El evento no es válido.");
-  const { data, error } = await supabase.from("events").delete().eq("id", eventId).eq("owner_id", ownerId).select("id").single();
-  if (error || !data) throw new Error("No se pudo eliminar el evento.");
+export type CreateEventResult =
+  | { success: true; event: EventView }
+  | { success: false; error: string };
+
+export type GenerateReviewPostsResult =
+  | { success: true; posts: PostView[] }
+  | { success: false; posts: PostView[]; error: string };
+
+export async function deleteEvent(eventId: string): Promise<ActionOutcome> {
+  try {
+    const { supabase, ownerId } = await authorizedClient();
+    if (!/^[0-9a-f-]{36}$/i.test(eventId)) return { success: false, error: "El evento no es válido." };
+    const { data, error } = await supabase.from("events").delete().eq("id", eventId).eq("owner_id", ownerId).select("id").single();
+    if (error || !data) return { success: false, error: "No se pudo eliminar el evento." };
+    return { success: true };
+  } catch (caught) {
+    return { success: false, error: caught instanceof Error ? caught.message : "No se pudo eliminar el evento." };
+  }
 }
 
-export async function createEvent(input: Omit<EventView, "id">): Promise<EventView> {
-  const { supabase, ownerId } = await authorizedClient();
-  const title = input.title.trim();
-  const substack = isSubstackUrl(input.url) || input.source === "Substack";
-  if (!title || title.length > 200 || (!substack && (!input.date || !input.time))) {
-    throw new Error("Completa título, fecha y hora del evento.");
+export async function createEvent(input: Omit<EventView, "id">): Promise<CreateEventResult> {
+  try {
+    const { supabase, ownerId } = await authorizedClient();
+    const title = input.title.trim();
+    const substack = isSubstackUrl(input.url) || input.source === "Substack";
+    if (!title || title.length > 200 || (!substack && (!input.date || !input.time))) {
+      return { success: false, error: "Completa título, fecha y hora del evento." };
+    }
+    let url: string | null = null;
+    if (input.url) {
+      try {
+        const parsed = new URL(input.url);
+        if (parsed.protocol !== "https:" && parsed.protocol !== "http:") throw new Error();
+        url = parsed.toString();
+      } catch { return { success: false, error: "El enlace del evento debe ser una URL HTTP o HTTPS válida." }; }
+    }
+    const fallbackNow = formatMadridDateTime(new Date().toISOString());
+    const eventDate = input.date || fallbackNow.date;
+    const eventTime = input.time || fallbackNow.time;
+    const startsAt = madridDateTimeToIso(eventDate, eventTime);
+    const resolvedImageUrl = input.imageUrl?.trim() || (url ? await fetchOpenGraphImage(url) : null);
+    const { data, error } = await supabase.from("events").insert({
+      owner_id: ownerId,
+      title,
+      starts_at: startsAt,
+      timezone: "Europe/Madrid",
+      location: packLocationAndImage(input.place.trim(), resolvedImageUrl),
+      description: input.description.trim(),
+      event_url: url,
+      detected_language: detectTitleLanguage(title),
+    }).select("id,title,starts_at,location,description,event_url,detected_language,source_id").single();
+    if (error || !data) return { success: false, error: "No se pudo guardar el evento en Supabase." };
+    const scheduled = formatMadridDateTime(data.starts_at);
+    const unpacked = unpackLocationAndImage(data.location);
+    return {
+      success: true,
+      event: {
+        id: data.id,
+        title: data.title,
+        date: scheduled.date,
+        time: scheduled.time,
+        place: unpacked.place,
+        description: data.description,
+        source: sourceForUrl(data.event_url),
+        sourceId: data.source_id,
+        url: data.event_url ?? undefined,
+        imageUrl: unpacked.imageUrl,
+        language: data.detected_language as PostLanguage,
+      },
+    };
+  } catch (caught) {
+    return { success: false, error: caught instanceof Error ? caught.message : "No se pudo guardar el evento en Supabase." };
   }
-  let url: string | null = null;
-  if (input.url) {
-    try {
-      const parsed = new URL(input.url);
-      if (parsed.protocol !== "https:" && parsed.protocol !== "http:") throw new Error();
-      url = parsed.toString();
-    } catch { throw new Error("El enlace del evento debe ser una URL HTTP o HTTPS válida."); }
-  }
-  const fallbackNow = formatMadridDateTime(new Date().toISOString());
-  const eventDate = input.date || fallbackNow.date;
-  const eventTime = input.time || fallbackNow.time;
-  const startsAt = madridDateTimeToIso(eventDate, eventTime);
-  const resolvedImageUrl = input.imageUrl?.trim() || (url ? await fetchOpenGraphImage(url) : null);
-  const { data, error } = await supabase.from("events").insert({
-    owner_id: ownerId,
-    title,
-    starts_at: startsAt,
-    timezone: "Europe/Madrid",
-    location: packLocationAndImage(input.place.trim(), resolvedImageUrl),
-    description: input.description.trim(),
-    event_url: url,
-    detected_language: detectTitleLanguage(title),
-  }).select("id,title,starts_at,location,description,event_url,detected_language,source_id").single();
-  if (error || !data) throw new Error("No se pudo guardar el evento en Supabase.");
-  const scheduled = formatMadridDateTime(data.starts_at);
-  const unpacked = unpackLocationAndImage(data.location);
-  return {
-    id: data.id,
-    title: data.title,
-    date: scheduled.date,
-    time: scheduled.time,
-    place: unpacked.place,
-    description: data.description,
-    source: sourceForUrl(data.event_url),
-    sourceId: data.source_id,
-    url: data.event_url ?? undefined,
-    imageUrl: unpacked.imageUrl,
-    language: data.detected_language as PostLanguage,
-  };
 }
 
-export async function generateReviewPosts(eventId: string): Promise<PostView[]> {
-  const { supabase, ownerId } = await authorizedClient();
-  if (!/^[0-9a-f-]{36}$/i.test(eventId)) throw new Error("Solicitud de publicaciones no válida.");
+export async function generateReviewPosts(eventId: string): Promise<GenerateReviewPostsResult> {
+  try {
+    const { supabase, ownerId } = await authorizedClient();
+    if (!/^[0-9a-f-]{36}$/i.test(eventId)) return { success: false, posts: [], error: "Solicitud de publicaciones no válida." };
 
-  const [eventResult, accountResult, existingResult, settingsResult] = await Promise.all([
-    supabase.from("events").select("id,title,starts_at,location,description,event_url,detected_language,source_id")
-      .eq("id", eventId).eq("owner_id", ownerId).single(),
-    supabase.from("accounts").select("id,name,voice_prompt,networks").eq("owner_id", ownerId).eq("enabled", true).order("created_at"),
-    supabase.from("posts").select("account_id,network,lead_days").eq("owner_id", ownerId).eq("event_id", eventId),
-    supabase.from("app_settings").select("value").eq("owner_id", ownerId).eq("key", "publishing_mode").maybeSingle(),
-  ]);
-  if (eventResult.error || !eventResult.data) throw new Error("No se encontró el evento en este espacio.");
-  if (accountResult.error || !accountResult.data) throw new Error("No se pudieron cargar las cuentas.");
-  if (existingResult.error || !existingResult.data) throw new Error("No se pudo comprobar si ya existen recordatorios.");
-  if (settingsResult.error) throw new Error("No se pudo cargar el modo de publicación.");
+    const [eventResult, accountResult, existingResult, settingsResult] = await Promise.all([
+      supabase.from("events").select("id,title,starts_at,location,description,event_url,detected_language,source_id")
+        .eq("id", eventId).eq("owner_id", ownerId).single(),
+      supabase.from("accounts").select("id,name,voice_prompt,networks").eq("owner_id", ownerId).eq("enabled", true).order("created_at"),
+      supabase.from("posts").select("account_id,network,lead_days").eq("owner_id", ownerId).eq("event_id", eventId),
+      supabase.from("app_settings").select("value").eq("owner_id", ownerId).eq("key", "publishing_mode").maybeSingle(),
+    ]);
+    if (eventResult.error || !eventResult.data) return { success: false, posts: [], error: "No se encontró el evento en este espacio." };
+    if (accountResult.error || !accountResult.data) return { success: false, posts: [], error: "No se pudieron cargar las cuentas." };
+    if (existingResult.error || !existingResult.data) return { success: false, posts: [], error: "No se pudo comprobar si ya existen recordatorios." };
+    if (settingsResult.error) return { success: false, posts: [], error: "No se pudo cargar el modo de publicación." };
 
-  let sourceLinks: { sourceId: string; accountId: string }[] = [];
-  if (eventResult.data.source_id) {
-    const { data, error } = await supabase.from("source_accounts").select("source_id,account_id")
-      .eq("owner_id", ownerId).eq("source_id", eventResult.data.source_id);
-    if (error) throw new Error("No se pudieron cargar las cuentas asociadas a la fuente.");
-    sourceLinks = (data ?? []).map((link) => ({ sourceId: link.source_id, accountId: link.account_id }));
-  }
-  const eligibleAccounts = selectEventAccounts(accountResult.data, eventResult.data.source_id, sourceLinks);
-  const accountIds = eligibleAccounts.map((account) => account.id);
-  const exampleResult = accountIds.length === 0
-    ? { data: [], error: null }
-    : await supabase.from("style_examples").select("content,account_id,network,language")
-      .eq("owner_id", ownerId).in("account_id", accountIds).order("created_at", { ascending: false }).limit(72);
-  if (exampleResult.error || !exampleResult.data) throw new Error("No se pudieron cargar los ejemplos de estilo aprobados.");
+    let sourceLinks: { sourceId: string; accountId: string }[] = [];
+    if (eventResult.data.source_id) {
+      const { data, error } = await supabase.from("source_accounts").select("source_id,account_id")
+        .eq("owner_id", ownerId).eq("source_id", eventResult.data.source_id);
+      if (error) return { success: false, posts: [], error: "No se pudieron cargar las cuentas asociadas a la fuente." };
+      sourceLinks = (data ?? []).map((link) => ({ sourceId: link.source_id, accountId: link.account_id }));
+    }
+    const eligibleAccounts = selectEventAccounts(accountResult.data, eventResult.data.source_id, sourceLinks);
+    const accountIds = eligibleAccounts.map((account) => account.id);
+    const exampleResult = accountIds.length === 0
+      ? { data: [], error: null }
+      : await supabase.from("style_examples").select("content,account_id,network,language")
+        .eq("owner_id", ownerId).in("account_id", accountIds).order("created_at", { ascending: false }).limit(72);
+    if (exampleResult.error || !exampleResult.data) return { success: false, posts: [], error: "No se pudieron cargar los ejemplos de estilo aprobados." };
 
-  const eventTime = formatMadridDateTime(eventResult.data.starts_at);
-  const unpacked = unpackLocationAndImage(eventResult.data.location);
-  const mappedAccounts = eligibleAccounts.map((account) => ({
-    id: account.id,
-    name: account.name,
-    voice: account.voice_prompt,
-    networks: (account.networks as string[]).filter((network): network is SocialNetwork => NETWORKS.includes(network as SocialNetwork)),
-  }));
-  const slotByAccountNetwork: Record<string, { date: string; time: string }> = {};
-  if (isSubstackUrl(eventResult.data.event_url)) {
-    for (const account of mappedAccounts) {
-      const apiKey = bufferCredentialForAccount(account.name).apiKey;
-      const slots = await fetchNextChannelSlotsForAccount(apiKey, account.networks);
-      for (const network of account.networks) {
-        const slot = slots[network];
-        if (slot) slotByAccountNetwork[`${account.id}:${network}`] = slot;
+    const eventTime = formatMadridDateTime(eventResult.data.starts_at);
+    const unpacked = unpackLocationAndImage(eventResult.data.location);
+    const mappedAccounts = eligibleAccounts.map((account) => ({
+      id: account.id,
+      name: account.name,
+      voice: account.voice_prompt,
+      networks: (account.networks as string[]).filter((network): network is SocialNetwork => NETWORKS.includes(network as SocialNetwork)),
+    }));
+    const slotByAccountNetwork: Record<string, { date: string; time: string }> = {};
+    if (isSubstackUrl(eventResult.data.event_url)) {
+      for (const account of mappedAccounts) {
+        const apiKey = bufferCredentialForAccount(account.name).apiKey;
+        const slots = await fetchNextChannelSlotsForAccount(apiKey, account.networks);
+        for (const network of account.networks) {
+          const slot = slots[network];
+          if (slot) slotByAccountNetwork[`${account.id}:${network}`] = slot;
+        }
       }
     }
-  }
-  const drafts = await generateEventDrafts({
-    event: {
-      id: eventResult.data.id,
-      title: eventResult.data.title,
-      date: eventTime.date,
-      time: eventTime.time,
-      place: unpacked.place,
-      description: eventResult.data.description,
-      url: eventResult.data.event_url ?? undefined,
-      language: eventResult.data.detected_language as PostLanguage,
-    },
-    accounts: mappedAccounts,
-    approvedExamples: exampleResult.data.flatMap((example) => {
-      if (!NETWORKS.includes(example.network as SocialNetwork) || !["en", "es", "ca"].includes(example.language)) return [];
-      return [{ accountId: example.account_id, network: example.network as SocialNetwork, language: example.language as PostLanguage, text: example.content }];
-    }),
-    existing: existingResult.data.flatMap((post) => {
-      if (!NETWORKS.includes(post.network as SocialNetwork)) return [];
-      return [{ accountId: post.account_id, network: post.network as SocialNetwork, leadDays: post.lead_days }];
-    }),
-    slotByAccountNetwork,
-    generate: generateSocialPost,
-  });
-
-  const automatic = (settingsResult.data?.value as { mode?: string } | null)?.mode === "automatic";
-  const rows = drafts.map((post) => {
-    const validation = validatePost(post.network, post.text);
-    if (!validation.valid) throw new Error(validation.message);
-    return {
-      owner_id: ownerId,
-      event_id: eventId,
-      account_id: post.accountId,
-      network: post.network,
-      lead_days: post.leadDays,
-      due_at: madridDateTimeToIso(post.date, post.time),
-      timezone: "Europe/Madrid",
-      content: post.text,
-      status: automatic ? "approved" : "review",
-      language: post.language,
-    };
-  });
-  if (rows.length > 0) {
-    const { error: upsertError } = await supabase.from("posts").upsert(rows, {
-      onConflict: "event_id,account_id,network,lead_days",
-      ignoreDuplicates: true,
+    const drafts = await generateEventDrafts({
+      event: {
+        id: eventResult.data.id,
+        title: eventResult.data.title,
+        date: eventTime.date,
+        time: eventTime.time,
+        place: unpacked.place,
+        description: eventResult.data.description,
+        url: eventResult.data.event_url ?? undefined,
+        language: eventResult.data.detected_language as PostLanguage,
+      },
+      accounts: mappedAccounts,
+      approvedExamples: exampleResult.data.flatMap((example) => {
+        if (!NETWORKS.includes(example.network as SocialNetwork) || !["en", "es", "ca"].includes(example.language)) return [];
+        return [{ accountId: example.account_id, network: example.network as SocialNetwork, language: example.language as PostLanguage, text: example.content }];
+      }),
+      existing: existingResult.data.flatMap((post) => {
+        if (!NETWORKS.includes(post.network as SocialNetwork)) return [];
+        return [{ accountId: post.account_id, network: post.network as SocialNetwork, leadDays: post.lead_days }];
+      }),
+      slotByAccountNetwork,
+      generate: generateSocialPostOrFallback,
     });
-    if (upsertError) throw new Error("No se pudieron guardar las publicaciones pendientes.");
-  }
-  if (automatic) {
-    await dispatchApprovedPostsWithSupabase(supabase, ownerId, eventId);
-  }
 
-  const { data, error } = await supabase.from("posts").select("id,event_id,account_id,network,lead_days,due_at,content,status,language,last_error,buffer_post_id")
-    .eq("owner_id", ownerId).eq("event_id", eventId).order("due_at");
-  if (error || !data) throw new Error("No se pudieron recuperar las publicaciones pendientes.");
-  const accountNames = new Map(accountResult.data.map((account) => [account.id, account.name]));
-  return data.flatMap((row) => {
-    const network = NETWORKS.find((value) => value === row.network);
-    if (!network) return [];
-    const scheduled = formatMadridDateTime(row.due_at);
-    return [{
-      id: row.id,
-      eventId: row.event_id,
-      date: scheduled.date,
-      time: scheduled.time,
-      account: accountNames.get(row.account_id) ?? "Cuenta",
-      accountId: row.account_id,
-      network,
-      text: row.content,
-      status: row.status as PostView["status"],
-      lastError: row.last_error,
-      bufferPostId: row.buffer_post_id,
-      leadDays: row.lead_days as PostView["leadDays"],
-      language: row.language as PostLanguage,
-    }];
-  });
+    const automatic = (settingsResult.data?.value as { mode?: string } | null)?.mode === "automatic";
+    const rows = drafts.map((post) => {
+      const validation = validatePost(post.network, post.text);
+      if (!validation.valid) throw new Error(validation.message);
+      return {
+        owner_id: ownerId,
+        event_id: eventId,
+        account_id: post.accountId,
+        network: post.network,
+        lead_days: post.leadDays,
+        due_at: madridDateTimeToIso(post.date, post.time),
+        timezone: "Europe/Madrid",
+        content: post.text,
+        status: automatic ? "approved" : "review",
+        language: post.language,
+      };
+    });
+    if (rows.length > 0) {
+      const { error: upsertError } = await supabase.from("posts").upsert(rows, {
+        onConflict: "event_id,account_id,network,lead_days",
+        ignoreDuplicates: true,
+      });
+      if (upsertError) return { success: false, posts: [], error: "No se pudieron guardar las publicaciones pendientes." };
+    }
+    if (automatic) {
+      await dispatchApprovedPostsWithSupabase(supabase, ownerId, eventId);
+    }
+
+    const { data, error } = await supabase.from("posts").select("id,event_id,account_id,network,lead_days,due_at,content,status,language,last_error,buffer_post_id")
+      .eq("owner_id", ownerId).eq("event_id", eventId).order("due_at");
+    if (error || !data) return { success: false, posts: [], error: "No se pudieron recuperar las publicaciones pendientes." };
+    const accountNames = new Map(accountResult.data.map((account) => [account.id, account.name]));
+    const posts = data.flatMap((row) => {
+      const network = NETWORKS.find((value) => value === row.network);
+      if (!network) return [];
+      const scheduled = formatMadridDateTime(row.due_at);
+      return [{
+        id: row.id,
+        eventId: row.event_id,
+        date: scheduled.date,
+        time: scheduled.time,
+        account: accountNames.get(row.account_id) ?? "Cuenta",
+        accountId: row.account_id,
+        network,
+        text: row.content,
+        status: row.status as PostView["status"],
+        lastError: row.last_error,
+        bufferPostId: row.buffer_post_id,
+        leadDays: row.lead_days as PostView["leadDays"],
+        language: row.language as PostLanguage,
+      }];
+    });
+    return { success: true, posts };
+  } catch (caught) {
+    return { success: false, posts: [], error: caught instanceof Error ? caught.message : "No se pudieron crear los borradores." };
+  }
 }
 
-export async function updatePostContent(postId: string, content: string): Promise<void> {
-  const { supabase } = await authorizedClient();
-  if (!content.trim()) throw new Error("El texto de la publicación no puede estar vacío.");
-  const current = await supabase.from("posts").select("network").eq("id", postId).single();
-  if (current.error || !NETWORKS.includes(current.data.network as SocialNetwork)) throw new Error("No se pudo comprobar la red de la publicación.");
-  const validation = validatePost(current.data.network as SocialNetwork, content);
-  if (!validation.valid) throw new Error(validation.message);
-  const { error } = await supabase.rpc("update_post_content", { p_post_id: postId, p_content: content });
-  if (error) throw new Error("No se pudo guardar la publicación. Comprueba que has aplicado las migraciones.");
+export async function updatePostContent(postId: string, content: string): Promise<ActionOutcome> {
+  try {
+    const { supabase } = await authorizedClient();
+    if (!content.trim()) return { success: false, error: "El texto de la publicación no puede estar vacío." };
+    const current = await supabase.from("posts").select("network").eq("id", postId).single();
+    if (current.error || !NETWORKS.includes(current.data.network as SocialNetwork)) return { success: false, error: "No se pudo comprobar la red de la publicación." };
+    const validation = validatePost(current.data.network as SocialNetwork, content);
+    if (!validation.valid) return { success: false, error: validation.message };
+    const { error } = await supabase.rpc("update_post_content", { p_post_id: postId, p_content: content });
+    if (error) return { success: false, error: "No se pudo guardar la publicación. Comprueba que has aplicado las migraciones." };
+    return { success: true };
+  } catch (caught) {
+    return { success: false, error: caught instanceof Error ? caught.message : "No se pudo guardar la publicación." };
+  }
 }
 
 export async function approvePost(postId: string, content: string): Promise<PostPublishingOutcome> {
-  const { supabase, ownerId } = await authorizedClient();
-  const validationNetwork = await supabase.from("posts").select("network").eq("id", postId).single();
-  if (validationNetwork.error || !NETWORKS.includes(validationNetwork.data.network as SocialNetwork)) {
-    throw new Error("No se pudo comprobar la red de la publicación.");
+  try {
+    const { supabase, ownerId } = await authorizedClient();
+    const validationNetwork = await supabase.from("posts").select("network").eq("id", postId).single();
+    if (validationNetwork.error || !NETWORKS.includes(validationNetwork.data.network as SocialNetwork)) {
+      return { kind: "failed", message: "No se pudo comprobar la red de la publicación." };
+    }
+    const validation = validatePost(validationNetwork.data.network as SocialNetwork, content);
+    if (!validation.valid) return { kind: "failed", message: validation.message };
+    const outcome = await approveAndSchedulePost(postId, content, supabase, ownerId);
+    invalidateBufferSyncCache();
+    return outcome;
+  } catch (caught) {
+    return { kind: "failed", message: caught instanceof Error ? caught.message : "No se pudo aprobar la publicación." };
   }
-  const validation = validatePost(validationNetwork.data.network as SocialNetwork, content);
-  if (!validation.valid) throw new Error(validation.message);
-  const outcome = await approveAndSchedulePost(postId, content, supabase, ownerId);
-  invalidateBufferSyncCache();
-  return outcome;
 }
 
 export async function retryFailedPost(postId: string): Promise<PostPublishingOutcome> {
-  const { supabase, ownerId } = await authorizedClient();
-  if (!/^[0-9a-f-]{36}$/i.test(postId)) throw new Error("Solicitud de publicación no válida.");
-  const outcome = await schedulePostWithSupabase(postId, supabase, ownerId);
-  invalidateBufferSyncCache();
-  return outcome;
-}
-
-export async function reconcileScheduledPost(postId: string, bufferPostId: string): Promise<void> {
-  const { supabase, ownerId } = await authorizedClient();
-  if (!/^[0-9a-f-]{36}$/i.test(postId)) throw new Error("Solicitud de publicación no válida.");
-  const normalizedId = bufferPostId.trim();
-  if (!normalizedId || normalizedId.length > 200) throw new Error("Introduce el ID del post confirmado en Buffer.");
-  const { error } = await supabase.rpc("reconcile_post_scheduled", {
-    p_post_id: postId,
-    p_buffer_post_id: normalizedId,
-    p_owner_id: ownerId,
-  });
-  if (error) throw new Error("No se pudo confirmar la programación conciliada.");
-}
-
-export async function confirmPostMissingFromBuffer(postId: string): Promise<void> {
-  const { supabase, ownerId } = await authorizedClient();
-  if (!/^[0-9a-f-]{36}$/i.test(postId)) throw new Error("Solicitud de publicación no válida.");
-  const { error } = await supabase.rpc("reconcile_post_missing", {
-    p_post_id: postId,
-    p_owner_id: ownerId,
-  });
-  if (error) throw new Error("No se pudo guardar la conciliación de ausencia.");
-}
-
-export async function saveBufferChannel(accountId: string, network: SocialNetwork, bufferChannelId: string): Promise<void> {
-  const { supabase, ownerId } = await authorizedClient();
-  if (!/^[0-9a-f-]{36}$/i.test(accountId) || !NETWORKS.includes(network)) throw new Error("La cuenta o red no es válida.");
-  const channelId = bufferChannelId.trim();
-  if (channelId.length > 200) throw new Error("El ID del canal de Buffer no puede superar 200 caracteres.");
-  if (!channelId) {
-    const { error } = await supabase.from("account_buffer_channels").delete()
-      .eq("owner_id", ownerId).eq("account_id", accountId).eq("network", network);
-    if (error) throw new Error("No se pudo eliminar el ID del canal de Buffer.");
+  try {
+    const { supabase, ownerId } = await authorizedClient();
+    if (!/^[0-9a-f-]{36}$/i.test(postId)) return { kind: "failed", message: "Solicitud de publicación no válida." };
+    const outcome = await schedulePostWithSupabase(postId, supabase, ownerId);
     invalidateBufferSyncCache();
-    return;
+    return outcome;
+  } catch (caught) {
+    return { kind: "failed", message: caught instanceof Error ? caught.message : "No se pudo reintentar la publicación." };
   }
-  const { error } = await supabase.from("account_buffer_channels").upsert({
-    owner_id: ownerId,
-    account_id: accountId,
-    network,
-    buffer_channel_id: channelId,
-  }, { onConflict: "owner_id,account_id,network" });
-  if (error) throw new Error("No se pudo guardar el ID del canal de Buffer.");
-  invalidateBufferSyncCache();
 }
 
-export async function updateAccountVoice(accountId: string, prompt: string): Promise<void> {
-  const { supabase } = await authorizedClient();
-  if (prompt.length > 2000) throw new Error("El prompt de estilo no puede superar los 2.000 caracteres.");
-  const { error } = await supabase.from("accounts").update({ voice_prompt: prompt }).eq("id", accountId);
-  if (error) throw new Error("No se pudo guardar la voz de la cuenta.");
+export async function reconcileScheduledPost(postId: string, bufferPostId: string): Promise<ActionOutcome> {
+  try {
+    const { supabase, ownerId } = await authorizedClient();
+    if (!/^[0-9a-f-]{36}$/i.test(postId)) return { success: false, error: "Solicitud de publicación no válida." };
+    const normalizedId = bufferPostId.trim();
+    if (!normalizedId || normalizedId.length > 200) return { success: false, error: "Introduce el ID del post confirmado en Buffer." };
+    const { error } = await supabase.rpc("reconcile_post_scheduled", {
+      p_post_id: postId,
+      p_buffer_post_id: normalizedId,
+      p_owner_id: ownerId,
+    });
+    if (error) return { success: false, error: "No se pudo confirmar la programación conciliada." };
+    return { success: true };
+  } catch (caught) {
+    return { success: false, error: caught instanceof Error ? caught.message : "No se pudo confirmar la programación conciliada." };
+  }
 }
 
-export async function updatePublishingMode(mode: "review" | "automatic"): Promise<void> {
-  const { supabase, ownerId } = await authorizedClient();
-  const { error } = await supabase.from("app_settings").upsert({
-    owner_id: ownerId,
-    key: "publishing_mode",
-    value: { mode },
-  }, { onConflict: "owner_id,key" });
-  if (error) throw new Error("No se pudo guardar el modo de publicación.");
+export async function confirmPostMissingFromBuffer(postId: string): Promise<ActionOutcome> {
+  try {
+    const { supabase, ownerId } = await authorizedClient();
+    if (!/^[0-9a-f-]{36}$/i.test(postId)) return { success: false, error: "Solicitud de publicación no válida." };
+    const { error } = await supabase.rpc("reconcile_post_missing", {
+      p_post_id: postId,
+      p_owner_id: ownerId,
+    });
+    if (error) return { success: false, error: "No se pudo guardar la conciliación de ausencia." };
+    return { success: true };
+  } catch (caught) {
+    return { success: false, error: caught instanceof Error ? caught.message : "No se pudo guardar la conciliación de ausencia." };
+  }
+}
+
+export async function saveBufferChannel(accountId: string, network: SocialNetwork, bufferChannelId: string): Promise<ActionOutcome> {
+  try {
+    const { supabase, ownerId } = await authorizedClient();
+    if (!/^[0-9a-f-]{36}$/i.test(accountId) || !NETWORKS.includes(network)) return { success: false, error: "La cuenta o red no es válida." };
+    const channelId = bufferChannelId.trim();
+    if (channelId.length > 200) return { success: false, error: "El ID del canal de Buffer no puede superar 200 caracteres." };
+    if (!channelId) {
+      const { error } = await supabase.from("account_buffer_channels").delete()
+        .eq("owner_id", ownerId).eq("account_id", accountId).eq("network", network);
+      if (error) return { success: false, error: "No se pudo eliminar el ID del canal de Buffer." };
+      invalidateBufferSyncCache();
+      return { success: true };
+    }
+    const { error } = await supabase.from("account_buffer_channels").upsert({
+      owner_id: ownerId,
+      account_id: accountId,
+      network,
+      buffer_channel_id: channelId,
+    }, { onConflict: "owner_id,account_id,network" });
+    if (error) return { success: false, error: "No se pudo guardar el ID del canal de Buffer." };
+    invalidateBufferSyncCache();
+    return { success: true };
+  } catch (caught) {
+    return { success: false, error: caught instanceof Error ? caught.message : "No se pudo guardar el ID del canal de Buffer." };
+  }
+}
+
+export async function updateAccountVoice(accountId: string, prompt: string): Promise<ActionOutcome> {
+  try {
+    const { supabase } = await authorizedClient();
+    if (prompt.length > 2000) return { success: false, error: "El prompt de estilo no puede superar los 2.000 caracteres." };
+    const { error } = await supabase.from("accounts").update({ voice_prompt: prompt }).eq("id", accountId);
+    if (error) return { success: false, error: "No se pudo guardar la voz de la cuenta." };
+    return { success: true };
+  } catch (caught) {
+    return { success: false, error: caught instanceof Error ? caught.message : "No se pudo guardar la voz de la cuenta." };
+  }
+}
+
+export async function updatePublishingMode(mode: "review" | "automatic"): Promise<ActionOutcome> {
+  try {
+    const { supabase, ownerId } = await authorizedClient();
+    const { error } = await supabase.from("app_settings").upsert({
+      owner_id: ownerId,
+      key: "publishing_mode",
+      value: { mode },
+    }, { onConflict: "owner_id,key" });
+    if (error) return { success: false, error: "No se pudo guardar el modo de publicación." };
+    return { success: true };
+  } catch (caught) {
+    return { success: false, error: caught instanceof Error ? caught.message : "No se pudo guardar el modo de publicación." };
+  }
 }
