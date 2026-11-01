@@ -147,15 +147,15 @@ export function PostDetailModal({
           </div>
         )}
         <div className={styles.detailActions}>
-          {selected.status === "review" && (
+          {(selected.status === "review" || selected.status === "failed") && (
             <button
               type="button"
               className={styles.secondaryButton}
               disabled={deletingDraft}
               onClick={() => onRemoveDraft(selected)}
-              aria-label="Eliminar borrador"
+              aria-label={selected.status === "failed" ? "Eliminar publicación" : "Eliminar borrador"}
             >
-              {deletingDraft ? "Eliminando…" : "Eliminar borrador"}
+              {deletingDraft ? "Eliminando…" : selected.status === "failed" ? "Eliminar publicación" : "Eliminar borrador"}
             </button>
           )}
           {isEditable && (
