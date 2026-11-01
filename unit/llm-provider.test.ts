@@ -5,6 +5,8 @@ import {
   DeterministicFallbackProvider,
   LLMFallbackChain,
   createDefaultLLMChain,
+  buildMessages,
+  buildFallbackDraftText,
   type LLMProvider,
 } from "../src/lib/llm-provider";
 import { PostGenerationError, type PostGenerationInput } from "../src/lib/groq";
@@ -287,5 +289,65 @@ describe("LLMFallbackChain", () => {
     const result = await chain.generate(mockInput, fetchImpl);
     assert.equal(result.text, "Generated text from custom override");
     assert.equal(result.provider, "groq");
+  });
+
+  it("buildMessages tailors prompt for personal account vs association and adds LinkedIn host gratitude", () => {
+    const personalInput: PostGenerationInput = {
+      ...mockInput,
+      accountName: "Personal",
+      accountKind: "Personal",
+      network: "LinkedIn",
+      language: "es",
+      reminderDays: 14,
+    };
+
+    const personalMessages = buildMessages(personalInput);
+    const personalSystem = personalMessages[0].content;
+    assert.match(personalSystem, /speaker participating in this event/);
+    assert.match(personalSystem, /Tone: Must sound authentic, organic, genuinely enthusiastic/);
+    assert.match(personalSystem, /🍺🍕/);
+    assert.match(personalSystem, /dentro de dos semanas/);
+
+    const associationInput: PostGenerationInput = {
+      ...mockInput,
+      accountName: "Barcelona JUG",
+      accountKind: "Asociación",
+      network: "X",
+      language: "es",
+      reminderDays: 7,
+    };
+    const assocMessages = buildMessages(associationInput);
+    const assocSystem = assocMessages[0].content;
+    assert.match(assocSystem, /community\/association organizing team/);
+    assert.doesNotMatch(assocSystem, /🍺🍕/);
+    assert.match(assocSystem, /dentro de una semana/);
+  });
+
+  it("buildFallbackDraftText includes formatted date, time, and personal/association perspective", () => {
+    const personalFallback = buildFallbackDraftText({
+      ...mockInput,
+      accountName: "Personal",
+      accountKind: "Personal",
+      network: "LinkedIn",
+      language: "es",
+      reminderDays: 14,
+    });
+    assert.match(personalFallback, /¡Participo dentro de dos semanas en Community Night!/);
+    assert.match(personalFallback, /12\/11\/2026/);
+    assert.match(personalFallback, /19:00/);
+    assert.match(personalFallback, /🍺🍕/);
+
+    const assocFallback = buildFallbackDraftText({
+      ...mockInput,
+      accountName: "Barcelona JUG",
+      accountKind: "Asociación",
+      network: "Bluesky",
+      language: "en",
+      reminderDays: 1,
+    });
+    assert.match(assocFallback, /Join us tomorrow for Community Night/);
+    assert.match(assocFallback, /12\/11\/2026/);
+    assert.match(assocFallback, /19:00/);
+    assert.doesNotMatch(assocFallback, /🍺🍕/);
   });
 });

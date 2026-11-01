@@ -37,6 +37,7 @@ import {
   makeDates,
   starterPosts,
 } from "./workspace-calendar-dates";
+import { sanitizeClientErrorMessage } from "@/lib/client-error";
 
 function toPublishingStatus(kind: string): Status {
   return kind === "scheduled"
@@ -176,7 +177,7 @@ export function useWorkspace() {
         .catch((error: unknown) => {
           if (!active) return;
           setSyncingWorkspace(false);
-          setFeedback(error instanceof Error ? error.message : "No se pudieron cargar los datos.");
+          setFeedback(sanitizeClientErrorMessage(error, "No se pudieron cargar los datos."));
           setHydrated(true);
         });
       return () => {
@@ -334,12 +335,13 @@ export function useWorkspace() {
       setFeedback("");
     } catch (error) {
       if (savedEvent) {
+        const sanitized = sanitizeClientErrorMessage(error, "");
         setFeedback(
-          `El evento quedó guardado, pero no se guardaron todos sus borradores. Puedes reintentarlo desde la ficha del evento. ${error instanceof Error ? error.message : ""}`,
+          `El evento quedó guardado, pero no se guardaron todos sus borradores. Puedes reintentarlo desde la ficha del evento.${sanitized ? ` ${sanitized}` : ""}`,
         );
         resetAddForm();
       } else {
-        setFeedback(error instanceof Error ? error.message : "No se pudo guardar el evento.");
+        setFeedback(sanitizeClientErrorMessage(error, "No se pudo guardar el evento."));
       }
       return;
     }
@@ -408,7 +410,7 @@ export function useWorkspace() {
       setPosts((all) => [...new Map([...all, ...saved].map((post) => [post.id, post])).values()]);
       setFeedback("Se han sincronizado los borradores de recordatorio.");
     } catch (error) {
-      setFeedback(error instanceof Error ? error.message : "No se pudieron crear los borradores.");
+      setFeedback(sanitizeClientErrorMessage(error, "No se pudieron crear los borradores."));
     }
   }
 
@@ -431,7 +433,7 @@ export function useWorkspace() {
       setMode(nextMode);
       setFeedback("");
     } catch (error) {
-      setFeedback(error instanceof Error ? error.message : "No se pudo guardar el modo.");
+      setFeedback(sanitizeClientErrorMessage(error, "No se pudo guardar el modo."));
     }
   }
 
@@ -442,7 +444,7 @@ export function useWorkspace() {
         const result = await updateAccountVoice(account.id, prompt);
         setFeedback(result.success ? "" : result.error);
       } catch (error) {
-        setFeedback(error instanceof Error ? error.message : "No se pudo guardar el tono.");
+        setFeedback(sanitizeClientErrorMessage(error, "No se pudo guardar el tono."));
       }
     }
   }
@@ -457,7 +459,7 @@ export function useWorkspace() {
         }
         setFeedback("");
       } catch (error) {
-        setFeedback(error instanceof Error ? error.message : "No se pudo guardar el canal de Buffer.");
+        setFeedback(sanitizeClientErrorMessage(error, "No se pudo guardar el canal de Buffer."));
       }
     }
     setAccountList((all) =>
@@ -497,7 +499,7 @@ export function useWorkspace() {
               : "La publicación está en proceso de envío.",
       );
     } catch (error) {
-      setFeedback(error instanceof Error ? error.message : "No se pudo reintentar la publicación.");
+      setFeedback(sanitizeClientErrorMessage(error, "No se pudo reintentar la publicación."));
     }
   }
 
@@ -514,7 +516,7 @@ export function useWorkspace() {
       setReconciliationId("");
       setFeedback("Post encontrado en Buffer y marcado como programado.");
     } catch (error) {
-      setFeedback(error instanceof Error ? error.message : "No se pudo guardar la conciliación.");
+      setFeedback(sanitizeClientErrorMessage(error, "No se pudo guardar la conciliación."));
     }
   }
 
@@ -531,7 +533,7 @@ export function useWorkspace() {
       setAbsenceConfirmed(false);
       setFeedback("La ausencia quedó confirmada. Puedes corregir el post y reintentar el envío.");
     } catch (error) {
-      setFeedback(error instanceof Error ? error.message : "No se pudo guardar la conciliación.");
+      setFeedback(sanitizeClientErrorMessage(error, "No se pudo guardar la conciliación."));
     }
   }
 
@@ -541,7 +543,7 @@ export function useWorkspace() {
       setSelected(null);
       if (next.status !== "approved") setFeedback("");
     } catch (error) {
-      setFeedback(error instanceof Error ? error.message : "No se pudo guardar la publicación.");
+      setFeedback(sanitizeClientErrorMessage(error, "No se pudo guardar la publicación."));
     }
   }
 
@@ -558,7 +560,7 @@ export function useWorkspace() {
       setPosts((all) => all.filter((p) => p.eventId !== eventId));
       setFeedback("");
     } catch (error) {
-      setFeedback(error instanceof Error ? error.message : "No se pudo eliminar el evento.");
+      setFeedback(sanitizeClientErrorMessage(error, "No se pudo eliminar el evento."));
     }
   }
 

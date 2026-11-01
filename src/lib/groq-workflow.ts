@@ -15,6 +15,7 @@ export type GenerationAccount = {
   name: string;
   voice: string;
   networks: SocialNetwork[];
+  kind?: string;
 };
 
 export type GenerationEvent = {
@@ -141,6 +142,7 @@ export async function generateEventDrafts({
       accountId: account.id,
       accountName: account.name,
       accountVoice: account.voice,
+      accountKind: account.kind,
       network,
       language,
       event: {
