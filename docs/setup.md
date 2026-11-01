@@ -19,6 +19,8 @@ This guide describes the intended setup for the personal event publishing app. I
 4. Apply the checked-in database migrations. Verify access policies before exposing the service to the public internet.
 5. Keep elevated Supabase credentials on the server. A browser may receive only the public/publishable key, protected by row-level security. The cron importer uses `SUPABASE_SERVICE_ROLE_KEY` because it has no interactive owner session; it is server-only and must never use a `NEXT_PUBLIC_` name.
 
+The first authenticated workspace load invokes an owner-scoped database function that inserts any missing managed accounts in one transaction. Stable managed-account keys and a unique owner/key constraint make concurrent loads and retries idempotent. Migration `202610310007` consolidates recognized legacy aliases while moving source links, Buffer channel mappings, posts and style examples to a deterministic surviving account. Before changing rows, it aborts with the conflicting owner/account/resource IDs if managed account settings, Buffer channels, or posts cannot be combined without a manual decision; resolve those conflicts without deleting data and retry the migration.
+
 Supabase free projects may pause after a week of sufficiently low activity. This is a service availability behavior, not a data deletion guarantee; monitor the project and understand the resume process.
 
 ### Buffer
