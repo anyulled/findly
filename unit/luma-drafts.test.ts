@@ -205,3 +205,29 @@ test("generation provenance and failure codes survive draft persistence without 
   await generateLumaEventDrafts(event, repository, async () => ({ text: "Groq text", model: "llama", validation: { valid: true, count: 9, limit: 3000, message: "ok" } }), new Date("2029-12-01T00:00:00.000Z"));
   assert.ok(inserted.every((row) => row.generation_origin === "groq" && row.generation_error_code === undefined && row.status === "approved"));
 });
+
+test("sets last_error on draft rows when fallback generator is used", async () => {
+  const inserted: LumaDraftRow[] = [];
+  const accounts: GenerationAccount[] = [
+    { id: "personal", name: "Personal", voice: "personal", networks: ["LinkedIn"] },
+  ];
+  const repository: LumaDraftRepository = {
+    async listLinkedAccounts() { return accounts; },
+    async listExistingReminders() { return []; },
+    async listApprovedExamples() { return []; },
+    async insertDrafts(rows) { inserted.push(...rows); return rows.length; },
+  };
+  const generate = async () => ({
+    text: "Fallback post",
+    model: "fallback",
+    provider: "fallback" as const,
+    validation: { valid: true, count: 13, limit: 3000, message: "13 / 3000" },
+  });
+  const count = await generateLumaEventDrafts(event, repository, generate, new Date("2029-12-01T00:00:00.000Z"));
+  assert.equal(count, 3);
+  assert.equal(inserted.length, 3);
+  assert.equal(
+    inserted.every((row) => row.last_error === "Generado con plantilla de respaldo (la generación con IA no estuvo disponible o no superó la validación)."),
+    true,
+  );
+});
