@@ -160,6 +160,11 @@ function Dashboard() {
       let active = true;
       void loadWorkspace().then((snapshot) => {
         if (!active) return;
+        if (snapshot.error) {
+          setFeedback(snapshot.error);
+          setHydrated(true);
+          return;
+        }
         setEvents(snapshot.events);
         setPosts(snapshot.posts);
         setMode(snapshot.mode);
@@ -337,6 +342,10 @@ function Dashboard() {
 
   async function refreshWorkspaceAfterSync() {
     const snapshot = await loadWorkspace();
+    if (snapshot.error) {
+      setFeedback(snapshot.error);
+      return;
+    }
     setEvents(snapshot.events);
     setPosts(snapshot.posts);
     setMode(snapshot.mode);
