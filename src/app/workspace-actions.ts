@@ -217,7 +217,7 @@ export async function loadWorkspace(): Promise<WorkspaceSnapshot> {
     for (const account of accounts) if (account.id) accountNames.set(account.id, account.name);
 
     const [eventsResult, postsResult, settingsResult, sourcesResult, sourceAccountsResult, channelResult, examplesResult] = await Promise.all([
-      supabase.from("events").select("id,title,starts_at,location,description,event_url,detected_language,source_id,target_account_ids").order("starts_at"),
+      supabase.from("events").select("id,title,starts_at,location,description,event_url,detected_language,source_id,target_account_ids").order("starts_at", { ascending: false }),
       supabase.from("posts").select("id,event_id,account_id,network,lead_days,due_at,content,status,language,last_error,buffer_post_id,generation_origin,generation_error_code").order("due_at"),
       supabase.from("app_settings").select("value").eq("key", "publishing_mode").maybeSingle(),
       supabase.from("sources").select("id,name,source_type,feed_url,enabled").is("archived_at", null).order("created_at"),

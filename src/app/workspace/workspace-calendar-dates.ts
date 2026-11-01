@@ -87,6 +87,18 @@ function reminderText(title: string, place: string, url: string | undefined, lan
   return `Ens veiem ${until} a ${title}! T’hi esperem a ${place}. ${cleanUrl}`.trim();
 }
 
+export function sortEventsReverseChronological<T extends { date: string; time?: string; id?: string }>(
+  events: T[],
+): T[] {
+  return [...events].sort((a, b) => {
+    const dateDiff = (b.date || "").localeCompare(a.date || "");
+    if (dateDiff !== 0) return dateDiff;
+    const timeDiff = (b.time || "").localeCompare(a.time || "");
+    if (timeDiff !== 0) return timeDiff;
+    return (b.id || "").localeCompare(a.id || "");
+  });
+}
+
 export function starterPosts(
   events: EventItem[],
   targetAccounts: Account[] = defaultAccounts,
