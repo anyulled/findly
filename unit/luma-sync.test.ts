@@ -205,8 +205,40 @@ test("fetchLumaFeed rejects invalid, private, unsuccessful, and oversized feeds"
     globalThis.fetch = async () => new Response("", { headers: { "content-length": "2000001" } });
     await assert.rejects(fetchLumaFeed("https://example.test/feed.ics"), /Feed is too large/);
 
-    globalThis.fetch = async () => new Response("x".repeat(2_000_001));
+    let chunksProduced = 0;
+    let streamCancelled = false;
+    globalThis.fetch = async () => new Response(new ReadableStream<Uint8Array>({
+      pull(controller) {
+        chunksProduced += 1;
+        controller.enqueue(new Uint8Array(1_000_000));
+        if (chunksProduced === 5) controller.close();
+      },
+      cancel() { streamCancelled = true; },
+    }));
     await assert.rejects(fetchLumaFeed("https://example.test/feed.ics"), /Feed is too large/);
+    // ReadableStream may prefetch one queued chunk; the remaining body is cancelled.
+    assert.ok(chunksProduced <= 4);
+    assert.equal(streamCancelled, true);
+
+    globalThis.fetch = async () => new Response("x", { headers: { "content-length": "2000001" } });
+    await assert.rejects(fetchLumaFeed("https://example.test/feed.ics"), /Feed is too large/);
+
+    const readFailure = new Error("stream broke");
+    globalThis.fetch = async () => new Response(new ReadableStream<Uint8Array>({
+      pull(controller) { controller.error(readFailure); },
+    }));
+    await assert.rejects(fetchLumaFeed("https://example.test/feed.ics"), /stream broke/);
+
+    const utf8 = new TextEncoder().encode("BEGIN:VCALENDAR\nSUMMARY:café\nEND:VCALENDAR");
+    globalThis.fetch = async () => new Response(new ReadableStream<Uint8Array>({
+      start(controller) {
+        const split = utf8.indexOf(0xc3) + 1;
+        controller.enqueue(utf8.slice(0, split));
+        controller.enqueue(utf8.slice(split));
+        controller.close();
+      },
+    }));
+    assert.equal(await fetchLumaFeed("https://example.test/feed.ics"), "BEGIN:VCALENDAR\nSUMMARY:café\nEND:VCALENDAR");
 
     globalThis.fetch = async () => new Response(fixture, { headers: { "content-length": String(Buffer.byteLength(fixture)) } });
     assert.equal(await fetchLumaFeed("https://example.test/feed.ics"), fixture);

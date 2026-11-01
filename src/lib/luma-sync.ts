@@ -77,6 +77,29 @@ import { IcalParseError } from "./luma-ical";
 const MAX_FEED_BYTES = 2_000_000;
 const FEED_TIMEOUT_MS = 10_000;
 
+async function readLimitedFeedBody(response: Response): Promise<string> {
+  if (!response.body) return "";
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let byteLength = 0;
+  let body = "";
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      byteLength += value.byteLength;
+      if (byteLength > MAX_FEED_BYTES) throw new Error("Feed is too large");
+      body += decoder.decode(value, { stream: true });
+    }
+    return body + decoder.decode();
+  } catch (error) {
+    try { await reader.cancel(error); } catch { /* Preserve the original read or size error. */ }
+    throw error;
+  } finally {
+    reader.releaseLock();
+  }
+}
+
 export async function fetchLumaFeed(url: string): Promise<string> {
   let parsed: URL;
   try { parsed = new URL(url); } catch { throw new Error("Invalid feed URL"); }
@@ -90,7 +113,5 @@ export async function fetchLumaFeed(url: string): Promise<string> {
   if (!response.ok) throw new Error("Feed request failed");
   const declaredLength = Number(response.headers.get("content-length"));
   if (Number.isFinite(declaredLength) && declaredLength > MAX_FEED_BYTES) throw new Error("Feed is too large");
-  const body = await response.text();
-  if (new TextEncoder().encode(body).byteLength > MAX_FEED_BYTES) throw new Error("Feed is too large");
-  return body;
+  return readLimitedFeedBody(response);
 }
