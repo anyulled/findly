@@ -313,3 +313,65 @@ test("cancelling deletion confirmation leaves the item unchanged", async ({ page
   await eventCard.getByRole("button", { name: /Eliminar evento/ }).click();
   await expect(page.getByRole("heading", { name: "Event Kept After Cancel" })).toBeVisible();
 });
+
+test("navigates to Revisiones tab, filters posts, approves single and batch, and sees empty state", async ({ page }) => {
+  await page.evaluate(() => localStorage.setItem("findly-state-v1", JSON.stringify({
+    events: [
+      { id: "rev-ev-1", title: "Review Event Alpha", date: "2026-11-15", time: "18:00", place: "Madrid", description: "Alpha event", source: "Manual" },
+    ],
+    posts: [
+      { id: "rev-post-1", eventId: "rev-ev-1", date: "2026-11-14", time: "10:00", account: "Personal", network: "LinkedIn", text: "Text for Alpha LinkedIn", status: "review" },
+      { id: "rev-post-2", eventId: "rev-ev-1", date: "2026-11-14", time: "11:00", account: "Personal", network: "X", text: "Text for Alpha X", status: "review" },
+      { id: "rev-post-3", eventId: "rev-ev-1", date: "2026-11-14", time: "12:00", account: "Personal", network: "Bluesky", text: "Text for Alpha Bluesky failed", status: "failed", lastError: "Buffer channel disconnected" },
+    ],
+    mode: "review",
+  })));
+
+  await page.reload();
+
+  // The sidebar should show Revisiones with badge 3 (2 review + 1 failed)
+  const reviewsNav = page.getByRole("button", { name: /Revisiones/ });
+  await expect(reviewsNav).toBeVisible();
+  await expect(reviewsNav).toContainText("3");
+
+  await reviewsNav.click();
+  await expect(page.getByRole("heading", { name: "Revisiones", level: 1 })).toBeVisible();
+
+  // Test filters
+  await page.getByRole("button", { name: /Pendientes de revisión/ }).click();
+  await expect(page.getByText("Text for Alpha LinkedIn")).toBeVisible();
+  await expect(page.getByText("Text for Alpha Bluesky failed")).toHaveCount(0);
+
+  await page.getByRole("button", { name: /Fallidas/ }).click();
+  await expect(page.getByText("Text for Alpha Bluesky failed")).toBeVisible();
+  await expect(page.getByText("Error de Buffer: Buffer channel disconnected")).toBeVisible();
+  await expect(page.getByText("Text for Alpha LinkedIn")).toHaveCount(0);
+
+  // Return to all
+  await page.getByRole("button", { name: /^Todas/ }).click();
+
+  // Test opening modal via Editar
+  await page.getByRole("button", { name: "✎ Editar" }).first().click();
+  await expect(page.getByRole("heading", { name: "Review Event Alpha" }).last()).toBeVisible();
+  await page.getByRole("button", { name: "×" }).click();
+
+  // Test batch approve for the event
+  const batchApproveBtn = page.getByRole("button", { name: /Aprobar todas/ });
+  await expect(batchApproveBtn).toContainText("2");
+  await batchApproveBtn.click();
+
+  // Now only the failed post remains in Revisiones
+  await expect(page.getByText("Text for Alpha LinkedIn")).toHaveCount(0);
+  await expect(page.getByText("Text for Alpha Bluesky failed")).toBeVisible();
+  await expect(reviewsNav).toContainText("1");
+
+  // Discard/remove the failed post
+  page.once("dialog", (dialog) => {
+    void dialog.accept();
+  });
+  await page.getByRole("button", { name: "✕ Eliminar" }).click();
+
+  // Empty state should now be displayed
+  await expect(page.getByRole("heading", { name: "¡Todo al día!" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Ver Calendario" })).toBeVisible();
+});

@@ -6,6 +6,7 @@ import { useWorkspace } from "./use-workspace";
 import { WorkspaceSidebar } from "./components/workspace-sidebar";
 import { WorkspaceTopbar } from "./components/workspace-topbar";
 import { CalendarView } from "./components/calendar-view";
+import { ReviewList } from "./components/review-list";
 import { EventList } from "./components/event-list";
 import { AccountSettings } from "./components/account-settings";
 import { SettingsView } from "./components/settings-view";
@@ -81,7 +82,7 @@ function Dashboard() {
                 firstRevealedPost={ws.firstRevealedPost}
                 events={ws.events}
                 posts={ws.posts}
-                reviewCount={ws.reviewCount}
+                reviewCount={ws.pendingReviewCount}
                 openAddForm={ws.openAddForm}
                 setTab={ws.setTab}
                 onSelectPost={(post) => {
@@ -91,6 +92,34 @@ function Dashboard() {
                   ws.setAbsenceConfirmed(false);
                   ws.setDraftDeleteError("");
                 }}
+              />
+            </WorkspaceErrorBoundary>
+          )}
+
+          {ws.tab === "Revisiones" && (
+            <WorkspaceErrorBoundary fallbackTitle="Error al cargar las revisiones">
+              <ReviewList
+                posts={ws.posts}
+                events={ws.events}
+                accountList={ws.accountList}
+                persistent={ws.persistent}
+                onSelectPost={(post) => {
+                  ws.setSelected(post);
+                  ws.setEditing(post.text);
+                  ws.setReconciliationId("");
+                  ws.setAbsenceConfirmed(false);
+                  ws.setDraftDeleteError("");
+                }}
+                onApprovePost={async (post) => {
+                  await ws.savePostChanges(post, { text: post.text, status: "approved" });
+                }}
+                onRetryPost={async (post) => {
+                  await ws.retryPost(post);
+                }}
+                onRemoveDraft={async (post) => {
+                  await ws.removeDraft(post);
+                }}
+                setTab={ws.setTab}
               />
             </WorkspaceErrorBoundary>
           )}

@@ -225,7 +225,8 @@ export function useWorkspace() {
     range === "Mes"
       ? anchor.toLocaleDateString("es-ES", { month: "long", year: "numeric" })
       : `${first.toLocaleDateString("es-ES", { day: "numeric", month: "short" })} – ${last.toLocaleDateString("es-ES", { day: "numeric", month: "short", year: "numeric" })}`;
-  const reviewCount = posts.filter((p) => p.status === "review").length;
+  const reviewCount = posts.filter((p) => p.status === "review" || p.status === "failed").length;
+  const pendingReviewCount = posts.filter((p) => p.status === "review").length;
 
   function navigate(direction: number) {
     if (range === "Mes") {
@@ -658,6 +659,7 @@ export function useWorkspace() {
     feedback,
     persistent,
     reviewCount,
+    pendingReviewCount,
     currentEvent,
     postValidation,
     isSubstackDraft,

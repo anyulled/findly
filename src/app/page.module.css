@@ -23,8 +23,88 @@
 .postscheduled{border-left-color:#6ba58a;background:#eff9f2;color:#345b41}
 .absenceConfirm{display:flex!important;grid-template-columns:none!important;align-items:flex-start;gap:7px!important;margin:11px 0!important;font-size:14px!important;font-weight:400!important;letter-spacing:0!important}.absenceConfirm input{accent-color:#7361dc;margin:1px 0 0}
 
+.statsLayout{display:flex;flex-direction:column;gap:20px;max-width:1040px}
+.statsHeader{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px}
+.statsHeader h2{font-size:20px;margin:0 0 4px;color:#2e2d35}
+.statsHeader p{font-size:14px;color:#797883;margin:0}
+.statsControls{display:flex;align-items:center;gap:8px}
+.filterBtn{border:1px solid #e2e1e8;background:#fff;color:#666570;padding:6px 12px;border-radius:6px;font-size:13px;cursor:pointer}
+.filterBtnActive{border-color:#7361dc;background:#f4f2ff;color:#5c4ab8;font-weight:600}
+.refreshBtn{border:1px solid #e2e1e8;background:#fff;color:#555460;padding:6px 12px;border-radius:6px;font-size:13px;cursor:pointer;display:flex;align-items:center;gap:4px}
+.refreshBtn:hover{background:#f7f7f9}
+.statsGrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
+.kpiCard{border:1px solid #ececf0;border-radius:10px;padding:16px;background:#fff;display:flex;flex-direction:column;gap:10px}
+.kpiHeader{display:flex;align-items:center;justify-content:space-between}
+.kpiTitle{font-size:13px;font-weight:600;color:#797883;text-transform:uppercase;letter-spacing:.5px}
+.kpiBadge{font-size:12px;font-weight:600;padding:2px 7px;border-radius:4px}
+.badgeGroq{background:#fff2e8;color:#d46b08}
+.badgeOpenai{background:#e6f7ff;color:#096dd9}
+.badgeFallback{background:#f5f5f5;color:#595959}
+.kpiMainValue{font-size:28px;font-weight:700;color:#222129;line-height:1.1}
+.kpiSub{font-size:13px;color:#8c8b96}
+.kpiDetails{display:grid;grid-template-columns:1fr 1fr;gap:8px;border-top:1px solid #f0f0f4;padding-top:10px;font-size:12px}
+.kpiDetailItem b{display:block;font-size:14px;color:#33323c}
+.kpiDetailItem span{color:#8c8b96}
+.ratioBarContainer{border:1px solid #ececf0;border-radius:10px;padding:16px;background:#fff}
+.ratioBarTitle{font-size:14px;font-weight:650;color:#33323c;margin-bottom:12px}
+.ratioBar{display:flex;height:20px;border-radius:6px;overflow:hidden;background:#f0f0f3;margin-bottom:10px}
+.ratioSegmentGroq{background:#f97316;transition:width .3s}
+.ratioSegmentOpenai{background:#10b981;transition:width .3s}
+.ratioSegmentFallback{background:#94a3b8;transition:width .3s}
+.ratioLegend{display:flex;gap:20px;font-size:13px;color:#656470;flex-wrap:wrap}
+.ratioLegendItem{display:flex;align-items:center;gap:6px}
+.ratioDot{width:10px;height:10px;border-radius:2px}
+.tableCard{border:1px solid #ececf0;border-radius:10px;background:#fff;overflow:hidden}
+.tableHeader{padding:14px 18px;border-bottom:1px solid #f0f0f4;display:flex;justify-content:space-between;align-items:center}
+.tableHeader h3{font-size:15px;font-weight:650;color:#33323c;margin:0}
+.tableWrapper{overflow-x:auto}
+.logsTable{width:100%;border-collapse:collapse;text-align:left;font-size:13px}
+.logsTable th{background:#fafafc;padding:10px 16px;color:#797883;font-weight:600;border-bottom:1px solid #ececf0;white-space:nowrap}
+.logsTable td{padding:11px 16px;border-bottom:1px solid #f3f3f6;color:#4a4954;white-space:nowrap}
+.logsTable tr:last-child td{border-bottom:none}
+.statusSuccess{display:inline-flex;align-items:center;gap:4px;color:#15803d;background:#f0fdf4;padding:2px 7px;border-radius:4px;font-weight:600;font-size:12px}
+.statusError{display:inline-flex;align-items:center;gap:4px;color:#b91c1c;background:#fef2f2;padding:2px 7px;border-radius:4px;font-weight:600;font-size:12px}
+@media(max-width:850px){.statsGrid{grid-template-columns:1fr}}
+
 .accountLogo{width:38px;height:38px;object-fit:contain;border-radius:9px;background:#fff;border:1px solid #f0f0f3}.keyStatus{font-size:14px;color:#777782;margin-top:10px}
 
 .extractionMessage{font-size:14px;color:#777782;line-height:1.45;margin:8px 0}
 .emptyNotice{color:#888796;font-size:14px;padding:24px 0}
 .eventActions{display:flex;align-items:center;margin-left:auto}
+
+.reviewFilters{display:flex;align-items:center;gap:8px;margin:18px 0 24px;flex-wrap:wrap}
+.filterChip{display:inline-flex;align-items:center;gap:8px;padding:8px 14px;border-radius:20px;border:1px solid #e7e6ec;background:#fff;color:#656670;font-size:14px;font-weight:500;cursor:pointer;transition:all .15s ease}
+.filterChip:hover{background:#fbfbfc;border-color:#d8d7e0}
+.filterChipActive{background:#f2f0ff;border-color:#9587e9;color:#5f4dd0;font-weight:600}
+.filterBadge{font-size:14px;padding:1px 7px;border-radius:10px;background:#ebe9f6;color:#6755cf}
+.filterChipActive .filterBadge{background:#7361dc;color:#fff}
+.reviewGroup{border:1px solid #ececf0;border-radius:12px;background:#fff;padding:20px;margin-bottom:20px;box-shadow:0 1px 3px rgba(0,0,0,.02)}
+.reviewGroupHeader{display:flex;align-items:center;justify-content:space-between;padding-bottom:16px;border-bottom:1px solid #f0f0f3;margin-bottom:16px;gap:16px;flex-wrap:wrap}
+.reviewGroupEvent{display:flex;align-items:center;gap:14px;min-width:0;flex:1}
+.reviewGroupTitle{min-width:0}
+.reviewGroupTitle h3{font-size:16px;font-weight:650;margin:0 0 4px;color:#2b2a33}
+.reviewGroupActions{display:flex;align-items:center;gap:10px}
+.approveAllButton{border:0;border-radius:8px;background:#2e7d32;color:#fff;font-weight:600;padding:8px 14px;font-size:14px;cursor:pointer;transition:background .15s ease;display:inline-flex;align-items:center;gap:6px}
+.approveAllButton:hover{background:#256628}
+.approveAllButton:disabled{opacity:.5;cursor:not-allowed}
+.reviewPostsGrid{display:grid;gap:14px}
+.reviewPostCard{border:1px solid #ececf0;border-radius:9px;padding:16px;background:#fafafd;display:flex;flex-direction:column;gap:12px;transition:border-color .15s ease}
+.reviewPostCard:hover{border-color:#dcdbe3}
+.reviewPostTop{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.reviewPostAccount{display:flex;align-items:center;gap:8px}
+.reviewAccountAvatar{width:24px;height:24px;border-radius:6px;display:grid;place-items:center;font-size:14px;font-weight:700;color:#fff}
+.reviewPostAccountName{font-size:14px;font-weight:600;color:#3b3a43}
+.reviewNetworkBadge{font-size:14px;padding:2px 7px;border-radius:4px;border:1px solid #e2e1ea;background:#fff;color:#555460;font-weight:500}
+.reviewPostMeta{display:flex;align-items:center;gap:8px;font-size:14px;color:#888794}
+.reviewStatusBadge{font-size:14px;padding:3px 8px;border-radius:12px;font-weight:600}
+.reviewStatusReview{background:#fff6e5;color:#926514;border:1px solid #f6e2b8}
+.reviewStatusFailed{background:#fff0ee;color:#a43a32;border:1px solid #fbd0cb}
+.reviewPostContent{background:#fff;border:1px solid #e7e6ee;border-radius:8px;padding:14px;font-size:14px;line-height:1.55;color:#33323c;white-space:pre-wrap;word-break:break-word;cursor:pointer;transition:border-color .15s ease,background .15s ease}
+.reviewPostContent:hover{border-color:#9587e9;background:#fdfdff}
+.reviewPostError{background:#fff1f0;border:1px solid #fbd5d2;color:#9f3c34;border-radius:6px;padding:8px 12px;font-size:14px;line-height:1.4}
+.reviewPostBottom{display:flex;align-items:center;justify-content:flex-end;gap:8px;flex-wrap:wrap}
+.reviewEmptyState{text-align:center;padding:60px 20px;background:#fff;border:1px solid #ececf0;border-radius:12px;margin-top:10px}
+.reviewEmptyIcon{width:56px;height:56px;border-radius:50%;background:#eef8f1;color:#368a52;font-size:24px;font-weight:bold;display:grid;place-items:center;margin:0 auto 16px}
+.reviewEmptyState h2{font-size:20px;font-weight:650;color:#2b2a33;margin:0 0 8px}
+.reviewEmptyState p{font-size:15px;color:#7b7a87;max-width:480px;margin:0 auto 24px;line-height:1.5}
+.reviewEmptyActions{display:flex;align-items:center;justify-content:center;gap:12px}

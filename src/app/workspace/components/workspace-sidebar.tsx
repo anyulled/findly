@@ -10,8 +10,8 @@ interface WorkspaceSidebarProps {
   profile: UserProfile;
 }
 
-const SIDEBAR_ITEMS = ["Calendario", "Eventos", "Cuentas", "Ajustes"] as const;
-const SIDEBAR_ICONS = ["▦", "◷", "♙", "⚙"] as const;
+const SIDEBAR_ITEMS = ["Calendario", "Revisiones", "Eventos", "Cuentas", "Ajustes"] as const;
+const SIDEBAR_ICONS = ["▦", "✍", "◷", "♙", "⚙"] as const;
 
 export function WorkspaceSidebar({
   tab,
@@ -47,7 +47,7 @@ export function WorkspaceSidebar({
             <span className={styles.navIcon}>{SIDEBAR_ICONS[i]}</span>
             {item}
             {item === "Eventos" && <span className={styles.navCount}>{eventsCount}</span>}
-            {item === "Calendario" && reviewCount > 0 && (
+            {item === "Revisiones" && reviewCount > 0 && (
               <span className={styles.navCount}>{reviewCount}</span>
             )}
           </button>

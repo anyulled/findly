@@ -10,6 +10,7 @@ La aplicación incluye:
 
 - Una página de presentación pública con acceso al espacio de trabajo desde la esquina superior derecha.
 - Un calendario con vistas quincenal, semanal y mensual. Cuando hay más de tres publicaciones en un día, el control «+N más» muestra todas con su cuenta, red y estado; cada una abre su detalle sin cambiar el intervalo.
+- Una pestaña «Revisiones» dedicada que reúne las publicaciones pendientes de revisión y las que tienen incidencias de envío agrupadas por evento próximo, con filtros rápidos («Todas», «Pendientes de revisión», «Fallidas»), aprobación individual o en lote por evento, edición en modal y descarte de borradores.
 - Alta manual con datos o pegando la URL pública de Meetup/Luma para extraer los datos disponibles, revisarlos y corregirlos antes de guardar. Elige las cuentas destinatarias; la selección se conserva para completar recordatorios.
 - Borradores para LinkedIn, X y Bluesky, con fechas recordatorio a 14, 7 y 1 día del evento, a las 13:00 de `Europe/Madrid`. Se omiten las fechas cuyo horario ya pasó.
 - Tres cuentas de ejemplo con prompts de voz editables, edición y eliminación de borradores en revisión, y validación local del límite de texto por red. Los recordatorios descartados no vuelven a generarse; los ya aprobados o enviados no se pueden eliminar desde este control.
