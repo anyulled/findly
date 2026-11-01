@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { extractEventPageDetails, EventUrlExtractionError } from "@/lib/event-url-extraction";
 import { createClient } from "@/lib/supabase/server";
+import { logger } from "@/lib/logger";
 
 export async function POST(request: Request) {
   const contentLength = Number(request.headers.get("content-length"));
@@ -46,15 +47,18 @@ export async function POST(request: Request) {
       if (error || !user || !ownerEmail || user.email?.toLowerCase() !== ownerEmail) {
         return NextResponse.json({ error: "No tienes acceso a este espacio." }, { status: 401 });
       }
-    } catch {
+    } catch (authError) {
+      logger.warn("Failed to verify space session for extract endpoint", {}, authError);
       return NextResponse.json({ error: "No se pudo verificar la sesión del espacio." }, { status: 401 });
     }
   }
 
+  const targetUrl = (body as { url: string }).url;
   try {
-    return NextResponse.json(await extractEventPageDetails((body as { url: string }).url));
+    return NextResponse.json(await extractEventPageDetails(targetUrl));
   } catch (error) {
     if (error instanceof EventUrlExtractionError) return NextResponse.json({ error: error.message }, { status: 422 });
+    logger.warn("Unexpected failure extracting event details", { url: targetUrl }, error);
     return NextResponse.json({ error: "No se pudieron extraer los datos del evento." }, { status: 502 });
   }
 }

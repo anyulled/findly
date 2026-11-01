@@ -17,6 +17,8 @@ import { validateSource, type SourceInput, type SourceType } from "@/lib/source-
 import { fetchNextChannelSlotsForAccount, invalidateBufferSyncCache, syncBufferScheduledPosts } from "@/lib/buffer-sync";
 import { isSubstackUrl, packLocationAndImage, unpackLocationAndImage } from "@/lib/substack";
 import { fetchOpenGraphImage } from "@/lib/opengraph";
+import { runAction, runVoidAction, UserFacingError, type ActionVoidResult } from "@/lib/action-result";
+import { logger } from "@/lib/logger";
 
 export type { UserProfile } from "@/lib/user-profile";
 export type { SourceInput, SourceType } from "@/lib/source-validation";
@@ -98,7 +100,7 @@ async function authorizedClient() {
   const { data: { user }, error } = await supabase.auth.getUser();
   const ownerEmail = process.env.OWNER_EMAIL?.trim().toLowerCase();
   if (error || !user || !ownerEmail || user.email?.toLowerCase() !== ownerEmail) {
-    throw new Error("No tienes acceso a este espacio.");
+    throw new UserFacingError("No tienes acceso a este espacio.");
   }
   return { supabase, ownerId: user.id, user };
 }
@@ -270,6 +272,7 @@ export async function loadWorkspace(): Promise<WorkspaceSnapshot> {
 
     return { accounts: accountsWithChannels, events, posts: [...posts, ...bufferScheduledPosts], sources, mode: settings?.mode === "automatic" ? "automatic" : "review", profile: extractUserProfile(user) };
   } catch (caught) {
+    logger.error("Failed to load workspace data from Supabase", {}, caught);
     return {
       accounts: [],
       events: [],
@@ -277,7 +280,7 @@ export async function loadWorkspace(): Promise<WorkspaceSnapshot> {
       sources: [],
       mode: "review",
       profile: { name: "Administrador", email: "", initials: "A" },
-      error: caught instanceof Error ? caught.message : "No se pudieron cargar los datos.",
+      error: caught instanceof UserFacingError ? caught.message : caught instanceof Error ? caught.message : "No se pudieron cargar los datos.",
     };
   }
 }
@@ -286,19 +289,17 @@ export type SaveSourceResult =
   | { success: true; source: SourceView }
   | { success: false; error: string };
 
-export type ActionOutcome =
-  | { success: true }
-  | { success: false; error: string };
+export type ActionOutcome = ActionVoidResult;
 
 export async function saveSource(input: SourceInput, sourceId?: string): Promise<SaveSourceResult> {
-  try {
+  const result = await runAction("saveSource", async () => {
     const { supabase } = await authorizedClient();
     const source = validateSource(input);
     if (sourceId && !/^[0-9a-f-]{36}$/i.test(sourceId)) {
-      return { success: false, error: "La fuente no es válida." };
+      throw new UserFacingError("La fuente no es válida.");
     }
     const dbSourceType = source.type === "substack" ? "luma_ical" : source.type;
-    const { data: result, error } = await supabase.rpc("save_source", {
+    const { data: resultData, error } = await supabase.rpc("save_source", {
       p_source_id: sourceId ?? null,
       p_name: source.name,
       p_source_type: dbSourceType,
@@ -307,60 +308,49 @@ export async function saveSource(input: SourceInput, sourceId?: string): Promise
       p_account_ids: source.accountIds,
     }).single();
     if (error) {
-      return { success: false, error: error.message || "No se pudo guardar la fuente en Supabase." };
+      throw new UserFacingError(error.message || "No se pudo guardar la fuente en Supabase.");
     }
-    const data = result as { id: string; name: string; source_type: SourceType; feed_url: string; enabled: boolean; account_ids: string[] } | null;
+    const data = resultData as { id: string; name: string; source_type: SourceType; feed_url: string; enabled: boolean; account_ids: string[] } | null;
     if (!data) {
-      return { success: false, error: "No se pudieron obtener los datos de la fuente guardada." };
+      throw new UserFacingError("No se pudieron obtener los datos de la fuente guardada.");
     }
     const resolvedType: SourceType = source.type === "substack" || isSubstackUrl(data.feed_url)
       ? "substack"
       : data.source_type;
     return {
-      success: true,
-      source: {
-        id: data.id,
-        name: data.name,
-        type: resolvedType,
-        url: data.feed_url,
-        enabled: data.enabled,
-        accountIds: data.account_ids ?? [],
-      },
+      id: data.id,
+      name: data.name,
+      type: resolvedType,
+      url: data.feed_url,
+      enabled: data.enabled,
+      accountIds: data.account_ids ?? [],
     };
-  } catch (caught) {
-    return {
-      success: false,
-      error: caught instanceof Error ? caught.message : "Error inesperado al guardar la fuente.",
-    };
-  }
+  }, { defaultErrorMessage: "Error inesperado al guardar la fuente." });
+
+  if (result.success) return { success: true, source: result.data };
+  return { success: false, error: result.error };
 }
 
 export async function setSourceEnabled(sourceId: string, enabled: boolean): Promise<ActionOutcome> {
-  try {
+  return runVoidAction("setSourceEnabled", async () => {
     const { supabase } = await authorizedClient();
     if (!/^[0-9a-f-]{36}$/i.test(sourceId) || typeof enabled !== "boolean") {
-      return { success: false, error: "La fuente no es válida." };
+      throw new UserFacingError("La fuente no es válida.");
     }
     const { data, error } = await supabase.from("sources").update({ enabled }).eq("id", sourceId).select("id").single();
-    if (error || !data) return { success: false, error: "No se pudo actualizar la fuente." };
-    return { success: true };
-  } catch (caught) {
-    return { success: false, error: caught instanceof Error ? caught.message : "No se pudo actualizar la fuente." };
-  }
+    if (error || !data) throw new UserFacingError("No se pudo actualizar la fuente.");
+  }, { defaultErrorMessage: "No se pudo actualizar la fuente." });
 }
 
 export async function deleteSource(sourceId: string): Promise<ActionOutcome> {
-  try {
+  return runVoidAction("deleteSource", async () => {
     const { supabase } = await authorizedClient();
     if (!/^[0-9a-f-]{36}$/i.test(sourceId)) {
-      return { success: false, error: "La fuente no es válida." };
+      throw new UserFacingError("La fuente no es válida.");
     }
     const { data, error } = await supabase.from("sources").delete().eq("id", sourceId).select("id").single();
-    if (error || !data) return { success: false, error: "No se pudo eliminar la fuente." };
-    return { success: true };
-  } catch (caught) {
-    return { success: false, error: caught instanceof Error ? caught.message : "No se pudo eliminar la fuente." };
-  }
+    if (error || !data) throw new UserFacingError("No se pudo eliminar la fuente.");
+  }, { defaultErrorMessage: "No se pudo eliminar la fuente." });
 }
 
 export type CreateEventResult =
@@ -372,24 +362,21 @@ export type GenerateReviewPostsResult =
   | { success: false; posts: PostView[]; error: string };
 
 export async function deleteEvent(eventId: string): Promise<ActionOutcome> {
-  try {
+  return runVoidAction("deleteEvent", async () => {
     const { supabase, ownerId } = await authorizedClient();
-    if (!/^[0-9a-f-]{36}$/i.test(eventId)) return { success: false, error: "El evento no es válido." };
+    if (!/^[0-9a-f-]{36}$/i.test(eventId)) throw new UserFacingError("El evento no es válido.");
     const { data, error } = await supabase.from("events").delete().eq("id", eventId).eq("owner_id", ownerId).select("id").single();
-    if (error || !data) return { success: false, error: "No se pudo eliminar el evento." };
-    return { success: true };
-  } catch (caught) {
-    return { success: false, error: caught instanceof Error ? caught.message : "No se pudo eliminar el evento." };
-  }
+    if (error || !data) throw new UserFacingError("No se pudo eliminar el evento.");
+  }, { defaultErrorMessage: "No se pudo eliminar el evento." });
 }
 
 export async function createEvent(input: Omit<EventView, "id">): Promise<CreateEventResult> {
-  try {
+  const result = await runAction("createEvent", async () => {
     const { supabase, ownerId } = await authorizedClient();
     const title = input.title.trim();
     const substack = isSubstackUrl(input.url) || input.source === "Substack";
     if (!title || title.length > 200 || (!substack && (!input.date || !input.time))) {
-      return { success: false, error: "Completa título, fecha y hora del evento." };
+      throw new UserFacingError("Completa título, fecha y hora del evento.");
     }
     let url: string | null = null;
     if (input.url) {
@@ -397,7 +384,7 @@ export async function createEvent(input: Omit<EventView, "id">): Promise<CreateE
         const parsed = new URL(input.url);
         if (parsed.protocol !== "https:" && parsed.protocol !== "http:") throw new Error();
         url = parsed.toString();
-      } catch { return { success: false, error: "El enlace del evento debe ser una URL HTTP o HTTPS válida." }; }
+      } catch { throw new UserFacingError("El enlace del evento debe ser una URL HTTP o HTTPS válida."); }
     }
     const fallbackNow = formatMadridDateTime(new Date().toISOString());
     const eventDate = input.date || fallbackNow.date;
@@ -414,34 +401,32 @@ export async function createEvent(input: Omit<EventView, "id">): Promise<CreateE
       event_url: url,
       detected_language: detectTitleLanguage(title),
     }).select("id,title,starts_at,location,description,event_url,detected_language,source_id").single();
-    if (error || !data) return { success: false, error: "No se pudo guardar el evento en Supabase." };
+    if (error || !data) throw new UserFacingError("No se pudo guardar el evento en Supabase.");
     const scheduled = formatMadridDateTime(data.starts_at);
     const unpacked = unpackLocationAndImage(data.location);
     return {
-      success: true,
-      event: {
-        id: data.id,
-        title: data.title,
-        date: scheduled.date,
-        time: scheduled.time,
-        place: unpacked.place,
-        description: data.description,
-        source: sourceForUrl(data.event_url),
-        sourceId: data.source_id,
-        url: data.event_url ?? undefined,
-        imageUrl: unpacked.imageUrl,
-        language: data.detected_language as PostLanguage,
-      },
+      id: data.id,
+      title: data.title,
+      date: scheduled.date,
+      time: scheduled.time,
+      place: unpacked.place,
+      description: data.description,
+      source: sourceForUrl(data.event_url),
+      sourceId: data.source_id,
+      url: data.event_url ?? undefined,
+      imageUrl: unpacked.imageUrl,
+      language: data.detected_language as PostLanguage,
     };
-  } catch (caught) {
-    return { success: false, error: caught instanceof Error ? caught.message : "No se pudo guardar el evento en Supabase." };
-  }
+  }, { defaultErrorMessage: "No se pudo guardar el evento en Supabase." });
+
+  if (result.success) return { success: true, event: result.data };
+  return { success: false, error: result.error };
 }
 
 export async function generateReviewPosts(eventId: string): Promise<GenerateReviewPostsResult> {
-  try {
+  const result = await runAction("generateReviewPosts", async () => {
     const { supabase, ownerId } = await authorizedClient();
-    if (!/^[0-9a-f-]{36}$/i.test(eventId)) return { success: false, posts: [], error: "Solicitud de publicaciones no válida." };
+    if (!/^[0-9a-f-]{36}$/i.test(eventId)) throw new UserFacingError("Solicitud de publicaciones no válida.");
 
     const [eventResult, accountResult, existingResult, settingsResult] = await Promise.all([
       supabase.from("events").select("id,title,starts_at,location,description,event_url,detected_language,source_id")
@@ -450,16 +435,16 @@ export async function generateReviewPosts(eventId: string): Promise<GenerateRevi
       supabase.from("posts").select("account_id,network,lead_days").eq("owner_id", ownerId).eq("event_id", eventId),
       supabase.from("app_settings").select("value").eq("owner_id", ownerId).eq("key", "publishing_mode").maybeSingle(),
     ]);
-    if (eventResult.error || !eventResult.data) return { success: false, posts: [], error: "No se encontró el evento en este espacio." };
-    if (accountResult.error || !accountResult.data) return { success: false, posts: [], error: "No se pudieron cargar las cuentas." };
-    if (existingResult.error || !existingResult.data) return { success: false, posts: [], error: "No se pudo comprobar si ya existen recordatorios." };
-    if (settingsResult.error) return { success: false, posts: [], error: "No se pudo cargar el modo de publicación." };
+    if (eventResult.error || !eventResult.data) throw new UserFacingError("No se encontró el evento en este espacio.");
+    if (accountResult.error || !accountResult.data) throw new UserFacingError("No se pudieron cargar las cuentas.");
+    if (existingResult.error || !existingResult.data) throw new UserFacingError("No se pudo comprobar si ya existen recordatorios.");
+    if (settingsResult.error) throw new UserFacingError("No se pudo cargar el modo de publicación.");
 
     let sourceLinks: { sourceId: string; accountId: string }[] = [];
     if (eventResult.data.source_id) {
       const { data, error } = await supabase.from("source_accounts").select("source_id,account_id")
         .eq("owner_id", ownerId).eq("source_id", eventResult.data.source_id);
-      if (error) return { success: false, posts: [], error: "No se pudieron cargar las cuentas asociadas a la fuente." };
+      if (error) throw new UserFacingError("No se pudieron cargar las cuentas asociadas a la fuente.");
       sourceLinks = (data ?? []).map((link) => ({ sourceId: link.source_id, accountId: link.account_id }));
     }
     const eligibleAccounts = selectEventAccounts(accountResult.data, eventResult.data.source_id, sourceLinks);
@@ -468,7 +453,7 @@ export async function generateReviewPosts(eventId: string): Promise<GenerateRevi
       ? { data: [], error: null }
       : await supabase.from("style_examples").select("content,account_id,network,language")
         .eq("owner_id", ownerId).in("account_id", accountIds).order("created_at", { ascending: false }).limit(72);
-    if (exampleResult.error || !exampleResult.data) return { success: false, posts: [], error: "No se pudieron cargar los ejemplos de estilo aprobados." };
+    if (exampleResult.error || !exampleResult.data) throw new UserFacingError("No se pudieron cargar los ejemplos de estilo aprobados.");
 
     const eventTime = formatMadridDateTime(eventResult.data.starts_at);
     const unpacked = unpackLocationAndImage(eventResult.data.location);
@@ -535,7 +520,7 @@ export async function generateReviewPosts(eventId: string): Promise<GenerateRevi
         onConflict: "event_id,account_id,network,lead_days",
         ignoreDuplicates: true,
       });
-      if (upsertError) return { success: false, posts: [], error: "No se pudieron guardar las publicaciones pendientes." };
+      if (upsertError) throw new UserFacingError("No se pudieron guardar las publicaciones pendientes.");
     }
     if (automatic) {
       await dispatchApprovedPostsWithSupabase(supabase, ownerId, eventId);
@@ -543,7 +528,7 @@ export async function generateReviewPosts(eventId: string): Promise<GenerateRevi
 
     const { data, error } = await supabase.from("posts").select("id,event_id,account_id,network,lead_days,due_at,content,status,language,last_error,buffer_post_id")
       .eq("owner_id", ownerId).eq("event_id", eventId).order("due_at");
-    if (error || !data) return { success: false, posts: [], error: "No se pudieron recuperar las publicaciones pendientes." };
+    if (error || !data) throw new UserFacingError("No se pudieron recuperar las publicaciones pendientes.");
     const accountNames = new Map(accountResult.data.map((account) => [account.id, account.name]));
     const posts = data.flatMap((row) => {
       const network = NETWORKS.find((value) => value === row.network);
@@ -565,26 +550,26 @@ export async function generateReviewPosts(eventId: string): Promise<GenerateRevi
         language: row.language as PostLanguage,
       }];
     });
-    return { success: true, posts };
-  } catch (caught) {
-    return { success: false, posts: [], error: caught instanceof Error ? caught.message : "No se pudieron crear los borradores." };
-  }
+    return posts;
+  }, { defaultErrorMessage: "No se pudieron crear los borradores." });
+
+  if (result.success) return { success: true, posts: result.data };
+  return { success: false, posts: [], error: result.error };
 }
 
 export async function updatePostContent(postId: string, content: string): Promise<ActionOutcome> {
-  try {
+  return runVoidAction("updatePostContent", async () => {
     const { supabase } = await authorizedClient();
-    if (!content.trim()) return { success: false, error: "El texto de la publicación no puede estar vacío." };
+    if (!content.trim()) throw new UserFacingError("El texto de la publicación no puede estar vacío.");
     const current = await supabase.from("posts").select("network").eq("id", postId).single();
-    if (current.error || !NETWORKS.includes(current.data.network as SocialNetwork)) return { success: false, error: "No se pudo comprobar la red de la publicación." };
+    if (current.error || !NETWORKS.includes(current.data.network as SocialNetwork)) {
+      throw new UserFacingError("No se pudo comprobar la red de la publicación.");
+    }
     const validation = validatePost(current.data.network as SocialNetwork, content);
-    if (!validation.valid) return { success: false, error: validation.message };
+    if (!validation.valid) throw new UserFacingError(validation.message);
     const { error } = await supabase.rpc("update_post_content", { p_post_id: postId, p_content: content });
-    if (error) return { success: false, error: "No se pudo guardar la publicación. Comprueba que has aplicado las migraciones." };
-    return { success: true };
-  } catch (caught) {
-    return { success: false, error: caught instanceof Error ? caught.message : "No se pudo guardar la publicación." };
-  }
+    if (error) throw new UserFacingError("No se pudo guardar la publicación. Comprueba que has aplicado las migraciones.");
+  }, { defaultErrorMessage: "No se pudo guardar la publicación." });
 }
 
 export type ApprovePostResult = PostPublishingOutcome | { kind: "error"; message: string };
@@ -602,6 +587,7 @@ export async function approvePost(postId: string, content: string): Promise<Appr
     invalidateBufferSyncCache();
     return outcome;
   } catch (caught) {
+    logger.error("Failed to approve post", { postId }, caught);
     return { kind: "error", message: caught instanceof Error ? caught.message : "No se pudo aprobar la publicación." };
   }
 }
@@ -614,55 +600,50 @@ export async function retryFailedPost(postId: string): Promise<ApprovePostResult
     invalidateBufferSyncCache();
     return outcome;
   } catch (caught) {
+    logger.error("Failed to retry post", { postId }, caught);
     return { kind: "error", message: caught instanceof Error ? caught.message : "No se pudo reintentar la publicación." };
   }
 }
 
 export async function reconcileScheduledPost(postId: string, bufferPostId: string): Promise<ActionOutcome> {
-  try {
+  return runVoidAction("reconcileScheduledPost", async () => {
     const { supabase, ownerId } = await authorizedClient();
-    if (!/^[0-9a-f-]{36}$/i.test(postId)) return { success: false, error: "Solicitud de publicación no válida." };
+    if (!/^[0-9a-f-]{36}$/i.test(postId)) throw new UserFacingError("Solicitud de publicación no válida.");
     const normalizedId = bufferPostId.trim();
-    if (!normalizedId || normalizedId.length > 200) return { success: false, error: "Introduce el ID del post confirmado en Buffer." };
+    if (!normalizedId || normalizedId.length > 200) throw new UserFacingError("Introduce el ID del post confirmado en Buffer.");
     const { error } = await supabase.rpc("reconcile_post_scheduled", {
       p_post_id: postId,
       p_buffer_post_id: normalizedId,
       p_owner_id: ownerId,
     });
-    if (error) return { success: false, error: "No se pudo confirmar la programación conciliada." };
-    return { success: true };
-  } catch (caught) {
-    return { success: false, error: caught instanceof Error ? caught.message : "No se pudo confirmar la programación conciliada." };
-  }
+    if (error) throw new UserFacingError("No se pudo confirmar la programación conciliada.");
+  }, { defaultErrorMessage: "No se pudo confirmar la programación conciliada." });
 }
 
 export async function confirmPostMissingFromBuffer(postId: string): Promise<ActionOutcome> {
-  try {
+  return runVoidAction("confirmPostMissingFromBuffer", async () => {
     const { supabase, ownerId } = await authorizedClient();
-    if (!/^[0-9a-f-]{36}$/i.test(postId)) return { success: false, error: "Solicitud de publicación no válida." };
+    if (!/^[0-9a-f-]{36}$/i.test(postId)) throw new UserFacingError("Solicitud de publicación no válida.");
     const { error } = await supabase.rpc("reconcile_post_missing", {
       p_post_id: postId,
       p_owner_id: ownerId,
     });
-    if (error) return { success: false, error: "No se pudo guardar la conciliación de ausencia." };
-    return { success: true };
-  } catch (caught) {
-    return { success: false, error: caught instanceof Error ? caught.message : "No se pudo guardar la conciliación de ausencia." };
-  }
+    if (error) throw new UserFacingError("No se pudo guardar la conciliación de ausencia.");
+  }, { defaultErrorMessage: "No se pudo guardar la conciliación de ausencia." });
 }
 
 export async function saveBufferChannel(accountId: string, network: SocialNetwork, bufferChannelId: string): Promise<ActionOutcome> {
-  try {
+  return runVoidAction("saveBufferChannel", async () => {
     const { supabase, ownerId } = await authorizedClient();
-    if (!/^[0-9a-f-]{36}$/i.test(accountId) || !NETWORKS.includes(network)) return { success: false, error: "La cuenta o red no es válida." };
+    if (!/^[0-9a-f-]{36}$/i.test(accountId) || !NETWORKS.includes(network)) throw new UserFacingError("La cuenta o red no es válida.");
     const channelId = bufferChannelId.trim();
-    if (channelId.length > 200) return { success: false, error: "El ID del canal de Buffer no puede superar 200 caracteres." };
+    if (channelId.length > 200) throw new UserFacingError("El ID del canal de Buffer no puede superar 200 caracteres.");
     if (!channelId) {
       const { error } = await supabase.from("account_buffer_channels").delete()
         .eq("owner_id", ownerId).eq("account_id", accountId).eq("network", network);
-      if (error) return { success: false, error: "No se pudo eliminar el ID del canal de Buffer." };
+      if (error) throw new UserFacingError("No se pudo eliminar el ID del canal de Buffer.");
       invalidateBufferSyncCache();
-      return { success: true };
+      return;
     }
     const { error } = await supabase.from("account_buffer_channels").upsert({
       owner_id: ownerId,
@@ -670,37 +651,28 @@ export async function saveBufferChannel(accountId: string, network: SocialNetwor
       network,
       buffer_channel_id: channelId,
     }, { onConflict: "owner_id,account_id,network" });
-    if (error) return { success: false, error: "No se pudo guardar el ID del canal de Buffer." };
+    if (error) throw new UserFacingError("No se pudo guardar el ID del canal de Buffer.");
     invalidateBufferSyncCache();
-    return { success: true };
-  } catch (caught) {
-    return { success: false, error: caught instanceof Error ? caught.message : "No se pudo guardar el ID del canal de Buffer." };
-  }
+  }, { defaultErrorMessage: "No se pudo guardar el ID del canal de Buffer." });
 }
 
 export async function updateAccountVoice(accountId: string, prompt: string): Promise<ActionOutcome> {
-  try {
+  return runVoidAction("updateAccountVoice", async () => {
     const { supabase } = await authorizedClient();
-    if (prompt.length > 2000) return { success: false, error: "El prompt de estilo no puede superar los 2.000 caracteres." };
+    if (prompt.length > 2000) throw new UserFacingError("El prompt de estilo no puede superar los 2.000 caracteres.");
     const { error } = await supabase.from("accounts").update({ voice_prompt: prompt }).eq("id", accountId);
-    if (error) return { success: false, error: "No se pudo guardar la voz de la cuenta." };
-    return { success: true };
-  } catch (caught) {
-    return { success: false, error: caught instanceof Error ? caught.message : "No se pudo guardar la voz de la cuenta." };
-  }
+    if (error) throw new UserFacingError("No se pudo guardar la voz de la cuenta.");
+  }, { defaultErrorMessage: "No se pudo guardar la voz de la cuenta." });
 }
 
 export async function updatePublishingMode(mode: "review" | "automatic"): Promise<ActionOutcome> {
-  try {
+  return runVoidAction("updatePublishingMode", async () => {
     const { supabase, ownerId } = await authorizedClient();
     const { error } = await supabase.from("app_settings").upsert({
       owner_id: ownerId,
       key: "publishing_mode",
       value: { mode },
     }, { onConflict: "owner_id,key" });
-    if (error) return { success: false, error: "No se pudo guardar el modo de publicación." };
-    return { success: true };
-  } catch (caught) {
-    return { success: false, error: caught instanceof Error ? caught.message : "No se pudo guardar el modo de publicación." };
-  }
+    if (error) throw new UserFacingError("No se pudo guardar el modo de publicación.");
+  }, { defaultErrorMessage: "No se pudo guardar el modo de publicación." });
 }

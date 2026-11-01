@@ -9,6 +9,7 @@ import { createClient } from "@/lib/supabase/server";
 import { isSameOriginSessionRequest } from "@/lib/sync-request-auth";
 import { selectEventAccounts } from "@/lib/event-targets";
 import { dispatchApprovedPostsWithSupabase, hasDispatchFailures, recordDispatchBatch, RECOVERY_BUDGET_MS, type ApprovedDispatchResult } from "@/lib/approved-dispatch";
+import { logger } from "@/lib/logger";
 
 const NETWORKS: SocialNetwork[] = ["LinkedIn", "X", "Bluesky"];
 
@@ -141,7 +142,8 @@ export async function POST(request: Request): Promise<Response> {
     const generateDrafts: DraftGenerator = (_source, event) => generateLumaEventDrafts(event, draftRepository, generateSocialPostOrFallback);
     const result = await syncLumaSources(repository, fetchLumaFeed, generateDrafts);
     return Response.json({ ...result, approvedRecovery, automaticDelivery }, { status: hasDispatchFailures(approvedRecovery, automaticDelivery) ? 503 : 200 });
-  } catch {
+  } catch (error) {
+    logger.error("Unhandled error during cron sync execution", { ownerId }, error);
     return Response.json({ error: "sync_unavailable" }, { status: 503 });
   }
 }
