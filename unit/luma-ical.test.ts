@@ -49,6 +49,12 @@ describe("Luma iCalendar parsing", () => {
     assert.deepEqual(result.issues, []);
   });
 
+  it("validates DTSTART from its first property when quoted parameters contain colons", () => {
+    const result = parseLumaIcal(`BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VTIMEZONE\r\nTZID:Custom:Zone\r\nBEGIN:STANDARD\r\nDTSTART:19700101T000000\r\nTZOFFSETFROM:+0200\r\nTZOFFSETTO:+0200\r\nTZNAME:CST\r\nEND:STANDARD\r\nEND:VTIMEZONE\r\nBEGIN:VEVENT\r\nUID:quoted-zone\r\nDTSTART;TZID="Custom:Zone":20261105T190000\r\nSUMMARY:Quoted timezone event\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n`);
+    assert.deepEqual(result.issues, []);
+    assert.equal(result.events[0]?.startsAt, "2026-11-05T17:00:00.000Z");
+  });
+
   for (const [start, expected] of [
     ["20260329T023000", "2026-03-29T01:30:00.000Z"],
     ["20261025T023000", "2026-10-25T00:30:00.000Z"],
