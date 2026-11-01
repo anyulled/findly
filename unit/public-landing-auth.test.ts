@@ -39,3 +39,13 @@ test("the workspace remains protected in production without Supabase configurati
     if (previousNodeEnv === undefined) Reflect.deleteProperty(process.env, "NODE_ENV"); else Object.assign(process.env, { NODE_ENV: previousNodeEnv });
   }
 });
+
+
+test("an OAuth code arriving at the public landing is forwarded to the callback", async () => {
+  const response = await updateSession(new NextRequest("https://findly.example/?code=example-code&state=example-state"));
+  assert.equal(response.status, 307);
+  const location = new URL(response.headers.get("location")!);
+  assert.equal(location.pathname, "/auth/callback");
+  assert.equal(location.searchParams.get("code"), "example-code");
+  assert.equal(location.searchParams.get("state"), "example-state");
+});
