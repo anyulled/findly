@@ -42,6 +42,8 @@ export type GeneratedReviewDraft = {
   leadDays: 14 | 7 | 1;
   language: PostLanguage;
   isFallback?: boolean;
+  generationOrigin?: "groq" | "fallback";
+  generationError?: GeneratedPost["generationError"];
 };
 
 export type ExistingReminder = {
@@ -168,7 +170,9 @@ export async function generateEventDrafts({
       status: "review" as const,
       leadDays,
       language,
+      ...("model" in generated && generated.model ? { generationOrigin: generated.model === "fallback" ? "fallback" as const : "groq" as const } : {}),
       ...("model" in generated && generated.model === "fallback" ? { isFallback: true } : {}),
+      ...("generationError" in generated && generated.generationError ? { generationError: generated.generationError } : {}),
     };
   });
 }

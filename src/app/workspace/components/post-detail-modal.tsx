@@ -2,6 +2,15 @@ import styles from "../../page.module.css";
 import type { EventItem, Post, Status } from "../workspace-types";
 import { dateAt } from "../workspace-calendar-dates";
 
+const generationErrors: Record<string, string> = {
+  not_configured: "Falta configurar GROQ_API_KEY o GROQ_MODEL en el servidor.",
+  provider_auth: "Groq rechazó la autorización. Comprueba la clave y los permisos.",
+  rate_limited: "Groq alcanzó su límite de solicitudes. Inténtalo de nuevo más tarde.",
+  provider_error: "No se pudo completar la solicitud a Groq. Revisa el servicio y el modelo configurado.",
+  empty_response: "Groq devolvió una respuesta vacía.",
+  over_limit: "El texto de Groq superó el límite de caracteres de esta red.",
+};
+
 interface PostDetailModalProps {
   selected: Post;
   deletingDraft: boolean;
@@ -84,6 +93,9 @@ export function PostDetailModal({
         </label>
         <div className={styles.characterCount}>
           {postValidation?.message} <span>Validación local por red.</span>
+        </div>
+        <div role="status" className={selected.generationOrigin === "fallback" ? styles.deliveryError : styles.autoNote}>
+          {selected.generationOrigin === "fallback" ? <>No se pudo generar con Groq; se creó un borrador básico para revisión. {generationErrors[selected.generationErrorCode ?? ""] ?? "No se conoce el motivo."}</> : selected.generationOrigin === "groq" ? "Texto generado inicialmente con Groq. Puede haber sido editado posteriormente." : "Origen de generación desconocido para esta publicación."}
         </div>
         {selected.lastError && <p className={styles.deliveryError}>{selected.lastError}</p>}
         {["needs_reconciliation", "scheduling"].includes(selected.status) && (

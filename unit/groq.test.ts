@@ -170,6 +170,7 @@ describe("generateSocialPost", () => {
     const unconfigured = await generateSocialPostOrFallback(input, { apiKey: "", model: "" });
     assert.equal(unconfigured.model, "fallback");
     assert.equal(unconfigured.validation.valid, true);
+    assert.equal(unconfigured.generationError, "not_configured");
 
     const overLimitFetch: typeof fetch = async () => response("x".repeat(350));
     const overLimit = await generateSocialPostOrFallback(input, {
@@ -179,6 +180,7 @@ describe("generateSocialPost", () => {
     });
     assert.equal(overLimit.model, "fallback");
     assert.equal(overLimit.validation.valid, true);
+    assert.equal(overLimit.generationError, "over_limit");
 
     const validFetch: typeof fetch = async () => response("Short valid post!");
     const valid = await generateSocialPostOrFallback(input, {
@@ -188,5 +190,19 @@ describe("generateSocialPost", () => {
     });
     assert.equal(valid.model, "mock-model");
     assert.equal(valid.text, "Short valid post!");
+    assert.equal(valid.generationError, undefined);
   });
 });
+
+
+it("classifies provider failures without persisting credentials or response bodies", async () => {
+    for (const [status, expected] of [[401, "provider_auth"], [403, "provider_auth"], [429, "rate_limited"], [503, "provider_error"]] as const) {
+      const result = await generateSocialPostOrFallback(input, {
+        apiKey: "secret-api-key", model: "model",
+        fetchImpl: async () => new Response("private-provider-body", { status }),
+      });
+      assert.equal(result.model, "fallback");
+      assert.equal(result.generationError, expected);
+      assert.doesNotMatch(JSON.stringify(result), /secret-api-key|private-provider-body/u);
+    }
+  });

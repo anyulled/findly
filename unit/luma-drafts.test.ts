@@ -186,3 +186,22 @@ test("manual event generation and retry retain persisted target accounts", async
   assert.deepEqual(new Set(generated), new Set(["personal"]));
   assert.deepEqual(new Set(inserted.map((row) => row.account_id)), new Set(["personal"]));
 });
+
+test("generation provenance and failure codes survive draft persistence without automatic approval", async () => {
+  const inserted: LumaDraftRow[] = [];
+  const repository: LumaDraftRepository = {
+    async getPublishingMode() { return "automatic"; },
+    async listLinkedAccounts() { return [{ id: "a", name: "Community", voice: "", networks: ["LinkedIn"] }]; },
+    async listExistingReminders() { return []; },
+    async listApprovedExamples() { return []; },
+    async insertDrafts(rows) { inserted.push(...rows); return rows.length; },
+    async scheduleAutomaticPosts() {},
+  };
+  const { generateSocialPostOrFallback } = await import("../src/lib/groq");
+  await generateLumaEventDrafts(event, repository, (input) => generateSocialPostOrFallback(input, { apiKey: "", model: "" }), new Date("2029-12-01T00:00:00.000Z"));
+  assert.equal(inserted.length, 3);
+  assert.ok(inserted.every((row) => row.status === "review" && row.generation_origin === "fallback" && row.generation_error_code === "not_configured"));
+  inserted.length = 0;
+  await generateLumaEventDrafts(event, repository, async () => ({ text: "Groq text", model: "llama", validation: { valid: true, count: 9, limit: 3000, message: "ok" } }), new Date("2029-12-01T00:00:00.000Z"));
+  assert.ok(inserted.every((row) => row.generation_origin === "groq" && row.generation_error_code === undefined && row.status === "approved"));
+});

@@ -66,6 +66,8 @@ export type PostView = {
   status: "review" | "approved" | "scheduling" | "scheduled" | "published" | "failed" | "needs_reconciliation" | "discarded";
   lastError?: string | null;
   bufferPostId?: string | null;
+  generationOrigin?: "groq" | "fallback" | null;
+  generationErrorCode?: string | null;
   leadDays?: 14 | 7 | 1;
   language?: PostLanguage;
 };
@@ -139,6 +141,8 @@ function mapPostRowToView(
     language: string;
     last_error?: string | null;
     buffer_post_id?: string | null;
+    generation_origin?: "groq" | "fallback" | null;
+    generation_error_code?: string | null;
   },
   accountNames: Map<string, string>,
 ): PostView | null {
@@ -157,6 +161,8 @@ function mapPostRowToView(
     status: row.status as PostView["status"],
     lastError: row.last_error,
     bufferPostId: row.buffer_post_id,
+    generationOrigin: row.generation_origin,
+    generationErrorCode: row.generation_error_code,
     leadDays: row.lead_days as PostView["leadDays"],
     language: row.language as PostLanguage,
   };
@@ -210,7 +216,7 @@ export async function loadWorkspace(): Promise<WorkspaceSnapshot> {
 
     const [eventsResult, postsResult, settingsResult, sourcesResult, sourceAccountsResult, channelResult, examplesResult] = await Promise.all([
       supabase.from("events").select("id,title,starts_at,location,description,event_url,detected_language,source_id,target_account_ids").order("starts_at"),
-      supabase.from("posts").select("id,event_id,account_id,network,lead_days,due_at,content,status,language,last_error,buffer_post_id").order("due_at"),
+      supabase.from("posts").select("id,event_id,account_id,network,lead_days,due_at,content,status,language,last_error,buffer_post_id,generation_origin,generation_error_code").order("due_at"),
       supabase.from("app_settings").select("value").eq("key", "publishing_mode").maybeSingle(),
       supabase.from("sources").select("id,name,source_type,feed_url,enabled").order("created_at"),
       supabase.from("source_accounts").select("source_id,account_id"),
@@ -479,7 +485,7 @@ export async function generateReviewPosts(eventId: string): Promise<GenerateRevi
 
     const [accountResult, postsResult] = await Promise.all([
       supabase.from("accounts").select("id,name").eq("owner_id", ownerId),
-      supabase.from("posts").select("id,event_id,account_id,network,lead_days,due_at,content,status,language,last_error,buffer_post_id")
+      supabase.from("posts").select("id,event_id,account_id,network,lead_days,due_at,content,status,language,last_error,buffer_post_id,generation_origin,generation_error_code")
         .eq("owner_id", ownerId).eq("event_id", eventId).order("due_at"),
     ]);
 
