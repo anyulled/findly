@@ -137,12 +137,12 @@ export function SourceSettings({ accounts, sources, persistent, onSourcesChange,
       <div><h3 id="sources-heading">Fuentes de eventos</h3><p>Guarda las fuentes y elige qué cuentas recibirán sus eventos.</p></div>
     </div>
 
-    <p className={styles.sourceNotice}>{persistent ? "La sincronización importa eventos y publicaciones nuevas de fuentes Luma iCal y Substack activas. Para un evento o artículo individual, pega su URL en Añadir evento." : "La demo guarda las fuentes en este navegador, pero no consulta feeds. Conecta Supabase para importar eventos."}</p>
+    <p className={styles.sourceNotice}>{persistent ? "La sincronización importa eventos y publicaciones nuevas de fuentes Luma iCal, Meetup RSS y Substack activas. Para un evento o artículo individual, pega su URL en Añadir evento." : "La demo guarda las fuentes en este navegador, pero no consulta feeds. Conecta Supabase para importar eventos."}</p>
 
     {sources.length === 0 ? <p className={styles.sourceEmpty}>Aún no hay fuentes configuradas.</p> : <div className={styles.sourceList}>
       {sources.map((source) => <article className={styles.sourceCard} key={source.id}>
         <div className={styles.sourceCardTop}>
-          <div><b>{source.name}</b><small>{source.type === "luma_ical" ? "Luma · iCal" : source.type === "substack" ? "Substack · feed" : "Meetup · enlace"}</small></div>
+          <div><b>{source.name}</b><small>{source.type === "luma_ical" ? "Luma · iCal" : source.type === "substack" ? "Substack · feed" : "Meetup · RSS"}</small></div>
           <a href={source.url} target="_blank" rel="noreferrer">Abrir ↗</a>
         </div>
         <p className={styles.sourceUrl}>{source.url}</p>
@@ -157,7 +157,7 @@ export function SourceSettings({ accounts, sources, persistent, onSourcesChange,
     <div className={styles.sourceActions}>
       <button type="button" className={styles.approveButton} disabled={!persistent || pending} onClick={() => { void syncNow(); }}>{pending ? "Sincronizando…" : "Sincronizar ahora"}</button>
       {!persistent && <small>La sincronización requiere Supabase configurado e iniciar sesión como propietario.</small>}
-      {persistent && !sources.some((source) => source.enabled && (source.type === "luma_ical" || source.type === "substack")) && <small>Sin fuentes activas, se recuperan las publicaciones aprobadas pendientes.</small>}
+      {persistent && !sources.some((source) => source.enabled) && <small>Sin fuentes activas, se recuperan las publicaciones aprobadas pendientes.</small>}
     </div>
 
     <form className={styles.sourceForm} onSubmit={(event) => { void addSource(event); }}>
@@ -169,11 +169,11 @@ export function SourceSettings({ accounts, sources, persistent, onSourcesChange,
         <select aria-label="Tipo de fuente" value={draft.type} onChange={(event) => setDraft({ ...draft, type: event.target.value as SourceType })}>
           <option value="luma_ical">Luma iCal</option>
           <option value="substack">Substack</option>
-          <option value="meetup">Meetup</option>
+          <option value="meetup">Meetup RSS</option>
         </select>
       </label>
-      <label className={styles.formLabel}>{draft.type === "luma_ical" ? "URL DE SUSCRIPCIÓN ICAL" : draft.type === "substack" ? "URL DE FEED O POSTS DE SUBSTACK" : "URL DEL GRUPO O EVENTO DE MEETUP"}
-        <input aria-label={draft.type === "luma_ical" ? "URL de suscripción iCal" : draft.type === "substack" ? "URL de Substack" : "URL de Meetup"} required type="url" maxLength={2000} value={draft.url} onChange={(event) => setDraft({ ...draft, url: event.target.value })} placeholder={draft.type === "luma_ical" ? "https://.../calendar.ics" : draft.type === "substack" ? "https://tu-blog.substack.com/feed" : "https://www.meetup.com/..."}/>
+      <label className={styles.formLabel}>{draft.type === "luma_ical" ? "URL DE SUSCRIPCIÓN ICAL" : draft.type === "substack" ? "URL DE FEED O POSTS DE SUBSTACK" : "URL DE FEED RSS O GRUPO DE MEETUP"}
+        <input aria-label={draft.type === "luma_ical" ? "URL de suscripción iCal" : draft.type === "substack" ? "URL de Substack" : "URL de Meetup"} required type="url" maxLength={2000} value={draft.url} onChange={(event) => setDraft({ ...draft, url: event.target.value })} placeholder={draft.type === "luma_ical" ? "https://.../calendar.ics" : draft.type === "substack" ? "https://tu-blog.substack.com/feed" : "https://www.meetup.com/barcelonajug/events/rss/"}/>
       </label>
       <fieldset className={styles.sourceAccountsFieldset}>
         <legend>ASOCIAR A CUENTAS</legend>
@@ -182,7 +182,7 @@ export function SourceSettings({ accounts, sources, persistent, onSourcesChange,
           return <label key={id}><input type="checkbox" disabled={pending || !accountsReady} checked={draft.accountIds.includes(id)} onChange={() => toggleAccount(id)}/>{account.name}</label>;
         })}
       </fieldset>
-      <p className={styles.sourceHelp}>{draft.type === "luma_ical" ? "Puedes asociar una fuente a varias cuentas. Los feeds Luma iCal activos se consultan al sincronizar." : draft.type === "substack" ? "Los feeds de Substack (/feed o /api/v1/posts) importan artículos con título, descripción y miniatura, programándolos en el siguiente hueco disponible de cada canal en Buffer." : "Puedes guardar el enlace y asociar cuentas, pero Meetup todavía no se importa automáticamente. Para eventos individuales, pega la URL en Añadir evento."}</p>
+      <p className={styles.sourceHelp}>{draft.type === "luma_ical" ? "Puedes asociar una fuente a varias cuentas. Los feeds Luma iCal activos se consultan al sincronizar." : draft.type === "substack" ? "Los feeds de Substack (/feed o /api/v1/posts) importan artículos con título, descripción y miniatura, programándolos en el siguiente hueco disponible de cada canal en Buffer." : "Puedes pegar el feed RSS (https://www.meetup.com/grupo/events/rss/) o la URL del grupo de Meetup. Los eventos activos se importan y preparan sus borradores al sincronizar."}</p>
       {error && <p role="alert" className={styles.sourceError}>{error}</p>}
       {message && <p role="status" className={styles.sourceSuccess}>{message}</p>}
       <button className={styles.approveButton} type="submit" disabled={pending || accounts.length === 0 || !accountsReady}>

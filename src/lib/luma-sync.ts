@@ -2,6 +2,7 @@ import { detectTitleLanguage } from "./language";
 import { parseLumaIcal, type LumaCalendarEvent } from "./luma-ical";
 import type { ImportedLumaEvent } from "./luma-drafts";
 import { isSubstackUrl, normalizeSubstackPostsApiUrl, packLocationAndImage, parseSubstackFeed } from "./substack";
+import { enrichMeetupRssItems, isMeetupUrl, normalizeMeetupRssUrl, parseMeetupFeed, parseMeetupRssFeed } from "./meetup";
 
 export type LumaSource = { id: string; ownerId: string; name: string; feedUrl: string };
 export type PersistableEvent = {
@@ -33,6 +34,22 @@ function parseSourceRows(source: LumaSource, rawContent: string): { rows: Persis
       starts_at: item.publishedAt,
       timezone: "Europe/Madrid",
       location: packLocationAndImage("", item.coverImage),
+      description: item.description,
+      event_url: item.url,
+      detected_language: detectTitleLanguage(item.title),
+    }));
+    return { rows, skippedEvents: 0 };
+  }
+  if (isMeetupUrl(source.feedUrl)) {
+    const items = parseMeetupFeed(rawContent, source.feedUrl);
+    const rows = items.map((item): PersistableEvent => ({
+      owner_id: source.ownerId,
+      source_id: source.id,
+      external_id: item.uid,
+      title: item.title,
+      starts_at: item.startsAt,
+      timezone: "Europe/Madrid",
+      location: packLocationAndImage(item.location, item.coverImage),
       description: item.description,
       event_url: item.url,
       detected_language: detectTitleLanguage(item.title),
@@ -130,9 +147,13 @@ function resolvePublicFeedUrl(url: string): URL {
   try { parsed = new URL(url); } catch { throw new Error("Invalid feed URL"); }
   if (parsed.protocol !== "https:" || parsed.username || parsed.password) throw new Error("Feed URL must use HTTPS");
   if (PRIVATE_HOST_PATTERN.test(parsed.hostname)) throw new Error("Private feed host is not allowed");
-  return isSubstackUrl(parsed.toString()) && /\/feed\/?$/iu.test(parsed.pathname)
-    ? new URL(normalizeSubstackPostsApiUrl(parsed.toString()))
-    : parsed;
+  if (isSubstackUrl(parsed.toString()) && /\/feed\/?$/iu.test(parsed.pathname)) {
+    return new URL(normalizeSubstackPostsApiUrl(parsed.toString()));
+  }
+  if (isMeetupUrl(parsed.toString())) {
+    return new URL(normalizeMeetupRssUrl(parsed.toString()));
+  }
+  return parsed;
 }
 
 export async function fetchLumaFeed(url: string): Promise<string> {
@@ -147,5 +168,11 @@ export async function fetchLumaFeed(url: string): Promise<string> {
     try { await response.body?.cancel(); } catch { /* Preserve the size rejection. */ }
     throw new Error("Feed is too large");
   }
-  return readLimitedFeedBody(response);
+  const rawBody = await readLimitedFeedBody(response);
+  if (isMeetupUrl(url) && !/^BEGIN:VCALENDAR/iu.test(rawBody.trim())) {
+    const items = parseMeetupRssFeed(rawBody, targetUrl.toString());
+    const enriched = await enrichMeetupRssItems(items, targetUrl.toString());
+    return JSON.stringify(enriched);
+  }
+  return rawBody;
 }

@@ -160,3 +160,31 @@ test("extracts latest Substack post from /feed and enriches cover image from /ap
   assert.equal(result.event.imageUrl, "https://substackcdn.com/image/api-cover.jpg");
   assert.deepEqual(result.missingFields, []);
 });
+
+test("extracts next upcoming event when pasting a Meetup RSS feed URL", async () => {
+  const jugRss = `<?xml version="1.0" encoding="utf-8"?>
+    <rss version="2.0"><channel>
+      <item>
+        <title><![CDATA[⚡Lightning Talks: Java 27]]></title>
+        <link>https://www.meetup.com/barcelonajug/events/317230196/</link>
+        <guid>https://www.meetup.com/barcelonajug/events/317230196/</guid>
+        <pubDate>Sun, 01 Nov 2026 00:27:23 GMT</pubDate>
+        <description><![CDATA[📅 **Jueves, 19 de noviembre de 2026**\n🏢 **Skyscanner**\n📍 Gran Via de les Corts Catalanes, 764, Barcelona.]]></description>
+      </item>
+    </channel></rss>`;
+
+  const result = await extractEventPageDetails("https://www.meetup.com/barcelonajug/events/rss/", async (input) => {
+    const url = String(input);
+    if (url.endsWith("/events/rss/")) {
+      return new Response(jugRss, { status: 200, headers: { "content-type": "application/rss+xml" } });
+    }
+    return new Response("<html></html>", { status: 200, headers: { "content-type": "text/html" } });
+  });
+
+  assert.equal(result.event.title, "⚡Lightning Talks: Java 27");
+  assert.equal(result.event.date, "2026-11-19");
+  assert.equal(result.event.time, "18:30");
+  assert.equal(result.event.place, "Skyscanner, Gran Via de les Corts Catalanes, 764, Barcelona");
+  assert.equal(result.event.url, "https://www.meetup.com/barcelonajug/events/317230196/");
+  assert.deepEqual(result.missingFields, []);
+});

@@ -287,3 +287,49 @@ test("syncLumaSources imports Substack sources and packs cover image in location
   assert.equal(inserted[0]?.location, "https://substackcdn.com/image/cover.jpg");
   assert.equal(inserted[0]?.event_url, "https://etsideusnondaretur.substack.com/p/la-eternidad");
 });
+
+test("syncLumaSources imports Meetup RSS sources and generates drafts", async () => {
+  const inserted: PersistableEvent[] = [];
+  let draftsGenerated = 0;
+  const repository: SyncRepository = {
+    async listEnabledLumaSources() {
+      return [
+        { id: "meetup-jug", ownerId: "owner-1", name: "Barcelona JUG", feedUrl: "https://www.meetup.com/barcelonajug/events/rss/" },
+        { id: "meetup-crafters", ownerId: "owner-1", name: "Software Crafters", feedUrl: "https://www.meetup.com/software-crafters-barcelona/events/rss/" },
+      ];
+    },
+    async upsertEvents(events) {
+      inserted.push(...events);
+      const available = events.map((event) => ({ ...event, id: `event-${event.external_id}` }));
+      return { inserted: available, available };
+    },
+  };
+  const jugRss = `<?xml version="1.0" encoding="utf-8"?>
+    <rss version="2.0"><channel>
+      <item>
+        <title><![CDATA[⚡Lightning Talks: Java 27]]></title>
+        <link>https://www.meetup.com/barcelonajug/events/317230196/</link>
+        <guid>https://www.meetup.com/barcelonajug/events/317230196/</guid>
+        <pubDate>Sun, 01 Nov 2026 00:27:23 GMT</pubDate>
+        <description><![CDATA[📅 **Jueves, 19 de noviembre de 2026**\n🏢 **Skyscanner**\n📍 Gran Via de les Corts Catalanes, 764, Barcelona.]]></description>
+      </item>
+    </channel></rss>`;
+  const emptyRss = `<?xml version="1.0" encoding="utf-8"?><rss version="2.0"><channel></channel></rss>`;
+
+  const result = await syncLumaSources(
+    repository,
+    async (url) => (url.includes("barcelonajug") ? jugRss : emptyRss),
+    async () => {
+      draftsGenerated += 3;
+      return 3;
+    },
+  );
+  assert.equal(result.sources, 2);
+  assert.equal(result.feedsSucceeded, 2);
+  assert.equal(result.eventsInserted, 1);
+  assert.equal(result.draftsCreated, 3);
+  assert.equal(draftsGenerated, 3);
+  assert.equal(inserted[0]?.title, "⚡Lightning Talks: Java 27");
+  assert.equal(inserted[0]?.external_id, "event_317230196@meetup.com");
+  assert.equal(inserted[0]?.starts_at, "2026-11-19T17:30:00.000Z");
+});
