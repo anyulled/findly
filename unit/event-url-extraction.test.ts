@@ -161,15 +161,27 @@ test("extracts latest Substack post from /feed and enriches cover image from /ap
   assert.deepEqual(result.missingFields, []);
 });
 
-test("extracts next upcoming event when pasting a Meetup RSS feed URL", async () => {
+test("extracts next upcoming event when pasting a Meetup RSS feed URL and skips past events", async () => {
   const jugRss = `<?xml version="1.0" encoding="utf-8"?>
     <rss version="2.0"><channel>
+      <item>
+        <title><![CDATA[Past Event]]></title>
+        <link>https://www.meetup.com/barcelonajug/events/100/</link>
+        <guid>https://www.meetup.com/barcelonajug/events/100/</guid>
+        <description><![CDATA[Happened on 2024-01-10 at 18:00h.]]></description>
+      </item>
+      <item>
+        <title><![CDATA[Later Event]]></title>
+        <link>https://www.meetup.com/barcelonajug/events/300/</link>
+        <guid>https://www.meetup.com/barcelonajug/events/300/</guid>
+        <description><![CDATA[Happening on 2099-12-01 at 19:00h.]]></description>
+      </item>
       <item>
         <title><![CDATA[⚡Lightning Talks: Java 27]]></title>
         <link>https://www.meetup.com/barcelonajug/events/317230196/</link>
         <guid>https://www.meetup.com/barcelonajug/events/317230196/</guid>
         <pubDate>Sun, 01 Nov 2026 00:27:23 GMT</pubDate>
-        <description><![CDATA[📅 **Jueves, 19 de noviembre de 2026**\n🏢 **Skyscanner**\n📍 Gran Via de les Corts Catalanes, 764, Barcelona.]]></description>
+        <description><![CDATA[📅 **Jueves, 19 de noviembre de 2099**\n🏢 **Skyscanner**\n📍 Gran Via de les Corts Catalanes, 764, Barcelona.]]></description>
       </item>
     </channel></rss>`;
 
@@ -182,9 +194,34 @@ test("extracts next upcoming event when pasting a Meetup RSS feed URL", async ()
   });
 
   assert.equal(result.event.title, "⚡Lightning Talks: Java 27");
-  assert.equal(result.event.date, "2026-11-19");
+  assert.equal(result.event.date, "2099-11-19");
   assert.equal(result.event.time, "18:30");
   assert.equal(result.event.place, "Skyscanner, Gran Via de les Corts Catalanes, 764, Barcelona");
   assert.equal(result.event.url, "https://www.meetup.com/barcelonajug/events/317230196/");
   assert.deepEqual(result.missingFields, []);
+});
+
+test("omits date and time when a Meetup RSS item has no usable start time", async () => {
+  const undatedRss = `<?xml version="1.0" encoding="utf-8"?>
+    <rss version="2.0"><channel>
+      <item>
+        <title><![CDATA[Undated Meetup]]></title>
+        <link>https://www.meetup.com/barcelonajug/events/999/</link>
+        <guid>https://www.meetup.com/barcelonajug/events/999/</guid>
+        <description><![CDATA[We will announce the date soon!]]></description>
+      </item>
+    </channel></rss>`;
+
+  const result = await extractEventPageDetails("https://www.meetup.com/barcelonajug/events/rss/", async (input) => {
+    const url = String(input);
+    if (url.endsWith("/events/rss/")) {
+      return new Response(undatedRss, { status: 200, headers: { "content-type": "application/rss+xml" } });
+    }
+    return new Response("<html></html>", { status: 200, headers: { "content-type": "text/html" } });
+  });
+
+  assert.equal(result.event.title, "Undated Meetup");
+  assert.equal(result.event.date, "");
+  assert.equal(result.event.time, "");
+  assert.deepEqual(result.missingFields, ["date", "time"]);
 });

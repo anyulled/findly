@@ -9,6 +9,7 @@ import type { SocialNetwork } from "@/lib/social-validation";
 import { validatePost } from "@/lib/social-validation";
 import { bufferCredentialForAccount } from "@/lib/buffer-account-credentials";
 import { isSubstackUrl, unpackLocationAndImage } from "@/lib/substack";
+import { fetchOpenGraphImage } from "@/lib/opengraph";
 
 type DatabaseError = { message: string };
 type DatabaseResult<T> = { data: T | null; error: DatabaseError | null };
@@ -97,7 +98,11 @@ function isUncertain(error: unknown): boolean {
 }
 
 export class SupabasePostPublishingRepository implements PostPublishingRepository {
-  constructor(private readonly supabase: SupabasePublisherClient, private readonly ownerId: string) {}
+  constructor(
+    private readonly supabase: SupabasePublisherClient,
+    private readonly ownerId: string,
+    private readonly fetchImpl?: typeof fetch,
+  ) {}
 
   async claim(postId: string): Promise<PostToSchedule | null> {
     const { data, error } = await this.supabase.rpc("claim_post_for_scheduling", {
@@ -138,9 +143,10 @@ export class SupabasePostPublishingRepository implements PostPublishingRepositor
       .eq("owner_id", this.ownerId).eq("id", postRow.event_id).maybeSingle();
     if (!eventRow) return null;
     const unpacked = unpackLocationAndImage(eventRow.location);
+    const resolvedImage = unpacked.imageUrl ?? (await fetchOpenGraphImage(eventRow.event_url, this.fetchImpl));
     return {
       eventUrl: eventRow.event_url,
-      imageUrl: unpacked.imageUrl ?? null,
+      imageUrl: resolvedImage ?? null,
     };
   }
 
@@ -272,7 +278,7 @@ export async function schedulePostWithSupabase(
   ownerId: string,
   fetchImpl?: typeof fetch,
 ): Promise<PostPublishingOutcome> {
-  const repository = new SupabasePostPublishingRepository(supabase as SupabasePublisherClient, ownerId);
+  const repository = new SupabasePostPublishingRepository(supabase as SupabasePublisherClient, ownerId, fetchImpl);
   return schedulePostWithBuffer(postId, repository, async (accountId) => {
     const name = await repository.accountName(accountId);
     if (!name) throw new Error("No se encontró la cuenta asociada a la publicación.");

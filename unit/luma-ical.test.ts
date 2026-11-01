@@ -104,4 +104,9 @@ describe("Luma iCalendar parsing", () => {
   it("rejects data that is not an iCalendar VCALENDAR", () => {
     assert.throws(() => parseLumaIcal("BEGIN:VCARD\r\nVERSION:4.0\r\nEND:VCARD\r\n"), IcalParseError);
   });
+
+  it("extracts the Luma event URL from DESCRIPTION when URL property is omitted", () => {
+    const result = parseLumaIcal(`BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:desc-url-event\r\nDTSTART:20261205T180000Z\r\nSUMMARY:Java 27 Event\r\nDESCRIPTION:Get up-to-date information at: https://luma.com/24y588h8\\n\\nJoin us!\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n`);
+    assert.equal(result.events[0]?.url, "https://luma.com/24y588h8");
+  });
 });

@@ -271,3 +271,70 @@ test("Substack posts use addToQueue mode and include the extracted cover image",
     },
   ]);
 });
+
+test("Luma and external events without a pre-stored cover image extract OpenGraph thumbnail before scheduling in Buffer", async () => {
+  process.env.BUFFER_API_KEY_PERSONAL = "mock-buffer-key";
+  let bufferInput: Record<string, unknown> | undefined;
+  const supabase = {
+    from: (table: string) => ({
+      select: () => ({
+        eq: () => ({
+          eq: () => ({
+            eq: () => ({ maybeSingle: async () => ({ data: { buffer_channel_id: "buffer-channel-luma" }, error: null }) }),
+            maybeSingle: async () => {
+              if (table === "accounts") return { data: { name: "Personal" }, error: null };
+              if (table === "posts") return { data: { event_id: "event-luma-1" }, error: null };
+              if (table === "events") return { data: { event_url: "https://lu.ma/java-27", location: "Barcelona, Spain" }, error: null };
+              return { data: null, error: null };
+            },
+          }),
+        }),
+      }),
+    }),
+    rpc: (name: string) => {
+      const execute = async () => {
+        if (name === "claim_post_for_scheduling") return { data: { ...post, attempt_id: "attempt-og-1" }, error: null };
+        return { data: null, error: null };
+      };
+      return {
+        maybeSingle: execute,
+        then: (resolve: (value: Awaited<ReturnType<typeof execute>>) => unknown) => execute().then(resolve),
+      };
+    },
+  };
+
+  const result = await schedulePostWithSupabase(
+    post.id,
+    supabase,
+    "owner-uuid",
+    async (input, init) => {
+      const url = String(input);
+      if (url === "https://lu.ma/java-27") {
+        return new Response(
+          `<html><head><meta property="og:image" content="https://images.lumacdn.com/java-27-og.jpg" /></head></html>`,
+          { status: 200, headers: { "content-type": "text/html" } },
+        );
+      }
+      const parsed = JSON.parse(String(init?.body)) as { variables: { input: Record<string, unknown> } };
+      bufferInput = parsed.variables.input;
+      return bufferResponse({
+        data: {
+          createPost: {
+            __typename: "PostActionSuccess",
+            post: { id: "luma-buf-1", text: post.content },
+          },
+        },
+      });
+    },
+  );
+
+  assert.equal(result.kind, "scheduled");
+  assert.deepEqual(bufferInput?.assets, [
+    {
+      image: {
+        url: "https://images.lumacdn.com/java-27-og.jpg",
+        thumbnailUrl: "https://images.lumacdn.com/java-27-og.jpg",
+      },
+    },
+  ]);
+});

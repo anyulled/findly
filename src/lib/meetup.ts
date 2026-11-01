@@ -1,12 +1,13 @@
 import { parseLumaIcal } from "./luma-ical";
 import { madridDateTimeToIso } from "./madrid-time";
+import { extractImageFromHtml } from "./opengraph";
 
 export type MeetupEventItem = {
   uid: string;
   title: string;
   description: string;
   url: string;
-  startsAt: string;
+  startsAt: string | null;
   location: string;
   coverImage: string | null;
 };
@@ -124,19 +125,15 @@ function resolveRssUid(guid: string, link: string): string {
   return idMatch?.[1] ? `event_${idMatch[1]}@meetup.com` : (guid || link);
 }
 
-function resolveFallbackStartsAt(rawDescription: string, pubDateRaw: string): string {
+function resolveFallbackStartsAt(rawDescription: string): string | null {
   const dateInText = extractDateFromText(rawDescription);
   const timeInText = extractTimeFromText(rawDescription) ?? "18:30";
   if (dateInText) {
     try {
       return madridDateTimeToIso(dateInText, timeInText);
-    } catch { /* Fall back to pubDate */ }
+    } catch { /* Ignore invalid date in description */ }
   }
-  if (pubDateRaw) {
-    const parsed = new Date(pubDateRaw);
-    if (Number.isFinite(parsed.getTime())) return parsed.toISOString();
-  }
-  return new Date().toISOString();
+  return null;
 }
 
 export function parseMeetupRssFeed(rawXml: string, baseUrl: string): MeetupEventItem[] {
@@ -149,13 +146,12 @@ export function parseMeetupRssFeed(rawXml: string, baseUrl: string): MeetupEvent
     const rawDescription = extractXmlTag(block, "description");
     const link = decodeEntities(extractXmlTag(block, "link")) || origin;
     const guid = decodeEntities(extractXmlTag(block, "guid")) || link;
-    const pubDate = extractXmlTag(block, "pubDate");
     items.push({
       uid: resolveRssUid(guid, link),
       title,
       description: cleanMeetupDescription(rawDescription),
       url: link,
-      startsAt: resolveFallbackStartsAt(rawDescription, pubDate),
+      startsAt: resolveFallbackStartsAt(rawDescription),
       location: extractLocationFromText(rawDescription),
       coverImage: null,
     });
@@ -178,7 +174,8 @@ function extractLdJsonImage(imageValue: unknown): string | undefined {
   return images.find((img): img is string => typeof img === "string" && /^https:\/\//iu.test(img.trim()));
 }
 
-function parseEventPageLdJson(html: string): { startsAt?: string; location?: string; coverImage?: string } {
+function parseEventPageLdJson(html: string, pageUrl?: string): { startsAt?: string; location?: string; coverImage?: string } {
+  const fallbackImage = extractImageFromHtml(html, pageUrl) ?? undefined;
   for (const match of html.matchAll(/<script\b[^>]*type\s*=\s*["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/giu)) {
     try {
       const parsed: unknown = JSON.parse(match[1]);
@@ -191,11 +188,11 @@ function parseEventPageLdJson(html: string): { startsAt?: string; location?: str
       return {
         startsAt,
         location: extractLdJsonLocation(obj.location),
-        coverImage: extractLdJsonImage(obj.image),
+        coverImage: extractLdJsonImage(obj.image) ?? fallbackImage,
       };
     } catch { /* Continue checking other scripts */ }
   }
-  return {};
+  return { coverImage: fallbackImage };
 }
 
 export async function enrichMeetupRssItems(
@@ -227,7 +224,7 @@ export async function enrichMeetupRssItems(
           headers: { accept: "text/html,application/xhtml+xml" },
           signal: AbortSignal.timeout(8_000),
         });
-        if (pageRes.ok) pageMeta = parseEventPageLdJson(await pageRes.text());
+        if (pageRes.ok) pageMeta = parseEventPageLdJson(await pageRes.text(), item.url);
       } catch { /* Optional page enrichment */ }
     }
     return {

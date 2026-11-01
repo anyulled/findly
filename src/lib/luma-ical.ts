@@ -178,7 +178,10 @@ function textValue(event: ICAL.Component, propertyName: string): string {
 
 function urlValue(event: ICAL.Component): string | null {
   const value = event.getFirstPropertyValue("url");
-  return typeof value === "string" ? value.trim() || null : null;
+  if (typeof value === "string" && value.trim()) return value.trim();
+  const description = textValue(event, "description");
+  const match = /https:\/\/(?:lu\.ma|luma\.com)\/(?!join\b)[a-z0-9._-]+/iu.exec(description);
+  return match?.[0] ?? null;
 }
 
 /** Parse VEVENT records into Findly's fields without fetching the feed. */

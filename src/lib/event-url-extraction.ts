@@ -1,6 +1,7 @@
 import { formatMadridDateTime } from "@/lib/madrid-time";
 import { isSubstackUrl, normalizeSubstackPostsApiUrl, parseSubstackFeed } from "@/lib/substack";
 import { enrichMeetupRssItems, isMeetupUrl, parseMeetupRssFeed } from "@/lib/meetup";
+import { extractImageFromHtml } from "@/lib/opengraph";
 
 const MAX_HTML_BYTES = 1_000_000;
 const MAX_REDIRECTS = 3;
@@ -205,9 +206,8 @@ function resolveDescription(structured: Record<string, unknown> | undefined, met
   return cleanText(meta["og:description"] || meta.description || meta["twitter:description"]);
 }
 
-function resolveImage(meta: Record<string, string>): string | undefined {
-  const candidate = (meta["og:image"] || meta["twitter:image"] || "").trim();
-  return /^https:\/\//iu.test(candidate) ? candidate : undefined;
+function resolveImage(html: string, pageUrl: string): string | undefined {
+  return extractImageFromHtml(html, pageUrl) ?? undefined;
 }
 
 export function parseEventPage(html: string, pageUrl: string): EventPageExtraction {
@@ -219,7 +219,7 @@ export function parseEventPage(html: string, pageUrl: string): EventPageExtracti
   const dateTime = resolveDateTime(structured, meta, html);
   const place = resolvePlace(structured, meta, html);
   const description = resolveDescription(structured, meta);
-  const imageUrl = resolveImage(meta);
+  const imageUrl = resolveImage(html, pageUrl);
   const url = new URL(pageUrl);
   const event: EventPageDetails = {
     title,
@@ -300,19 +300,33 @@ async function readHtml(response: Response): Promise<string> {
   return output + decoder.decode();
 }
 
+function pickNextMeetupItem(items: Awaited<ReturnType<typeof enrichMeetupRssItems>>, nowMs = Date.now()) {
+  const candidates = items.filter((item) => {
+    if (!item.startsAt) return true;
+    const ms = new Date(item.startsAt).getTime();
+    return Number.isFinite(ms) && ms > nowMs;
+  });
+  candidates.sort((a, b) => {
+    const aMs = a.startsAt ? new Date(a.startsAt).getTime() : Number.POSITIVE_INFINITY;
+    const bMs = b.startsAt ? new Date(b.startsAt).getTime() : Number.POSITIVE_INFINITY;
+    return aMs - bMs;
+  });
+  return candidates[0] ?? null;
+}
+
 async function parseMeetupFeedExtraction(rawContent: string, feedUrl: string, fetchImpl: typeof fetch): Promise<EventPageExtraction> {
   const items = await enrichMeetupRssItems(parseMeetupRssFeed(rawContent, feedUrl), feedUrl, fetchImpl);
-  const latest = items[0];
-  if (!latest) throw new EventUrlExtractionError("No se encontraron eventos activos en ese feed de Meetup.");
-  const scheduled = formatMadridDateTime(latest.startsAt);
+  const nextItem = pickNextMeetupItem(items);
+  if (!nextItem) throw new EventUrlExtractionError("No se encontraron eventos activos en ese feed de Meetup.");
+  const scheduled = nextItem.startsAt ? formatMadridDateTime(new Date(nextItem.startsAt)) : null;
   const event: EventPageDetails = {
-    title: latest.title,
-    date: scheduled.date,
-    time: scheduled.time,
-    place: latest.location,
-    description: latest.description,
-    url: latest.url,
-    ...(latest.coverImage ? { imageUrl: latest.coverImage } : {}),
+    title: nextItem.title,
+    date: scheduled?.date ?? "",
+    time: scheduled?.time ?? "",
+    place: nextItem.location,
+    description: nextItem.description,
+    url: nextItem.url,
+    ...(nextItem.coverImage ? { imageUrl: nextItem.coverImage } : {}),
   };
   return {
     event,
