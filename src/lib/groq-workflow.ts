@@ -40,6 +40,7 @@ export type GeneratedReviewDraft = {
   status: "review";
   leadDays: 14 | 7 | 1;
   language: PostLanguage;
+  isFallback?: boolean;
 };
 
 export type ExistingReminder = {
@@ -55,7 +56,7 @@ type GenerateEventDraftsInput = {
   existing: ExistingReminder[];
   now?: Date;
   slotByAccountNetwork?: Record<string, { date: string; time: string }>;
-  generate: (input: PostGenerationInput) => Promise<GeneratedPost | { text: string }>;
+  generate: (input: PostGenerationInput) => Promise<GeneratedPost | { text: string; model?: string }>;
 };
 
 function dateMinusDays(date: string, days: number): string {
@@ -165,6 +166,7 @@ export async function generateEventDrafts({
       status: "review" as const,
       leadDays,
       language,
+      ...("model" in generated && generated.model === "fallback" ? { isFallback: true } : {}),
     };
   });
 }

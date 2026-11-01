@@ -245,6 +245,9 @@ function Dashboard() {
     if (persistent) {
       if (next.status === "approved") {
         const outcome = await approvePost(post.id, content);
+        if (outcome.kind === "error") {
+          throw new Error(outcome.message);
+        }
         if (outcome.kind === "not_claimed") {
           await refreshWorkspaceAfterSync();
           setFeedback("No se pudo reservar la publicación. Revisa su estado y la cuenta asociada a la fuente.");
@@ -450,6 +453,10 @@ function Dashboard() {
   async function retryPost(post: Post) {
     try {
       const outcome = await retryFailedPost(post.id);
+      if (outcome.kind === "error") {
+        setFeedback(outcome.message);
+        return;
+      }
       if (outcome.kind === "not_claimed") {
         await refreshWorkspaceAfterSync();
         setSelected(null);

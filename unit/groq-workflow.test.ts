@@ -144,4 +144,21 @@ describe("generateEventDrafts", () => {
       ],
     );
   });
+
+  it("marks fallback drafts with isFallback when model is fallback", async () => {
+    const drafts = await generateEventDrafts({
+      event: { ...event, date: "2026-12-12" },
+      accounts: [accounts[0]],
+      approvedExamples: [],
+      existing: [],
+      now: new Date("2026-12-05T13:00:00.000Z"),
+      generate: async (input) => ({
+        text: "fallback text",
+        model: input.network === "X" ? "fallback" : "llama-3.3-70b",
+      }),
+    });
+
+    assert.equal(drafts.find((d) => d.network === "X")?.isFallback, true);
+    assert.equal(drafts.find((d) => d.network === "LinkedIn")?.isFallback, undefined);
+  });
 });

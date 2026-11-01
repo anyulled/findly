@@ -108,7 +108,7 @@ export async function generateLumaEventDrafts(
       due_at: madridDateTimeToIso(draft.date, draft.time),
       timezone: "Europe/Madrid",
       content: draft.text,
-      status: publishingMode === "automatic" ? "approved" : "review",
+      status: publishingMode === "automatic" && !draft.isFallback ? "approved" : "review",
       language: draft.language,
     };
   });
