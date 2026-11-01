@@ -270,6 +270,13 @@ export async function deleteSource(sourceId: string): Promise<void> {
   if (error || !data) throw new Error("No se pudo eliminar la fuente.");
 }
 
+export async function deleteEvent(eventId: string): Promise<void> {
+  const { supabase, ownerId } = await authorizedClient();
+  if (!/^[0-9a-f-]{36}$/i.test(eventId)) throw new Error("El evento no es válido.");
+  const { data, error } = await supabase.from("events").delete().eq("id", eventId).eq("owner_id", ownerId).select("id").single();
+  if (error || !data) throw new Error("No se pudo eliminar el evento.");
+}
+
 export async function createEvent(input: Omit<EventView, "id">): Promise<EventView> {
   const { supabase, ownerId } = await authorizedClient();
   const title = input.title.trim();

@@ -5,7 +5,7 @@ import styles from "./page.module.css";
 import { validatePost } from "@/lib/social-validation";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import { detectTitleLanguage, type PostLanguage } from "@/lib/language";
-import { approvePost, confirmPostMissingFromBuffer, createEvent, generateReviewPosts, loadWorkspace, reconcileScheduledPost, retryFailedPost, saveBufferChannel, updateAccountVoice, updatePostContent, updatePublishingMode, type SourceView, type UserProfile } from "./workspace-actions";
+import { approvePost, confirmPostMissingFromBuffer, createEvent, deleteEvent, generateReviewPosts, loadWorkspace, reconcileScheduledPost, retryFailedPost, saveBufferChannel, updateAccountVoice, updatePostContent, updatePublishingMode, type SourceView, type UserProfile } from "./workspace-actions";
 import { SourceSettings } from "./source-settings";
 import Image from "next/image";
 import { sourceForEventUrl } from "@/lib/event-source";
@@ -39,12 +39,7 @@ function matchesAccount(a: Account, target: Account): boolean {
   return target.id ? a.id === target.id : a.name === target.name;
 }
 
-const initialEvents: EventItem[] = [
-  { id: "evt-1", title: "BarcelonaJS · Holiday Meetup", date: "2026-12-10", time: "19:00", place: "Barcelona", description: "Una tarde para compartir charlas cortas, conocer a la comunidad y cerrar el año con JavaScript.", source: "Luma" },
-  { id: "evt-2", title: "DevBcn Community Night", date: "2026-11-19", time: "18:30", place: "Barcelona", description: "Nos reunimos para hablar de tecnología, conectar con otros profesionales y compartir ideas.", source: "Meetup" },
-  { id: "evt-3", title: "AI Builders: From idea to product", date: "2026-11-27", time: "18:00", place: "Barcelona", description: "Tres equipos presentan lo que han construido. Demos, conversación y comunidad.", source: "Luma" },
-  { id: "evt-4", title: "Frontend friends coffee", date: "2026-11-06", time: "09:30", place: "Barcelona", description: "Café informal para charlar de frontend y conocer a más gente de la ciudad.", source: "Manual" },
-];
+const initialEvents: EventItem[] = [];
 
 function dateAt(date: string) { const [y, m, d] = date.split("-").map(Number); return new Date(y, m - 1, d); }
 function dayKey(d: Date) { return [d.getFullYear(), String(d.getMonth() + 1).padStart(2, "0"), String(d.getDate()).padStart(2, "0")].join("-"); }
@@ -87,7 +82,7 @@ function starterPosts(events: EventItem[], targetAccounts: Account[] = accounts)
     status: "review" as Status,
     };}))))
 }
-const initialPosts = starterPosts(initialEvents);
+const initialPosts: Post[] = [];
 
 function Dashboard() {
   const [tab, setTab] = useState("Calendario");
@@ -157,7 +152,18 @@ function Dashboard() {
     }
     const saved = localStorage.getItem("findly-state-v1");
     if (saved) {
-      try { const value = JSON.parse(saved); setEvents(value.events ?? initialEvents); setPosts(value.posts ?? initialPosts); setMode(value.mode ?? "review"); setAccountList(value.accounts ?? accounts); setSources(value.sources ?? []); if (value.profile) setProfile(value.profile); }
+      try {
+        const value = JSON.parse(saved);
+        const legacyMockIds = new Set(["evt-1", "evt-2", "evt-3", "evt-4"]);
+        const cleanedEvents: EventItem[] = (value.events ?? initialEvents).filter((e: EventItem) => !legacyMockIds.has(e.id));
+        const cleanedPosts: Post[] = (value.posts ?? initialPosts).filter((p: Post) => !legacyMockIds.has(p.eventId));
+        setEvents(cleanedEvents);
+        setPosts(cleanedPosts);
+        setMode(value.mode ?? "review");
+        setAccountList(value.accounts ?? accounts);
+        setSources(value.sources ?? []);
+        if (value.profile) setProfile(value.profile);
+      }
       catch { localStorage.removeItem("findly-state-v1"); }
     }
     setHydrated(true);
@@ -394,6 +400,17 @@ function Dashboard() {
     }
   }
 
+  async function removeEvent(eventId: string) {
+    try {
+      if (persistent) await deleteEvent(eventId);
+      setEvents((all) => all.filter((e) => e.id !== eventId));
+      setPosts((all) => all.filter((p) => p.eventId !== eventId));
+      setFeedback("");
+    } catch (error) {
+      setFeedback(error instanceof Error ? error.message : "No se pudo eliminar el evento.");
+    }
+  }
+
   const side = ["Calendario", "Eventos", "Cuentas", "Ajustes"];
   const currentEvent = selected ? events.find((event) => event.id === selected.eventId) : null;
   const postValidation = selected ? validatePost(selected.network, editing) : null;
@@ -443,7 +460,7 @@ function Dashboard() {
           <div className={styles.legend}><span><i className={styles.legendReview}/> Revisión pendiente</span><span><i className={styles.legendApproved}/> Aprobada</span><span><i className={styles.legendScheduled}/> Programada</span><span className={styles.legendCount}>{posts.filter((p) => p.status === "review").length} pendientes de revisión</span></div>
         </>}
 
-        {tab === "Eventos" && <><div className={styles.pageHeading}><div><div className={styles.eyebrow}>EVENTOS DETECTADOS Y MANUALES</div><h1>Eventos</h1><p>Gestiona los eventos y las publicaciones que generan.</p></div><button className={styles.addButton} onClick={openAddForm}>＋ Añadir evento</button></div><div className={styles.eventsList}>{events.map((event) => { const eventPosts = posts.filter((post) => post.eventId === event.id); const links = sources.flatMap((source) => source.accountIds.map((accountId) => ({ sourceId: source.id, accountId }))); const eligibleAccounts = selectEventAccounts(accountList, event.sourceId, links); const missing = hasMissingReminders(eligibleAccounts, scheduleDates(event.date).map(({ leadDays }) => leadDays), eventPosts); return <article key={event.id} className={styles.eventCard}><div className={styles.eventDate}><b>{dateAt(event.date).toLocaleDateString("es-ES", { day: "2-digit" })}</b><span>{dateAt(event.date).toLocaleDateString("es-ES", { month: "short" })}</span></div><div className={styles.eventInfo}><div className={styles.eventMeta}><span className={styles.sourceTag}>{event.source}</span><span>{event.time} · {event.place}</span></div><h3>{event.title}</h3><p>{event.description}</p><div className={styles.eventFoot}>{eventPosts.length} publicaciones previstas {persistent && missing && <button className={styles.morePosts} onClick={() => { void retryDrafts(event); }}>Completar recordatorios</button>} <a href={event.url ?? (event.source === "Luma" ? "https://lu.ma" : event.source === "Meetup" ? "https://meetup.com" : "#")} target={event.url ? "_blank" : undefined} rel="noreferrer">{event.source === "Manual" ? "Añadido manualmente" : "Abrir evento ↗"}</a></div></div><button className={styles.iconAction} onClick={() => { setNewEvent({ title: event.title, date: event.date, time: event.time, place: event.place, description: event.description, source: event.source }); setSourceUrl(event.url ?? ""); openAddForm(); }}>···</button></article>; })}</div></>}
+        {tab === "Eventos" && <><div className={styles.pageHeading}><div><div className={styles.eyebrow}>EVENTOS DETECTADOS Y MANUALES</div><h1>Eventos</h1><p>Gestiona los eventos y las publicaciones que generan.</p></div><button className={styles.addButton} onClick={openAddForm}>＋ Añadir evento</button></div>{events.length === 0 ? <p className={styles.emptyNotice}>Aún no hay eventos registrados.</p> : <div className={styles.eventsList}>{events.map((event) => { const eventPosts = posts.filter((post) => post.eventId === event.id); const links = sources.flatMap((source) => source.accountIds.map((accountId) => ({ sourceId: source.id, accountId }))); const eligibleAccounts = selectEventAccounts(accountList, event.sourceId, links); const missing = hasMissingReminders(eligibleAccounts, scheduleDates(event.date).map(({ leadDays }) => leadDays), eventPosts); return <article key={event.id} className={styles.eventCard}><div className={styles.eventDate}><b>{dateAt(event.date).toLocaleDateString("es-ES", { day: "2-digit" })}</b><span>{dateAt(event.date).toLocaleDateString("es-ES", { month: "short" })}</span></div><div className={styles.eventInfo}><div className={styles.eventMeta}><span className={styles.sourceTag}>{event.source}</span><span>{event.time} · {event.place}</span></div><h3>{event.title}</h3><p>{event.description}</p><div className={styles.eventFoot}>{eventPosts.length} publicaciones previstas {persistent && missing && <button className={styles.morePosts} onClick={() => { void retryDrafts(event); }}>Completar recordatorios</button>} <a href={event.url ?? (event.source === "Luma" ? "https://lu.ma" : event.source === "Meetup" ? "https://meetup.com" : "#")} target={event.url ? "_blank" : undefined} rel="noreferrer">{event.source === "Manual" ? "Añadido manualmente" : "Abrir evento ↗"}</a></div></div><div className={styles.eventActions}><button type="button" className={styles.secondaryButton} onClick={() => { void removeEvent(event.id); }} aria-label={`Eliminar evento ${event.title}`}>Eliminar</button></div></article>; })}</div>}</>}
 
         {tab === "Cuentas" && <><div className={styles.pageHeading}><div><div className={styles.eyebrow}>CANALES Y VOZ DE MARCA</div><h1>Tus cuentas</h1><p>Cada cuenta tiene una voz propia para tus publicaciones.</p></div></div><div className={styles.accountsGrid}>{accountList.map((account) => <article className={styles.accountCard} key={account.id ?? account.name}><div className={`${styles.accountTop}`}><Image className={styles.accountLogo} src={account.logo} alt={`Logo de ${account.name}`} width={38} height={38}/><div><b>{account.name}</b><small>{account.kind}</small></div><span className={styles.connected}>{persistent ? "● Supabase" : "● Demo"}</span></div><div className={styles.keyStatus}>{account.bufferApiKeyConfigured ? "API key configurada" : `Falta ${account.bufferApiKeyEnv}`}</div><div className={styles.accountNetworks}>{account.networks.map((network) => <span key={network}>{network === "LinkedIn" ? "in" : network === "X" ? "𝕏" : "◉"} &nbsp;{network}</span>)}</div><div className={styles.bufferChannels}><h4>CANALES DE BUFFER</h4><p>Introduce el ID del canal de Buffer conectado a cada red.</p>{account.networks.map((network) => <label key={network}><span>{network}</span><input aria-label={`ID de canal de Buffer ${network} para ${account.name}`} value={account.bufferChannels?.[network] ?? ""} disabled={!persistent} onChange={(event) => setAccountList((all) => all.map((item) => matchesAccount(item, account) ? { ...item, bufferChannels: { ...item.bufferChannels, [network]: event.target.value } } : item))} onBlur={(event) => { void changeBufferChannel(account, network, event.currentTarget.value); }} placeholder="ID del canal"/></label>)}</div><label>VOZ Y TONO<textarea value={account.prompt} onChange={(e) => setAccountList((all) => all.map((item) => matchesAccount(item, account) ? { ...item, prompt: e.target.value } : item))} onBlur={(e) => { void changeVoice(account, e.currentTarget.value); }} rows={3}/></label><div className={styles.exampleBox}><span>✦</span><div><b>{account.styleExampleCount ?? posts.filter((p) => p.account === account.name && p.status === "approved").length} ejemplos aprobados</b><small>Las publicaciones aprobadas ayudan a mantener tu estilo.</small></div></div></article>)}</div></>}
 

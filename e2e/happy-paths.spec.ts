@@ -201,3 +201,16 @@ test("active sends cannot be confirmed missing, while settled uncertain sends ca
   await expect(page.getByRole("checkbox", { name: /He revisado el canal/ })).toBeVisible();
   await expect(page.getByRole("button", { name: "Confirmar ausencia y permitir reintento" })).toBeDisabled();
 });
+
+test("deletes an event from the events list", async ({ page }) => {
+  await page.getByRole("button", { name: "Añadir evento" }).first().click();
+  await page.getByLabel("TÍTULO").fill("Temporary Event to Delete");
+  await page.getByLabel("FECHA").fill("2026-12-15");
+  await page.getByLabel("HORA").fill("10:00");
+  await page.getByRole("button", { name: "Crear evento" }).click();
+
+  await expect(page.getByRole("heading", { name: "Temporary Event to Delete" })).toBeVisible();
+  const eventCard = page.getByRole("article").filter({ hasText: "Temporary Event to Delete" });
+  await eventCard.getByRole("button", { name: /Eliminar evento/ }).click();
+  await expect(page.getByRole("heading", { name: "Temporary Event to Delete" })).toHaveCount(0);
+});
