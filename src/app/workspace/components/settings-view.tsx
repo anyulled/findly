@@ -37,7 +37,11 @@ export function SettingsView({
         ? "Claves configuradas"
         : "Configura las tres API keys de Buffer",
     ],
-    ["Groq", "Redacción de borradores", "Requiere GROQ_API_KEY y GROQ_MODEL"],
+    [
+      "Groq & OpenAI",
+      "Redacción de borradores (con fallback)",
+      "Usa GROQ_API_KEY (primario) y OPENAI_API_KEY (fallback)",
+    ],
     [
       "Fuentes (Luma / Meetup / Substack)",
       "Detección de eventos y artículos",
