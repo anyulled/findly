@@ -159,6 +159,35 @@ function validDateTime(parts: LocalDateTime): boolean {
     && parts.minute >= 0 && parts.minute <= 59 && parts.second >= 0 && parts.second <= 59;
 }
 
+function rawStartValues(input: string): Array<string | null> {
+  const lines = input.replace(/\r?\n[ \t]/g, "").split(/\r?\n/);
+  const values: Array<string | null> = [];
+  let inEvent = false;
+  for (const line of lines) {
+    if (/^BEGIN:VEVENT\s*$/i.test(line)) {
+      inEvent = true;
+      values.push(null);
+    } else if (/^END:VEVENT\s*$/i.test(line)) {
+      inEvent = false;
+    } else if (inEvent && /^DTSTART(?:;[^:]*)?:(.*)$/i.test(line)) {
+      values[values.length - 1] = line.slice(line.indexOf(":") + 1);
+    }
+  }
+  return values;
+}
+
+function validateRawStart(value: string | null): void {
+  if (value === null) return;
+  const dateTime = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z?$/i.exec(value);
+  const date = /^(\d{4})(\d{2})(\d{2})$/.exec(value);
+  const match = dateTime ?? date;
+  if (!match) throw new IcalParseError("DTSTART contiene una fecha u hora no válida.");
+  const [, year, month, day, hour = "0", minute = "0", second = "0"] = match;
+  if (!validDateTime({ year: Number(year), month: Number(month), day: Number(day), hour: Number(hour), minute: Number(minute), second: Number(second) })) {
+    throw new IcalParseError("DTSTART contiene una fecha u hora no válida.");
+  }
+}
+
 function textValue(event: ICAL.Component, propertyName: string): string {
   const value = event.getFirstPropertyValue(propertyName);
   return typeof value === "string" ? value.trim() : "";
@@ -183,17 +212,24 @@ export function parseLumaIcal(input: string): LumaCalendarParseResult {
 
   const events: LumaCalendarEvent[] = [];
   const issues: CalendarParseIssue[] = [];
-  for (const component of calendar.getAllSubcomponents("vevent")) {
-    const uid = textValue(component, "uid");
-    const title = textValue(component, "summary");
-    const startProperty = component.getFirstProperty("dtstart");
-    const start = component.getFirstPropertyValue("dtstart");
-    if (!uid || !title || !(start instanceof ICAL.Time)) {
-      issues.push({ uid: uid || null, message: "Se omite el evento porque falta UID, SUMMARY o DTSTART." });
-      continue;
-    }
-
+  const components = calendar.getAllSubcomponents("vevent");
+  const starts = rawStartValues(input);
+  for (const [index, component] of components.entries()) {
+    let uid: string | null = null;
     try {
+      uid = textValue(component, "uid") || null;
+      const title = textValue(component, "summary");
+      const startProperty = component.getFirstProperty("dtstart");
+      if (!uid || !title || !startProperty) {
+        issues.push({ uid, message: "Se omite el evento porque falta UID, SUMMARY o DTSTART." });
+        continue;
+      }
+      validateRawStart(starts[index] ?? null);
+      const start = component.getFirstPropertyValue("dtstart");
+      if (!(start instanceof ICAL.Time)) {
+        issues.push({ uid, message: "Se omite el evento porque falta UID, SUMMARY o DTSTART." });
+        continue;
+      }
       const instant = eventInstant(calendar, startProperty!, start);
       const madrid = formatMadridDateTime(instant);
       events.push({

@@ -72,6 +72,19 @@ describe("Luma iCalendar parsing", () => {
     assert.deepEqual(result.issues, [{ uid: "missing-start", message: "Se omite el evento porque falta UID, SUMMARY o DTSTART." }]);
   });
 
+  it("isolates malformed and impossible DTSTART values without losing valid events", () => {
+    const result = parseLumaIcal(`BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:valid\r\nDTSTART:20261205T180000Z\r\nSUMMARY:Good event\r\nEND:VEVENT\r\nBEGIN:VEVENT\r\nUID:garbage\r\nDTSTART:garbage\r\nSUMMARY:Bad event\r\nEND:VEVENT\r\nBEGIN:VEVENT\r\nUID:impossible-day\r\nDTSTART:20260231T180000Z\r\nSUMMARY:Bad date\r\nEND:VEVENT\r\nBEGIN:VEVENT\r\nUID:impossible-time\r\nDTSTART:20261399T999999Z\r\nSUMMARY:Bad time\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n`);
+    assert.deepEqual(result.events.map(({ uid }) => uid), ["valid"]);
+    assert.deepEqual(result.issues.map(({ uid }) => uid), ["garbage", "impossible-day", "impossible-time"]);
+    assert.ok(result.issues.every(({ message }) => message === "DTSTART contiene una fecha u hora no válida."));
+  });
+
+  it("isolates a DTSTART decoding error when the feed contains other events", () => {
+    const result = parseLumaIcal(`BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:broken\r\nDTSTART:garbage\r\nSUMMARY:Broken start\r\nEND:VEVENT\r\nBEGIN:VEVENT\r\nUID:valid\r\nDTSTART:20261205T180000Z\r\nSUMMARY:Good event\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n`);
+    assert.deepEqual(result.events.map(({ uid }) => uid), ["valid"]);
+    assert.deepEqual(result.issues.map(({ uid }) => uid), ["broken"]);
+  });
+
   it("rejects data that is not an iCalendar VCALENDAR", () => {
     assert.throws(() => parseLumaIcal("BEGIN:VCARD\r\nVERSION:4.0\r\nEND:VCARD\r\n"), IcalParseError);
   });
