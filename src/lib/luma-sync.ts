@@ -1,6 +1,7 @@
 import { detectTitleLanguage } from "./language";
 import { parseLumaIcal, type LumaCalendarEvent } from "./luma-ical";
 import type { ImportedLumaEvent } from "./luma-drafts";
+import { isSubstackUrl, normalizeSubstackPostsApiUrl, packLocationAndImage, parseSubstackFeed } from "./substack";
 
 export type LumaSource = { id: string; ownerId: string; name: string; feedUrl: string };
 export type PersistableEvent = {
@@ -21,6 +22,32 @@ export type SyncResult = {
   issues: Array<{ sourceId: string; eventId?: string; code: "feed_unavailable" | "invalid_calendar" | "database_error" | "draft_generation_failed"; skippedEvents?: number }>;
 };
 
+function parseSourceRows(source: LumaSource, rawContent: string): { rows: PersistableEvent[]; skippedEvents: number } {
+  if (isSubstackUrl(source.feedUrl)) {
+    const items = parseSubstackFeed(rawContent, source.feedUrl).slice(0, 5);
+    const rows = items.map((item): PersistableEvent => ({
+      owner_id: source.ownerId,
+      source_id: source.id,
+      external_id: item.uid,
+      title: item.title,
+      starts_at: item.publishedAt,
+      timezone: "Europe/Madrid",
+      location: packLocationAndImage("", item.coverImage),
+      description: item.description,
+      event_url: item.url,
+      detected_language: detectTitleLanguage(item.title),
+    }));
+    return { rows, skippedEvents: 0 };
+  }
+  const parsed = parseLumaIcal(rawContent);
+  const rows = parsed.events.map((event: LumaCalendarEvent): PersistableEvent => ({
+    owner_id: source.ownerId, source_id: source.id, external_id: event.uid, title: event.title,
+    starts_at: event.startsAt, timezone: "Europe/Madrid", location: event.location,
+    description: event.description, event_url: event.url, detected_language: detectTitleLanguage(event.title),
+  }));
+  return { rows, skippedEvents: parsed.issues.length };
+}
+
 export async function syncLumaSources(
   repository: SyncRepository,
   fetchFeed: FeedFetcher,
@@ -32,21 +59,17 @@ export async function syncLumaSources(
     draftsCreated: 0, draftEventsSkipped: 0, draftEventsFailed: 0, issues: [],
   };
   for (const source of sources) {
-    let parsed: ReturnType<typeof parseLumaIcal>;
+    let parsed: { rows: PersistableEvent[]; skippedEvents: number };
     try {
-      parsed = parseLumaIcal(await fetchFeed(source.feedUrl));
+      parsed = parseSourceRows(source, await fetchFeed(source.feedUrl));
       result.feedsSucceeded += 1;
     } catch (error) {
       result.feedsFailed += 1;
       result.issues.push({ sourceId: source.id, code: error instanceof IcalParseError ? "invalid_calendar" : "feed_unavailable" });
       continue;
     }
-    if (parsed.issues.length) result.issues.push({ sourceId: source.id, code: "invalid_calendar", skippedEvents: parsed.issues.length });
-    const rows = parsed.events.map((event: LumaCalendarEvent): PersistableEvent => ({
-      owner_id: source.ownerId, source_id: source.id, external_id: event.uid, title: event.title,
-      starts_at: event.startsAt, timezone: "Europe/Madrid", location: event.location,
-      description: event.description, event_url: event.url, detected_language: detectTitleLanguage(event.title),
-    }));
+    if (parsed.skippedEvents) result.issues.push({ sourceId: source.id, code: "invalid_calendar", skippedEvents: parsed.skippedEvents });
+    const rows = parsed.rows;
     if (!rows.length) continue;
     let persisted: { inserted: ImportedLumaEvent[]; available: ImportedLumaEvent[] };
     try {
@@ -100,15 +123,23 @@ async function readLimitedFeedBody(response: Response): Promise<string> {
   }
 }
 
-export async function fetchLumaFeed(url: string): Promise<string> {
+const PRIVATE_HOST_PATTERN = /^(?:localhost|.*\.localhost|.*\.local|::1|127\..*|10\..*|192\.168\..*|169\.254\..*|172\.(?:1[6-9]|2\d|3[01])\..*)$/iu;
+
+function resolvePublicFeedUrl(url: string): URL {
   let parsed: URL;
   try { parsed = new URL(url); } catch { throw new Error("Invalid feed URL"); }
   if (parsed.protocol !== "https:" || parsed.username || parsed.password) throw new Error("Feed URL must use HTTPS");
-  const host = parsed.hostname.toLowerCase();
-  if (host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local") || host === "::1" || /^127\./.test(host) || /^10\./.test(host) || /^192\.168\./.test(host) || /^169\.254\./.test(host) || /^172\.(1[6-9]|2\d|3[01])\./.test(host)) throw new Error("Private feed host is not allowed");
-  const response = await fetch(parsed, {
+  if (PRIVATE_HOST_PATTERN.test(parsed.hostname)) throw new Error("Private feed host is not allowed");
+  return isSubstackUrl(parsed.toString()) && /\/feed\/?$/iu.test(parsed.pathname)
+    ? new URL(normalizeSubstackPostsApiUrl(parsed.toString()))
+    : parsed;
+}
+
+export async function fetchLumaFeed(url: string): Promise<string> {
+  const targetUrl = resolvePublicFeedUrl(url);
+  const response = await fetch(targetUrl, {
     method: "GET", redirect: "error", signal: AbortSignal.timeout(FEED_TIMEOUT_MS),
-    headers: { accept: "text/calendar, text/plain;q=0.9" },
+    headers: { accept: "text/calendar, application/json, application/rss+xml, application/xml, text/xml, text/plain;q=0.9" },
   });
   if (!response.ok) throw new Error("Feed request failed");
   const declaredLength = Number(response.headers.get("content-length"));

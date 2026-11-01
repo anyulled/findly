@@ -35,6 +35,20 @@ test("validateSource accepts valid meetup source on meetup.com", () => {
   assert.deepEqual(result.accountIds, [validAccountId]);
 });
 
+test("validateSource accepts valid substack source", () => {
+  const input: SourceInput = {
+    name: "Etsi Deus Non Daretur",
+    type: "substack",
+    url: "https://etsideusnondaretur.substack.com/feed",
+    accountIds: [validAccountId],
+  };
+
+  const result = validateSource(input);
+  assert.equal(result.name, "Etsi Deus Non Daretur");
+  assert.equal(result.type, "substack");
+  assert.equal(result.url, "https://etsideusnondaretur.substack.com/feed");
+});
+
 test("validateSource rejects null, non-object or missing name/url/accountIds", () => {
   assert.throws(() => validateSource(null as unknown as SourceInput), /Los datos de la fuente no son válidos/);
   assert.throws(() => validateSource(undefined as unknown as SourceInput), /Los datos de la fuente no son válidos/);

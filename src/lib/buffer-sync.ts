@@ -44,6 +44,53 @@ export interface BufferPostView {
   language: PostLanguage;
 }
 
+export interface BufferPostingScheduleDay {
+  day: string;
+  times: string[];
+  paused: boolean;
+}
+
+export interface BufferSlot {
+  date: string;
+  time: string;
+}
+
+const WEEKDAY_CODES = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"] as const;
+
+export function computeNextSlotFromSchedule(
+  network: SocialNetwork,
+  schedule: BufferPostingScheduleDay[] | undefined,
+  occupiedSlots: Set<string>,
+  now: Date = new Date(),
+): BufferSlot {
+  const defaultTime = network === "X" ? "14:14" : "13:14";
+  const nowMadrid = formatMadridDateTime(now);
+  const [startYear, startMonth, startDay] = nowMadrid.date.split("-").map(Number);
+
+  for (let offset = 0; offset <= 30; offset += 1) {
+    const candidate = new Date(Date.UTC(startYear, startMonth - 1, startDay + offset, 12, 0, 0));
+    const date = candidate.toISOString().slice(0, 10);
+    const dayCode = WEEKDAY_CODES[candidate.getUTCDay()];
+    const dayEntry = schedule && schedule.length > 0
+      ? schedule.find((item) => item.day.toLowerCase().slice(0, 3) === dayCode)
+      : { day: dayCode, times: [defaultTime], paused: false };
+    if (!dayEntry || dayEntry.paused || dayEntry.times.length === 0) continue;
+
+    for (const rawTime of dayEntry.times) {
+      const time = rawTime.slice(0, 5);
+      if (offset === 0 && time <= nowMadrid.time) continue;
+      const key = `${date}T${time}`;
+      if (!occupiedSlots.has(key)) {
+        occupiedSlots.add(key);
+        return { date, time };
+      }
+    }
+  }
+
+  const fallback = new Date(Date.UTC(startYear, startMonth - 1, startDay + 1, 12, 0, 0)).toISOString().slice(0, 10);
+  return { date: fallback, time: defaultTime };
+}
+
 const BUFFER_API_URL = "https://api.buffer.com";
 
 export function mapServiceToNetwork(service: string): SocialNetwork | null {
@@ -85,7 +132,12 @@ interface AccountOrgData {
 }
 
 interface ChannelsData {
-  channels?: Array<{ id: string; name: string; service: string }>;
+  channels?: Array<{
+    id: string;
+    name: string;
+    service: string;
+    postingSchedule?: BufferPostingScheduleDay[];
+  }>;
 }
 
 interface PostsData {
@@ -241,4 +293,80 @@ export async function syncBufferScheduledPosts(
   }
 
   return resultPosts;
+}
+
+export async function fetchNextChannelSlotsForAccount(
+  apiKey: string | null | undefined,
+  networks: SocialNetwork[],
+  existingOccupiedByNetwork: Partial<Record<SocialNetwork, Set<string>>> = {},
+  fetchImpl: typeof fetch = fetch,
+  now: Date = new Date(),
+): Promise<Record<SocialNetwork, BufferSlot>> {
+  const schedulesByNetwork = new Map<SocialNetwork, BufferPostingScheduleDay[]>();
+  const occupiedByNetwork: Record<SocialNetwork, Set<string>> = {
+    LinkedIn: new Set(existingOccupiedByNetwork.LinkedIn ?? []),
+    X: new Set(existingOccupiedByNetwork.X ?? []),
+    Bluesky: new Set(existingOccupiedByNetwork.Bluesky ?? []),
+  };
+
+  if (apiKey?.trim()) {
+    const orgData = await queryBufferGraphql<AccountOrgData>(
+      apiKey,
+      "query { account { organizations { id name } } }",
+      undefined,
+      fetchImpl,
+    );
+    const orgId = orgData?.account?.organizations?.[0]?.id;
+    if (orgId) {
+      const channelsData = await queryBufferGraphql<ChannelsData>(
+        apiKey,
+        `query GetChannelsWithSchedule($input: ChannelsInput!) {
+          channels(input: $input) {
+            id
+            name
+            service
+            postingSchedule { day times paused }
+          }
+        }`,
+        { input: { organizationId: orgId } },
+        fetchImpl,
+      );
+      const channelNetworkMap = new Map<string, SocialNetwork>();
+      for (const chan of channelsData?.channels ?? []) {
+        const net = mapServiceToNetwork(chan.service);
+        if (!net) continue;
+        channelNetworkMap.set(chan.id, net);
+        if (chan.postingSchedule) schedulesByNetwork.set(net, chan.postingSchedule);
+      }
+
+      const postsData = await queryBufferGraphql<PostsData>(
+        apiKey,
+        `query GetScheduledPosts($input: PostsInput!) {
+          posts(first: 50, input: $input) {
+            edges { node { id text dueAt channelId status } }
+          }
+        }`,
+        { input: { organizationId: orgId, filter: { status: ["scheduled"] } } },
+        fetchImpl,
+      );
+      for (const edge of postsData?.posts?.edges ?? []) {
+        const node = edge.node;
+        const net = node?.channelId ? channelNetworkMap.get(node.channelId) : undefined;
+        if (!net || !node?.dueAt) continue;
+        const dt = formatMadridDateTime(node.dueAt);
+        occupiedByNetwork[net].add(`${dt.date}T${dt.time}`);
+      }
+    }
+  }
+
+  const result = {} as Record<SocialNetwork, BufferSlot>;
+  for (const network of networks) {
+    result[network] = computeNextSlotFromSchedule(
+      network,
+      schedulesByNetwork.get(network),
+      occupiedByNetwork[network],
+      now,
+    );
+  }
+  return result;
 }

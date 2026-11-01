@@ -14,7 +14,8 @@ import { sourceForEventUrl } from "@/lib/event-source";
 import { selectEventAccounts } from "@/lib/event-targets";
 import { extractUserProfile, type UserProfile } from "@/lib/user-profile";
 import { validateSource, type SourceInput, type SourceType } from "@/lib/source-validation";
-import { syncBufferScheduledPosts } from "@/lib/buffer-sync";
+import { fetchNextChannelSlotsForAccount, syncBufferScheduledPosts } from "@/lib/buffer-sync";
+import { isSubstackUrl, packLocationAndImage, unpackLocationAndImage } from "@/lib/substack";
 
 export type { UserProfile } from "@/lib/user-profile";
 export type { SourceInput, SourceType } from "@/lib/source-validation";
@@ -45,6 +46,7 @@ export type EventView = {
   source: string;
   sourceId?: string | null;
   url?: string;
+  imageUrl?: string;
   language?: PostLanguage;
 };
 
@@ -126,7 +128,7 @@ function sourceForUrl(value: string | null): string {
 }
 
 export async function loadWorkspace(): Promise<WorkspaceSnapshot> {
-  const { supabase, user } = await authorizedClient();
+  const { supabase, ownerId, user } = await authorizedClient();
   const bootstrapResult = await supabase.rpc("ensure_managed_accounts");
   if (bootstrapResult.error) throw new Error("No se pudieron preparar las cuentas iniciales.");
   const accountResult = await supabase.from("accounts").select("id,name,account_type,voice_prompt,networks,enabled").order("created_at");
@@ -155,16 +157,18 @@ export async function loadWorkspace(): Promise<WorkspaceSnapshot> {
 
   const events: EventView[] = (eventsResult.data ?? []).map((row) => {
     const scheduled = formatMadridDateTime(row.starts_at);
+    const unpacked = unpackLocationAndImage(row.location);
     return {
       id: row.id,
       title: row.title,
       date: scheduled.date,
       time: scheduled.time,
-      place: row.location,
+      place: unpacked.place,
       description: row.description,
       source: sourceForUrl(row.event_url),
       sourceId: row.source_id,
       url: row.event_url ?? undefined,
+      imageUrl: unpacked.imageUrl,
       language: row.detected_language as PostLanguage,
     };
   });
@@ -206,8 +210,11 @@ export async function loadWorkspace(): Promise<WorkspaceSnapshot> {
     accountIdsBySource.set(link.source_id, accountIds);
   }
   const sources: SourceView[] = (sourcesResult.data ?? []).flatMap((row) => {
-    if (row.source_type !== "luma_ical" && row.source_type !== "meetup") return [];
-    return [{ id: row.id, name: row.name, type: row.source_type, url: row.feed_url ?? "", enabled: row.enabled, accountIds: accountIdsBySource.get(row.id) ?? [] }];
+    if (row.source_type !== "luma_ical" && row.source_type !== "meetup" && row.source_type !== "substack") return [];
+    const resolvedType: SourceType = isSubstackUrl(row.feed_url) || row.source_type === "substack"
+      ? "substack"
+      : row.source_type;
+    return [{ id: row.id, name: row.name, type: resolvedType, url: row.feed_url ?? "", enabled: row.enabled, accountIds: accountIdsBySource.get(row.id) ?? [] }];
   });
 
   const existingBufferPostIds = new Set(
@@ -251,10 +258,11 @@ export async function saveSource(input: SourceInput, sourceId?: string): Promise
     if (sourceId && !/^[0-9a-f-]{36}$/i.test(sourceId)) {
       return { success: false, error: "La fuente no es válida." };
     }
+    const dbSourceType = source.type === "substack" ? "luma_ical" : source.type;
     const { data: result, error } = await supabase.rpc("save_source", {
       p_source_id: sourceId ?? null,
       p_name: source.name,
-      p_source_type: source.type,
+      p_source_type: dbSourceType,
       p_feed_url: source.url,
       p_enabled: source.enabled,
       p_account_ids: source.accountIds,
@@ -266,12 +274,15 @@ export async function saveSource(input: SourceInput, sourceId?: string): Promise
     if (!data) {
       return { success: false, error: "No se pudieron obtener los datos de la fuente guardada." };
     }
+    const resolvedType: SourceType = source.type === "substack" || isSubstackUrl(data.feed_url)
+      ? "substack"
+      : data.source_type;
     return {
       success: true,
       source: {
         id: data.id,
         name: data.name,
-        type: data.source_type,
+        type: resolvedType,
         url: data.feed_url,
         enabled: data.enabled,
         accountIds: data.account_ids ?? [],
@@ -323,7 +334,10 @@ export async function deleteEvent(eventId: string): Promise<void> {
 export async function createEvent(input: Omit<EventView, "id">): Promise<EventView> {
   const { supabase, ownerId } = await authorizedClient();
   const title = input.title.trim();
-  if (!title || title.length > 200 || !input.date || !input.time) throw new Error("Completa título, fecha y hora del evento.");
+  const substack = isSubstackUrl(input.url) || input.source === "Substack";
+  if (!title || title.length > 200 || (!substack && (!input.date || !input.time))) {
+    throw new Error("Completa título, fecha y hora del evento.");
+  }
   let url: string | null = null;
   if (input.url) {
     try {
@@ -332,29 +346,34 @@ export async function createEvent(input: Omit<EventView, "id">): Promise<EventVi
       url = parsed.toString();
     } catch { throw new Error("El enlace del evento debe ser una URL HTTP o HTTPS válida."); }
   }
-  const startsAt = madridDateTimeToIso(input.date, input.time);
+  const fallbackNow = formatMadridDateTime(new Date().toISOString());
+  const eventDate = input.date || fallbackNow.date;
+  const eventTime = input.time || fallbackNow.time;
+  const startsAt = madridDateTimeToIso(eventDate, eventTime);
   const { data, error } = await supabase.from("events").insert({
     owner_id: ownerId,
     title,
     starts_at: startsAt,
     timezone: "Europe/Madrid",
-    location: input.place.trim(),
+    location: packLocationAndImage(input.place.trim(), input.imageUrl),
     description: input.description.trim(),
     event_url: url,
     detected_language: detectTitleLanguage(title),
   }).select("id,title,starts_at,location,description,event_url,detected_language,source_id").single();
   if (error || !data) throw new Error("No se pudo guardar el evento en Supabase.");
   const scheduled = formatMadridDateTime(data.starts_at);
+  const unpacked = unpackLocationAndImage(data.location);
   return {
     id: data.id,
     title: data.title,
     date: scheduled.date,
     time: scheduled.time,
-    place: data.location,
+    place: unpacked.place,
     description: data.description,
     source: sourceForUrl(data.event_url),
     sourceId: data.source_id,
     url: data.event_url ?? undefined,
+    imageUrl: unpacked.imageUrl,
     language: data.detected_language as PostLanguage,
   };
 }
@@ -391,23 +410,36 @@ export async function generateReviewPosts(eventId: string): Promise<PostView[]> 
   if (exampleResult.error || !exampleResult.data) throw new Error("No se pudieron cargar los ejemplos de estilo aprobados.");
 
   const eventTime = formatMadridDateTime(eventResult.data.starts_at);
+  const unpacked = unpackLocationAndImage(eventResult.data.location);
+  const mappedAccounts = eligibleAccounts.map((account) => ({
+    id: account.id,
+    name: account.name,
+    voice: account.voice_prompt,
+    networks: (account.networks as string[]).filter((network): network is SocialNetwork => NETWORKS.includes(network as SocialNetwork)),
+  }));
+  const slotByAccountNetwork: Record<string, { date: string; time: string }> = {};
+  if (isSubstackUrl(eventResult.data.event_url)) {
+    for (const account of mappedAccounts) {
+      const apiKey = bufferCredentialForAccount(account.name).apiKey;
+      const slots = await fetchNextChannelSlotsForAccount(apiKey, account.networks);
+      for (const network of account.networks) {
+        const slot = slots[network];
+        if (slot) slotByAccountNetwork[`${account.id}:${network}`] = slot;
+      }
+    }
+  }
   const drafts = await generateEventDrafts({
     event: {
       id: eventResult.data.id,
       title: eventResult.data.title,
       date: eventTime.date,
       time: eventTime.time,
-      place: eventResult.data.location,
+      place: unpacked.place,
       description: eventResult.data.description,
       url: eventResult.data.event_url ?? undefined,
       language: eventResult.data.detected_language as PostLanguage,
     },
-    accounts: eligibleAccounts.map((account) => ({
-      id: account.id,
-      name: account.name,
-      voice: account.voice_prompt,
-      networks: account.networks.filter((network: string): network is SocialNetwork => NETWORKS.includes(network as SocialNetwork)),
-    })),
+    accounts: mappedAccounts,
     approvedExamples: exampleResult.data.flatMap((example) => {
       if (!NETWORKS.includes(example.network as SocialNetwork) || !["en", "es", "ca"].includes(example.language)) return [];
       return [{ accountId: example.account_id, network: example.network as SocialNetwork, language: example.language as PostLanguage, text: example.content }];
@@ -416,6 +448,7 @@ export async function generateReviewPosts(eventId: string): Promise<PostView[]> 
       if (!NETWORKS.includes(post.network as SocialNetwork)) return [];
       return [{ accountId: post.account_id, network: post.network as SocialNetwork, leadDays: post.lead_days }];
     }),
+    slotByAccountNetwork,
     generate: generateSocialPost,
   });
 

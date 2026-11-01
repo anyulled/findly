@@ -111,3 +111,52 @@ test("rejects non-HTML and oversized pages", async () => {
 test("rejects a page without an event title", () => {
   assert.throws(() => parseEventPage("<html><body>Not an event</body></html>", "https://example.com/not-an-event"), EventUrlExtractionError);
 });
+
+test("extracts Substack article metadata and cover image without requiring date/time/place", () => {
+  const substackHtml = `<!doctype html>
+  <html><head>
+    <meta property="og:title" content="La eternidad está en el presente">
+    <meta property="og:description" content="De la cinta de Moebius al presente continuo">
+    <meta property="og:image" content="https://substackcdn.com/image/cover.jpg">
+  </head><body></body></html>`;
+  const result = parseEventPage(substackHtml, "https://etsideusnondaretur.substack.com/p/la-eternidad");
+  assert.equal(result.event.title, "La eternidad está en el presente");
+  assert.equal(result.event.description, "De la cinta de Moebius al presente continuo");
+  assert.equal(result.event.imageUrl, "https://substackcdn.com/image/cover.jpg");
+  assert.deepEqual(result.missingFields, []);
+});
+
+test("extracts latest Substack post from /feed and enriches cover image from /api/v1/posts", async () => {
+  const rssXml = `<?xml version="1.0" encoding="UTF-8"?>
+    <rss version="2.0"><channel>
+      <item>
+        <title><![CDATA[La eternidad está en el presente]]></title>
+        <description><![CDATA[De la cinta de Moebius al presente continuo]]></description>
+        <link>https://etsideusnondaretur.substack.com/p/la-eternidad</link>
+        <pubDate>Sat, 28 Mar 2026 09:15:10 GMT</pubDate>
+      </item>
+    </channel></rss>`;
+  const apiJson = JSON.stringify([
+    {
+      id: 1,
+      title: "La eternidad está en el presente",
+      description: "De la cinta de Moebius al presente continuo",
+      canonical_url: "https://etsideusnondaretur.substack.com/p/la-eternidad",
+      cover_image: "https://substackcdn.com/image/api-cover.jpg",
+    },
+  ]);
+
+  const result = await extractEventPageDetails("https://etsideusnondaretur.substack.com/feed", async (input) => {
+    const url = String(input);
+    if (url.endsWith("/api/v1/posts")) {
+      return new Response(apiJson, { status: 200, headers: { "content-type": "application/json" } });
+    }
+    return new Response(rssXml, { status: 200, headers: { "content-type": "application/rss+xml" } });
+  });
+
+  assert.equal(result.event.title, "La eternidad está en el presente");
+  assert.equal(result.event.description, "De la cinta de Moebius al presente continuo");
+  assert.equal(result.event.url, "https://etsideusnondaretur.substack.com/p/la-eternidad");
+  assert.equal(result.event.imageUrl, "https://substackcdn.com/image/api-cover.jpg");
+  assert.deepEqual(result.missingFields, []);
+});

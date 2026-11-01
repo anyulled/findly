@@ -82,8 +82,10 @@ export interface ScheduleBufferPostInput {
   /** A single connected Buffer channel. One GraphQL mutation is sent per channel. */
   channelId: string;
   text: string;
-  /** An ISO 8601 instant in UTC, ending in `Z`. */
-  dueAt: string;
+  /** An ISO 8601 instant in UTC, ending in `Z`. Optional when mode is `addToQueue`. */
+  dueAt?: string;
+  mode?: "customScheduled" | "addToQueue";
+  imageUrl?: string;
 }
 
 export interface BufferScheduledPost {
@@ -143,11 +145,23 @@ function isUtcInstant(value: string): boolean {
     && hour <= 23 && minute <= 59 && second <= 59;
 }
 
+function isHttpsUrl(value: string): boolean {
+  try {
+    return new URL(value).protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
 function validateInput(input: ScheduleBufferPostInput): void {
   if (!input.channelId.trim()) throw new BufferInputError("A Buffer channel ID is required.");
   if (!input.text.trim()) throw new BufferInputError("Post text cannot be empty.");
-  if (!isUtcInstant(input.dueAt)) {
+  const mode = input.mode ?? "customScheduled";
+  if (mode !== "addToQueue" && (!input.dueAt || !isUtcInstant(input.dueAt))) {
     throw new BufferInputError("dueAt must be a valid ISO 8601 UTC timestamp ending in Z.");
+  }
+  if (input.imageUrl && !isHttpsUrl(input.imageUrl)) {
+    throw new BufferInputError("imageUrl must be a valid HTTPS URL.");
   }
 }
 
@@ -167,6 +181,16 @@ export class BufferClient {
   }
 
   private async postMutation(input: ScheduleBufferPostInput): Promise<Response> {
+    const mode = input.mode ?? "customScheduled";
+    const imageUrl = input.imageUrl?.trim();
+    const mutationInput: Record<string, unknown> = {
+      channelId: input.channelId,
+      text: input.text,
+      schedulingType: "automatic",
+      mode,
+      ...(mode === "addToQueue" ? {} : { dueAt: input.dueAt }),
+      ...(imageUrl ? { assets: [{ image: { url: imageUrl, thumbnailUrl: imageUrl } }] } : {}),
+    };
     try {
       return await this.fetchImpl(BUFFER_API_URL, {
         method: "POST",
@@ -177,13 +201,7 @@ export class BufferClient {
         body: JSON.stringify({
           query: CREATE_SCHEDULED_POST,
           variables: {
-            input: {
-              channelId: input.channelId,
-              text: input.text,
-              schedulingType: "automatic",
-              mode: "customScheduled",
-              dueAt: input.dueAt,
-            },
+            input: mutationInput,
           },
         }),
         signal: AbortSignal.timeout(this.timeoutMs),

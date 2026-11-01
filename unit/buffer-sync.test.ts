@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  computeNextSlotFromSchedule,
+  fetchNextChannelSlotsForAccount,
   fetchScheduledPostsForAccount,
   mapServiceToNetwork,
   syncBufferScheduledPosts,
@@ -261,4 +263,77 @@ test("syncBufferScheduledPosts survives onChannelDiscovered error and fetch erro
 
   assert.deepEqual(posts, []);
   assert.equal(accounts[0].bufferChannels.X, "chan-1");
+});
+
+test("computeNextSlotFromSchedule picks the earliest available slot and skips occupied slots", () => {
+  const now = new Date("2026-11-01T10:00:00.000Z"); // Sunday Nov 1, 2026 11:00 Madrid
+  const schedule = [
+    { day: "mon", times: ["09:00", "14:00"], paused: false },
+    { day: "tue", times: ["12:00"], paused: false },
+    { day: "sun", times: ["18:00"], paused: true },
+  ];
+  const slot1 = computeNextSlotFromSchedule("X", schedule, new Set(), now);
+  assert.deepEqual(slot1, { date: "2026-11-02", time: "09:00" });
+
+  const slot2 = computeNextSlotFromSchedule("X", schedule, new Set(["2026-11-02T09:00"]), now);
+  assert.deepEqual(slot2, { date: "2026-11-02", time: "14:00" });
+
+  // Empty schedule falls back to default network time (13:14 for LinkedIn)
+  const fallback = computeNextSlotFromSchedule("LinkedIn", [], new Set(), now);
+  assert.deepEqual(fallback, { date: "2026-11-01", time: "13:14" });
+});
+
+test("fetchNextChannelSlotsForAccount queries Buffer schedule and scheduled posts", async () => {
+  const now = new Date("2026-11-01T10:00:00.000Z");
+  const mockFetch: typeof fetch = async (_url, init) => {
+    const body = JSON.parse(init?.body as string) as { query: string };
+    if (body.query.includes("organizations")) {
+      return new Response(JSON.stringify({
+        data: { account: { organizations: [{ id: "org-1", name: "Org" }] } },
+      }), { status: 200 });
+    }
+    if (body.query.includes("GetChannels")) {
+      return new Response(JSON.stringify({
+        data: {
+          channels: [
+            {
+              id: "chan-x",
+              name: "X",
+              service: "twitter",
+              postingSchedule: [{ day: "mon", times: ["14:00"], paused: false }],
+            },
+          ],
+        },
+      }), { status: 200 });
+    }
+    if (body.query.includes("GetScheduledPosts")) {
+      return new Response(JSON.stringify({
+        data: {
+          posts: {
+            edges: [
+              {
+                node: {
+                  id: "p1",
+                  text: "Scheduled",
+                  dueAt: "2026-11-02T13:00:00.000Z", // 14:00 Europe/Madrid
+                  channelId: "chan-x",
+                  status: "scheduled",
+                },
+              },
+            ],
+          },
+        },
+      }), { status: 200 });
+    }
+    return new Response("Not found", { status: 404 });
+  };
+
+  const slots = await fetchNextChannelSlotsForAccount("valid-key", ["X", "Bluesky"], {}, mockFetch, now);
+  // Monday Nov 2 14:00 is occupied, so next Monday Nov 9 14:00 is chosen for X
+  assert.deepEqual(slots.X, { date: "2026-11-09", time: "14:00" });
+  // Bluesky has no channel in Buffer response so falls back to default (13:14)
+  assert.deepEqual(slots.Bluesky, { date: "2026-11-01", time: "13:14" });
+
+  const fallbackSlots = await fetchNextChannelSlotsForAccount(null, ["X"], {}, mockFetch, now);
+  assert.deepEqual(fallbackSlots.X, { date: "2026-11-01", time: "14:14" });
 });

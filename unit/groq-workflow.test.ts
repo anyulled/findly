@@ -115,4 +115,33 @@ describe("generateEventDrafts", () => {
 
     assert.equal(started, 4);
   });
+
+  it("generates 1 post per account/network for Substack URLs using the next Buffer slot", async () => {
+    const substackEvent = {
+      ...event,
+      title: "La eternidad está en el presente",
+      url: "https://etsideusnondaretur.substack.com/p/la-eternidad",
+    };
+    const drafts = await generateEventDrafts({
+      event: substackEvent,
+      accounts: [accounts[0]],
+      approvedExamples: [],
+      existing: [],
+      slotByAccountNetwork: {
+        "account-1:LinkedIn": { date: "2026-11-03", time: "09:15" },
+        "account-1:X": { date: "2026-11-02", time: "14:00" },
+      },
+      now: new Date("2026-11-01T10:00:00.000Z"),
+      generate: async (input) => ({ text: `${input.network}: ${input.event.title}` }),
+    });
+
+    assert.equal(drafts.length, 2);
+    assert.deepEqual(
+      drafts.map((d) => ({ network: d.network, leadDays: d.leadDays, date: d.date, time: d.time })),
+      [
+        { network: "LinkedIn", leadDays: 1, date: "2026-11-03", time: "09:15" },
+        { network: "X", leadDays: 1, date: "2026-11-02", time: "14:00" },
+      ],
+    );
+  });
 });

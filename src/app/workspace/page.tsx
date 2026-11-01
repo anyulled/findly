@@ -10,12 +10,14 @@ import { SourceSettings } from "../source-settings";
 import Image from "next/image";
 import { sourceForEventUrl } from "@/lib/event-source";
 import { hasMissingReminders, selectEventAccounts } from "@/lib/event-targets";
+import { isSubstackUrl } from "@/lib/substack";
+import { computeNextSlotFromSchedule } from "@/lib/buffer-sync";
 import { BrandIcon } from "../brand-icon";
 
 type Range = "Quincena" | "Semana" | "Mes";
 type Status = "review" | "approved" | "scheduling" | "scheduled" | "published" | "failed" | "needs_reconciliation";
 type Network = "LinkedIn" | "X" | "Bluesky";
-type EventItem = { id: string; title: string; date: string; time: string; place: string; description: string; source: string; sourceId?: string | null; url?: string; language?: PostLanguage; };
+type EventItem = { id: string; title: string; date: string; time: string; place: string; description: string; source: string; sourceId?: string | null; url?: string; imageUrl?: string; language?: PostLanguage; };
 type Post = { id: string; eventId: string; date: string; time: string; account: string; accountId?: string; network: Network; text: string; status: Status; leadDays?: 14 | 7 | 1; language?: PostLanguage; lastError?: string | null; bufferPostId?: string | null; };
 type Account = { id?: string; enabled?: boolean; name: string; kind: string; initials: string; color: string; logo: string; bufferApiKeyEnv: string; bufferApiKeyConfigured: boolean; prompt: string; networks: Network[]; bufferChannels: Partial<Record<Network, string>>; styleExampleCount: number; };
 
@@ -63,24 +65,47 @@ function scheduleDates(eventDate: string) {
     .filter(({ date }) => dayKey(date) > today || (dayKey(date) === today && nowMinutes < 13 * 60));
 }
 function starterPosts(events: EventItem[], targetAccounts: Account[] = accounts): Post[] {
-  return events.flatMap((event) => scheduleDates(event.date).flatMap(({ date, leadDays }) => targetAccounts.flatMap((account) => account.networks.map((network) => {
+  return events.flatMap((event) => {
     const language = event.language ?? detectTitleLanguage(event.title);
-    const until = language === "en"
-      ? leadDays === 14 ? "in two weeks" : leadDays === 7 ? "next week" : "tomorrow"
-      : language === "es"
-        ? leadDays === 14 ? "dentro de dos semanas" : leadDays === 7 ? "dentro de una semana" : "mañana"
-        : leadDays === 14 ? "d’aquí a dues setmanes" : leadDays === 7 ? "d’aquí a una setmana" : "demà";
-    const text = language === "en"
-      ? `Join us ${until} for ${event.title} in ${event.place}. See you there! ${event.url ?? ""}`.trim()
-      : language === "es"
-        ? `¡Nos vemos ${until} en ${event.title}! Te esperamos en ${event.place}. ${event.url ?? ""}`.trim()
-        : `Ens veiem ${until} a ${event.title}! T’hi esperem a ${event.place}. ${event.url ?? ""}`.trim();
-    return {
-    id: event.id + "-" + dayKey(date) + "-" + account.initials + "-" + network,
-    eventId: event.id, date: dayKey(date), time: "13:00", account: account.name, accountId: account.id, network, leadDays, language,
-    text,
-    status: "review" as Status,
-    };}))))
+    if (event.source === "Substack" || isSubstackUrl(event.url)) {
+      return targetAccounts.flatMap((account) => account.networks.map((network) => {
+        const slot = computeNextSlotFromSchedule(network, [], new Set());
+        const summary = event.description ? ` — ${event.description.slice(0, 120)}` : "";
+        const text = `${event.title}${summary} ${event.url ?? ""}`.trim();
+        return {
+          id: `${event.id}-${slot.date}-${account.initials}-${network}`,
+          eventId: event.id,
+          date: slot.date,
+          time: slot.time,
+          account: account.name,
+          accountId: account.id,
+          network,
+          leadDays: 1 as const,
+          language,
+          text,
+          status: "review" as Status,
+        };
+      }));
+    }
+    return scheduleDates(event.date).flatMap(({ date, leadDays }) => targetAccounts.flatMap((account) => account.networks.map((network) => {
+      const until = language === "en"
+        ? leadDays === 14 ? "in two weeks" : leadDays === 7 ? "next week" : "tomorrow"
+        : language === "es"
+          ? leadDays === 14 ? "dentro de dos semanas" : leadDays === 7 ? "dentro de una semana" : "mañana"
+          : leadDays === 14 ? "d’aquí a dues setmanes" : leadDays === 7 ? "d’aquí a una setmana" : "demà";
+      const text = language === "en"
+        ? `Join us ${until} for ${event.title} in ${event.place}. See you there! ${event.url ?? ""}`.trim()
+        : language === "es"
+          ? `¡Nos vemos ${until} en ${event.title}! Te esperamos en ${event.place}. ${event.url ?? ""}`.trim()
+          : `Ens veiem ${until} a ${event.title}! T’hi esperem a ${event.place}. ${event.url ?? ""}`.trim();
+      return {
+        id: event.id + "-" + dayKey(date) + "-" + account.initials + "-" + network,
+        eventId: event.id, date: dayKey(date), time: "13:00", account: account.name, accountId: account.id, network, leadDays, language,
+        text,
+        status: "review" as Status,
+      };
+    })));
+  });
 }
 const initialPosts: Post[] = [];
 
@@ -102,7 +127,7 @@ function Dashboard() {
   const [reconciliationId, setReconciliationId] = useState("");
   const [absenceConfirmed, setAbsenceConfirmed] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
-  const [newEvent, setNewEvent] = useState({ title: "", date: "", time: "", place: "", description: "", source: "Manual" });
+  const [newEvent, setNewEvent] = useState({ title: "", date: "", time: "", place: "", description: "", source: "Manual", imageUrl: "" });
   const [sourceUrl, setSourceUrl] = useState("");
   const [extractingEvent, setExtractingEvent] = useState(false);
   const [extractionMessage, setExtractionMessage] = useState("");
@@ -211,16 +236,27 @@ function Dashboard() {
     setPosts((all) => all.map((item) => item.id === post.id ? { ...item, ...changes } : item));
     if (selected) setSelected({ ...selected, ...changes });
   }
+  const isSubstackDraft = newEvent.source === "Substack" || isSubstackUrl(sourceUrl.trim());
   async function addEvent() {
     if (extractingEvent) return;
-    if (!newEvent.title.trim() || !newEvent.date || !newEvent.time) return;
+    if (!newEvent.title.trim() || (!isSubstackDraft && (!newEvent.date || !newEvent.time))) return;
     let parsedUrl: URL | null = null;
     try {
       const candidate = new URL(sourceUrl.trim());
       if (candidate.protocol === "https:" || candidate.protocol === "http:") parsedUrl = candidate;
     } catch { /* A missing or invalid link falls back to manual event entry. */ }
     const source = sourceForEventUrl(parsedUrl?.toString());
-    const draftEvent = { ...newEvent, source, url: parsedUrl?.toString() };
+    const madrid = madridClock();
+    const fallbackDate = `${madrid.year}-${madrid.month}-${madrid.day}`;
+    const fallbackTime = `${madrid.hour}:${madrid.minute}`;
+    const draftEvent = {
+      ...newEvent,
+      date: newEvent.date || fallbackDate,
+      time: newEvent.time || fallbackTime,
+      source,
+      url: parsedUrl?.toString(),
+      imageUrl: newEvent.imageUrl || undefined,
+    };
     let savedEvent: EventItem | null = null;
     try {
       const event = persistent ? await createEvent(draftEvent) : { ...draftEvent, id: "evt-" + Date.now(), language: detectTitleLanguage(draftEvent.title) };
@@ -235,7 +271,7 @@ function Dashboard() {
       if (savedEvent) {
         setFeedback(`El evento quedó guardado, pero no se guardaron todos sus borradores. Puedes reintentarlo desde la ficha del evento. ${error instanceof Error ? error.message : ""}`);
         closeAddForm();
-        setNewEvent({ title: "", date: "", time: "", place: "", description: "", source: "Manual" });
+        setNewEvent({ title: "", date: "", time: "", place: "", description: "", source: "Manual", imageUrl: "" });
         setSourceUrl("");
         setExtractionMessage("");
         setTab("Eventos");
@@ -245,7 +281,7 @@ function Dashboard() {
       return;
     }
     closeAddForm();
-    setNewEvent({ title: "", date: "", time: "", place: "", description: "", source: "Manual" });
+    setNewEvent({ title: "", date: "", time: "", place: "", description: "", source: "Manual", imageUrl: "" });
     setSourceUrl("");
     setExtractionMessage("");
     setTab("Eventos");
@@ -460,7 +496,7 @@ function Dashboard() {
           <div className={styles.legend}><span><i className={styles.legendReview}/> Revisión pendiente</span><span><i className={styles.legendApproved}/> Aprobada</span><span><i className={styles.legendScheduled}/> Programada</span><span className={styles.legendCount}>{posts.filter((p) => p.status === "review").length} pendientes de revisión</span></div>
         </>}
 
-        {tab === "Eventos" && <><div className={styles.pageHeading}><div><div className={styles.eyebrow}>EVENTOS DETECTADOS Y MANUALES</div><h1>Eventos</h1><p>Gestiona los eventos y las publicaciones que generan.</p></div><button className={styles.addButton} onClick={openAddForm}>＋ Añadir evento</button></div>{events.length === 0 ? <p className={styles.emptyNotice}>Aún no hay eventos registrados.</p> : <div className={styles.eventsList}>{events.map((event) => { const eventPosts = posts.filter((post) => post.eventId === event.id); const links = sources.flatMap((source) => source.accountIds.map((accountId) => ({ sourceId: source.id, accountId }))); const eligibleAccounts = selectEventAccounts(accountList, event.sourceId, links); const missing = hasMissingReminders(eligibleAccounts, scheduleDates(event.date).map(({ leadDays }) => leadDays), eventPosts); return <article key={event.id} className={styles.eventCard}><div className={styles.eventDate}><b>{dateAt(event.date).toLocaleDateString("es-ES", { day: "2-digit" })}</b><span>{dateAt(event.date).toLocaleDateString("es-ES", { month: "short" })}</span></div><div className={styles.eventInfo}><div className={styles.eventMeta}><span className={styles.sourceTag}>{event.source}</span><span>{event.time} · {event.place}</span></div><h3>{event.title}</h3><p>{event.description}</p><div className={styles.eventFoot}>{eventPosts.length} publicaciones previstas {persistent && missing && <button className={styles.morePosts} onClick={() => { void retryDrafts(event); }}>Completar recordatorios</button>} <a href={event.url ?? (event.source === "Luma" ? "https://lu.ma" : event.source === "Meetup" ? "https://meetup.com" : "#")} target={event.url ? "_blank" : undefined} rel="noreferrer">{event.source === "Manual" ? "Añadido manualmente" : "Abrir evento ↗"}</a></div></div><div className={styles.eventActions}><button type="button" className={styles.secondaryButton} onClick={() => { void removeEvent(event.id); }} aria-label={`Eliminar evento ${event.title}`}>Eliminar</button></div></article>; })}</div>}</>}
+        {tab === "Eventos" && <><div className={styles.pageHeading}><div><div className={styles.eyebrow}>EVENTOS DETECTADOS Y MANUALES</div><h1>Eventos</h1><p>Gestiona los eventos y las publicaciones que generan.</p></div><button className={styles.addButton} onClick={openAddForm}>＋ Añadir evento</button></div>{events.length === 0 ? <p className={styles.emptyNotice}>Aún no hay eventos registrados.</p> : <div className={styles.eventsList}>{events.map((event) => { const eventPosts = posts.filter((post) => post.eventId === event.id); const links = sources.flatMap((source) => source.accountIds.map((accountId) => ({ sourceId: source.id, accountId }))); const eligibleAccounts = selectEventAccounts(accountList, event.sourceId, links); const expectedLeadDays = event.source === "Substack" ? [1 as const] : scheduleDates(event.date).map(({ leadDays }) => leadDays); const missing = hasMissingReminders(eligibleAccounts, expectedLeadDays, eventPosts); return <article key={event.id} className={styles.eventCard}><div className={styles.eventDate}><b>{dateAt(event.date).toLocaleDateString("es-ES", { day: "2-digit" })}</b><span>{dateAt(event.date).toLocaleDateString("es-ES", { month: "short" })}</span></div><div className={styles.eventInfo}><div className={styles.eventMeta}><span className={styles.sourceTag}>{event.source}</span><span>{event.source === "Substack" && !event.place ? "Artículo" : `${event.time} · ${event.place}`}</span></div><h3>{event.title}</h3><p>{event.description}</p><div className={styles.eventFoot}>{eventPosts.length} publicaciones previstas {persistent && missing && <button className={styles.morePosts} onClick={() => { void retryDrafts(event); }}>Completar recordatorios</button>} <a href={event.url ?? (event.source === "Luma" ? "https://lu.ma" : event.source === "Meetup" ? "https://meetup.com" : "#")} target={event.url ? "_blank" : undefined} rel="noreferrer">{event.source === "Manual" ? "Añadido manualmente" : "Abrir evento ↗"}</a></div></div><div className={styles.eventActions}><button type="button" className={styles.secondaryButton} onClick={() => { void removeEvent(event.id); }} aria-label={`Eliminar evento ${event.title}`}>Eliminar</button></div></article>; })}</div>}</>}
 
         {tab === "Cuentas" && <><div className={styles.pageHeading}><div><div className={styles.eyebrow}>CANALES Y VOZ DE MARCA</div><h1>Tus cuentas</h1><p>Cada cuenta tiene una voz propia para tus publicaciones.</p></div></div><div className={styles.accountsGrid}>{accountList.map((account) => <article className={styles.accountCard} key={account.id ?? account.name}><div className={`${styles.accountTop}`}><Image className={styles.accountLogo} src={account.logo} alt={`Logo de ${account.name}`} width={38} height={38}/><div><b>{account.name}</b><small>{account.kind}</small></div><span className={styles.connected}>{persistent ? "● Supabase" : "● Demo"}</span></div><div className={styles.keyStatus}>{account.bufferApiKeyConfigured ? "API key configurada" : `Falta ${account.bufferApiKeyEnv}`}</div><div className={styles.accountNetworks}>{account.networks.map((network) => <span key={network}>{network === "LinkedIn" ? "in" : network === "X" ? "𝕏" : "◉"} &nbsp;{network}</span>)}</div><div className={styles.bufferChannels}><h4>CANALES DE BUFFER</h4><p>Introduce el ID del canal de Buffer conectado a cada red.</p>{account.networks.map((network) => <label key={network}><span>{network}</span><input aria-label={`ID de canal de Buffer ${network} para ${account.name}`} value={account.bufferChannels?.[network] ?? ""} disabled={!persistent} onChange={(event) => setAccountList((all) => all.map((item) => matchesAccount(item, account) ? { ...item, bufferChannels: { ...item.bufferChannels, [network]: event.target.value } } : item))} onBlur={(event) => { void changeBufferChannel(account, network, event.currentTarget.value); }} placeholder="ID del canal"/></label>)}</div><label>VOZ Y TONO<textarea value={account.prompt} onChange={(e) => setAccountList((all) => all.map((item) => matchesAccount(item, account) ? { ...item, prompt: e.target.value } : item))} onBlur={(e) => { void changeVoice(account, e.currentTarget.value); }} rows={3}/></label><div className={styles.exampleBox}><span>✦</span><div><b>{account.styleExampleCount ?? posts.filter((p) => p.account === account.name && p.status === "approved").length} ejemplos aprobados</b><small>Las publicaciones aprobadas ayudan a mantener tu estilo.</small></div></div></article>)}</div></>}
 
@@ -480,7 +516,7 @@ function Dashboard() {
       <div className={styles.formGrid}><label className={styles.formLabel}>FECHA<input type="date" value={newEvent.date} disabled={extractingEvent} onChange={(e) => setNewEvent({ ...newEvent, date: e.target.value })}/></label><label className={styles.formLabel}>HORA<input type="time" value={newEvent.time} disabled={extractingEvent} onChange={(e) => setNewEvent({ ...newEvent, time: e.target.value })}/></label></div>
       <label className={styles.formLabel}>LUGAR<input value={newEvent.place} disabled={extractingEvent} onChange={(e) => setNewEvent({ ...newEvent, place: e.target.value })}/></label>
       <label className={styles.formLabel}>DESCRIPCIÓN<textarea rows={3} value={newEvent.description} disabled={extractingEvent} onChange={(e) => setNewEvent({ ...newEvent, description: e.target.value })} placeholder="¿Qué ocurrirá en el evento?"/></label>
-      <div className={styles.modalActions}><button className={styles.secondaryButton} onClick={closeAddForm}>Cancelar</button><button className={styles.approveButton} onClick={addEvent} disabled={extractingEvent || !newEvent.title.trim() || !newEvent.date || !newEvent.time}>Crear evento</button></div>
+      <div className={styles.modalActions}><button className={styles.secondaryButton} onClick={closeAddForm}>Cancelar</button><button className={styles.approveButton} onClick={addEvent} disabled={extractingEvent || !newEvent.title.trim() || (!isSubstackDraft && (!newEvent.date || !newEvent.time))}>Crear evento</button></div>
     </section></div>}
   </main>;
 }

@@ -2,9 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   approveAndSchedulePost,
+  schedulePostWithBuffer,
   schedulePostWithSupabase,
   type PostToSchedule,
 } from "../src/lib/post-publishing";
+import { BufferClient } from "../src/lib/buffer";
 
 const post: PostToSchedule = {
   id: "post-uuid",
@@ -222,4 +224,50 @@ test("the Supabase repository sends the active attempt ID when recording failure
   const database = fakeSupabase({ channelId: "buffer-channel-1" });
   await schedulePostWithSupabase(post.id, database.supabase, "owner-uuid", async () => { throw new Error("timeout"); });
   assert.equal(database.rpcArguments.find((call) => call.name === "mark_post_scheduling_failure")?.args.p_attempt_id, "attempt-1");
+});
+
+test("Substack posts use addToQueue mode and include the extracted cover image", async () => {
+  let receivedInput: Record<string, unknown> | undefined;
+  const outcome = await schedulePostWithBuffer(
+    post.id,
+    {
+      claim: async () => post,
+      accountName: async () => "Personal",
+      bufferChannelId: async () => "buffer-channel-substack",
+      postContext: async () => ({
+        eventUrl: "https://etsideusnondaretur.substack.com/p/la-eternidad",
+        imageUrl: "https://substackcdn.com/image/cover.jpg",
+      }),
+      markScheduled: async () => {},
+      markFailure: async () => {},
+    },
+    () =>
+      new BufferClient({
+        apiKey: "mock-key",
+        fetchImpl: async (_url, init) => {
+          const parsed = JSON.parse(String(init?.body)) as { variables: { input: Record<string, unknown> } };
+          receivedInput = parsed.variables.input;
+          return bufferResponse({
+            data: {
+              createPost: {
+                __typename: "PostActionSuccess",
+                post: { id: "substack-buf-1", text: post.content, dueAt: "2026-11-02T13:00:00.000Z" },
+              },
+            },
+          });
+        },
+      }),
+  );
+
+  assert.deepEqual(outcome, { kind: "scheduled", bufferPostId: "substack-buf-1" });
+  assert.equal(receivedInput?.mode, "addToQueue");
+  assert.equal(receivedInput?.dueAt, undefined);
+  assert.deepEqual(receivedInput?.assets, [
+    {
+      image: {
+        url: "https://substackcdn.com/image/cover.jpg",
+        thumbnailUrl: "https://substackcdn.com/image/cover.jpg",
+      },
+    },
+  ]);
 });
