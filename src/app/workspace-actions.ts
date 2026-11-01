@@ -526,7 +526,7 @@ export async function generateReviewPosts(eventId: string): Promise<GenerateRevi
         due_at: madridDateTimeToIso(post.date, post.time),
         timezone: "Europe/Madrid",
         content: post.text,
-        status: automatic ? "approved" : "review",
+        status: automatic && !post.isFallback ? "approved" : "review",
         language: post.language,
       };
     });
@@ -587,32 +587,34 @@ export async function updatePostContent(postId: string, content: string): Promis
   }
 }
 
-export async function approvePost(postId: string, content: string): Promise<PostPublishingOutcome> {
+export type ApprovePostResult = PostPublishingOutcome | { kind: "error"; message: string };
+
+export async function approvePost(postId: string, content: string): Promise<ApprovePostResult> {
   try {
     const { supabase, ownerId } = await authorizedClient();
     const validationNetwork = await supabase.from("posts").select("network").eq("id", postId).single();
     if (validationNetwork.error || !NETWORKS.includes(validationNetwork.data.network as SocialNetwork)) {
-      return { kind: "failed", message: "No se pudo comprobar la red de la publicación." };
+      return { kind: "error", message: "No se pudo comprobar la red de la publicación." };
     }
     const validation = validatePost(validationNetwork.data.network as SocialNetwork, content);
-    if (!validation.valid) return { kind: "failed", message: validation.message };
+    if (!validation.valid) return { kind: "error", message: validation.message };
     const outcome = await approveAndSchedulePost(postId, content, supabase, ownerId);
     invalidateBufferSyncCache();
     return outcome;
   } catch (caught) {
-    return { kind: "failed", message: caught instanceof Error ? caught.message : "No se pudo aprobar la publicación." };
+    return { kind: "error", message: caught instanceof Error ? caught.message : "No se pudo aprobar la publicación." };
   }
 }
 
-export async function retryFailedPost(postId: string): Promise<PostPublishingOutcome> {
+export async function retryFailedPost(postId: string): Promise<ApprovePostResult> {
   try {
     const { supabase, ownerId } = await authorizedClient();
-    if (!/^[0-9a-f-]{36}$/i.test(postId)) return { kind: "failed", message: "Solicitud de publicación no válida." };
+    if (!/^[0-9a-f-]{36}$/i.test(postId)) return { kind: "error", message: "Solicitud de publicación no válida." };
     const outcome = await schedulePostWithSupabase(postId, supabase, ownerId);
     invalidateBufferSyncCache();
     return outcome;
   } catch (caught) {
-    return { kind: "failed", message: caught instanceof Error ? caught.message : "No se pudo reintentar la publicación." };
+    return { kind: "error", message: caught instanceof Error ? caught.message : "No se pudo reintentar la publicación." };
   }
 }
 

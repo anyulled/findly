@@ -141,6 +141,7 @@ export async function generateSocialPostOrFallback(
     return await generateSocialPost(input, config);
   } catch (error) {
     if (error instanceof PostGenerationError) {
+      console.warn(`Groq draft generation failed (${error.code}); using deterministic fallback.`);
       const text = buildFallbackDraftText(input);
       return { text, model: "fallback", validation: validatePost(input.network, text) };
     }
