@@ -1,19 +1,17 @@
 import { generateSocialPost, type ApprovedStyleExample, type GeneratedPost } from "./groq";
 import { generateEventDrafts, type ExistingReminder, type GenerationAccount } from "./groq-workflow";
 import { formatMadridDateTime, madridDateTimeToIso } from "./madrid-time";
-import { validatePost, type SocialNetwork } from "./social-validation";
+import { validatePost, NETWORKS, type SocialNetwork } from "./social-validation";
 import type { PostLanguage } from "./language";
 import { isSubstackUrl, unpackLocationAndImage } from "./substack";
 import { fetchNextChannelSlotsForAccount } from "./buffer-sync";
 import { bufferCredentialForAccount } from "./buffer-account-credentials";
 
-const NETWORKS: SocialNetwork[] = ["LinkedIn", "X", "Bluesky"];
-
 export type ImportedLumaEvent = {
   id: string;
   owner_id: string;
-  source_id: string;
-  external_id: string;
+  source_id?: string | null;
+  external_id?: string;
   title: string;
   starts_at: string;
   location: string;
@@ -36,7 +34,7 @@ export type LumaDraftRow = {
 };
 
 export type LumaDraftRepository = {
-  listLinkedAccounts(ownerId: string, sourceId: string): Promise<GenerationAccount[]>;
+  listLinkedAccounts(ownerId: string, sourceId?: string | null): Promise<GenerationAccount[]>;
   listExistingReminders(ownerId: string, eventId: string): Promise<ExistingReminder[]>;
   listApprovedExamples(ownerId: string, accountIds: string[]): Promise<ApprovedStyleExample[]>;
   insertDrafts(rows: LumaDraftRow[]): Promise<number>;

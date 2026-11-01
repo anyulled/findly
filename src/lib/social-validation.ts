@@ -1,5 +1,7 @@
 export type SocialNetwork = "LinkedIn" | "X" | "Bluesky";
 
+export const NETWORKS: readonly SocialNetwork[] = ["LinkedIn", "X", "Bluesky"] as const;
+
 const LIMITS: Record<SocialNetwork, number> = {
   LinkedIn: 3000,
   X: 280,

@@ -132,7 +132,7 @@ test("source sync and automatic retries restrict generation and dispatch to sour
     const repository: LumaDraftRepository = {
       async getPublishingMode() { return mode; },
       async listLinkedAccounts(_ownerId, sourceId) {
-        return selectEventAccounts(allAccounts, sourceId, [{ sourceId: event.source_id, accountId: "jug" }]);
+        return selectEventAccounts(allAccounts, sourceId, [{ sourceId: event.source_id ?? "source-1", accountId: "jug" }]);
       },
       async listExistingReminders() { return inserted.map((row) => ({ accountId: row.account_id, network: row.network, leadDays: row.lead_days })); },
       async listApprovedExamples(_ownerId, accountIds) { assert.deepEqual(accountIds, ["jug"]); return []; },
