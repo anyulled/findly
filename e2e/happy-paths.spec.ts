@@ -63,6 +63,7 @@ test("creates an event, prepares only timely reminders, and saves approval as a 
   const eventPost = page.getByRole("button", { name: /Playwright Happy Path Event/ }).first();
   await eventPost.click();
   await expect(page.getByRole("heading", { name: "Playwright Happy Path Event" }).last()).toBeVisible();
+  await expect(page.getByText("Origen de generación desconocido para esta publicación.")).toBeVisible();
   await page.getByRole("button", { name: "✓ Aprobar y guardar ejemplo" }).click();
 
   await page.getByRole("button", { name: "Cuentas" }).click();
@@ -252,6 +253,7 @@ test("creates an event for selected accounts only and retains the selection afte
   expect([...new Set(state.posts.map((post: { account: string }) => post.account))]).toEqual(["Personal"]);
 });
 
+<<<<<<< HEAD
 test("discards a review draft and preserves scheduled posts", async ({ page }) => {
   const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Madrid", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
   await page.evaluate((date) => localStorage.setItem("findly-state-v1", JSON.stringify({
@@ -271,4 +273,18 @@ test("discards a review draft and preserves scheduled posts", async ({ page }) =
   await expect(page.getByRole("button", { name: "Borrado de prueba · Personal · LinkedIn · Pendiente de revisión" })).toHaveCount(0);
   await page.getByRole("button", { name: "Borrado de prueba · Personal · X · Programada" }).click();
   await expect(page.getByRole("button", { name: "Eliminar borrador" })).toHaveCount(0);
+});
+
+test("shows safe generation diagnostics on the affected draft", async ({ page }) => {
+  const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Madrid", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+  await page.evaluate((date) => localStorage.setItem("findly-state-v1", JSON.stringify({
+    events: [{ id: "diagnostic-event", title: "Diagnostic event", date, time: "19:00", place: "", description: "", source: "Manual" }],
+    posts: [{ id: "diagnostic-post", eventId: "diagnostic-event", date, time: "13:00", account: "Personal", network: "LinkedIn", text: "Basic text", status: "review", generationOrigin: "fallback", generationErrorCode: "rate_limited" }],
+    mode: "review",
+  })), today);
+  await page.reload();
+  await page.getByRole("button", { name: "Calendario" }).click();
+  await page.getByRole("button", { name: /Diagnostic event.*Personal.*LinkedIn/ }).click();
+  await expect(page.getByText(/No se pudo generar con Groq; se creó un borrador básico/)).toBeVisible();
+  await expect(page.getByText(/Groq alcanzó su límite de solicitudes/)).toBeVisible();
 });

@@ -273,8 +273,16 @@ function parseChatResponseContent(payload: unknown, providerName: string): strin
       "provider_error",
     );
   }
-  const content = (payload as { choices?: Array<{ message?: { content?: unknown } }> })
-    .choices?.[0]?.message?.content;
+  const choice = (
+    payload as { choices?: Array<{ finish_reason?: unknown; message?: { content?: unknown } }> }
+  ).choices?.[0];
+  if (choice?.finish_reason === "length") {
+    throw new PostGenerationError(
+      `${providerName} stopped before the text was complete.`,
+      "output_truncated",
+    );
+  }
+  const content = choice?.message?.content;
   if (typeof content !== "string" || !content.trim()) {
     throw new PostGenerationError(
       `${providerName} returned no post text. The draft was not created.`,
@@ -316,9 +324,15 @@ async function callChatCompletionsApi(
   }
 
   if (!response.ok) {
+    const code =
+      response.status === 401 || response.status === 403
+        ? "provider_auth"
+        : response.status === 429
+          ? "rate_limited"
+          : "provider_error";
     throw new PostGenerationError(
       `${providerName} returned HTTP ${response.status}. The draft was not created.`,
-      "provider_error",
+      code,
     );
   }
 
@@ -397,6 +411,7 @@ export class DeterministicFallbackProvider implements LLMProvider {
       model: "fallback",
       provider: "fallback",
       validation: validatePost(input.network, text),
+      isFallback: true,
     };
   }
 }
@@ -408,6 +423,7 @@ export class LLMFallbackChain {
     input: PostGenerationInput,
     fetchImpl: typeof fetch = fetch,
   ): Promise<GeneratedPost> {
+    let lastErrorCode: PostGenerationError["code"] = "not_configured";
     for (let i = 0; i < this.providers.length; i++) {
       const provider = this.providers[i];
       if (!provider.isConfigured()) {
@@ -416,6 +432,11 @@ export class LLMFallbackChain {
       try {
         return await provider.generate(input, fetchImpl);
       } catch (error) {
+        if (error instanceof PostGenerationError) {
+          lastErrorCode = error.code;
+        } else {
+          lastErrorCode = "provider_error";
+        }
         const remaining = this.providers.slice(i + 1).find((p) => p.isConfigured());
         logger.warn(
           `LLM provider '${provider.name}' failed during post generation; falling back to '${remaining?.name ?? "none"}'.`,
@@ -429,7 +450,11 @@ export class LLMFallbackChain {
       }
     }
     const fallback = new DeterministicFallbackProvider();
-    return fallback.generate(input);
+    const result = await fallback.generate(input);
+    return {
+      ...result,
+      generationError: lastErrorCode,
+    };
   }
 }
 

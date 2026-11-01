@@ -32,6 +32,8 @@ export type LumaDraftRow = {
   content: string;
   status: "review" | "approved";
   language: PostLanguage;
+  generation_origin?: "groq" | "fallback";
+  generation_error_code?: GeneratedPost["generationError"];
 };
 
 export type LumaDraftRepository = {
@@ -109,6 +111,8 @@ export async function generateLumaEventDrafts(
       content: draft.text,
       status: publishingMode === "automatic" && !draft.isFallback ? "approved" : "review",
       language: draft.language,
+      ...(draft.generationOrigin ? { generation_origin: draft.generationOrigin } : {}),
+      ...(draft.generationError ? { generation_error_code: draft.generationError } : {}),
     };
   });
   const inserted = rows.length > 0 ? await repository.insertDrafts(rows) : 0;
