@@ -6,6 +6,7 @@ The Playwright suite runs against the Next.js app in demo mode with an isolated 
 
 The current E2E coverage checks:
 
+- Public landing at `/`, the top-right **Acceder** link into `/workspace`, and responsive layout at 375, 768, 1024 and 1440 pixels.
 - Switching the calendar between its default fortnight, week, and month views.
 - Creating an event eight days ahead, which leaves the one-week and one-day reminders in range and omits the two-week reminder. The generated drafts cover all seven configured social channels.
 - Approving a draft, recording it as a style example, and retaining that approval after a page reload.
@@ -29,7 +30,7 @@ The required `Database migrations` CI check uses an isolated local Postgres data
 
 The iCalendar parser reads event `UID`, `SUMMARY`, `DESCRIPTION`, `LOCATION`, `URL`, and `DTSTART`. It relies on ical.js for RFC 5545 content-line folding and escaped text. UTC, embedded `VTIMEZONE`, IANA `TZID`, floating Madrid times, and date-only events are normalized to Madrid date/time. Malformed events produce per-event issues while valid events in the same calendar remain available. The parser does not fetch feeds, expand `RRULE` recurrences, or reconcile cancellation and date changes.
 
-The browser uses the `Europe/Madrid` time zone. The test server binds to localhost port 3100 and receives empty Supabase settings to select demo mode.
+Focused proxy unit tests also verify that the public landing does not contact Supabase and that an unconfigured production workspace redirects to the login page. The browser uses the `Europe/Madrid` time zone. The test server binds to localhost port 3100 and receives empty Supabase settings to select demo mode.
 
 ## Run locally
 

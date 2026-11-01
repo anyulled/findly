@@ -15,6 +15,9 @@ export async function updateSession(request: NextRequest) {
     return NextResponse.redirect(callbackUrl);
   }
 
+  // The landing is public and does not depend on an authentication provider.
+  if (request.nextUrl.pathname === "/") return NextResponse.next({ request });
+
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
   if (!url || !key) {
@@ -48,6 +51,6 @@ export async function updateSession(request: NextRequest) {
     if (claims && !isOwner) loginUrl.searchParams.set("error", "owner");
     return NextResponse.redirect(loginUrl);
   }
-  if (request.nextUrl.pathname === "/login" && isOwner) return NextResponse.redirect(new URL("/", request.url));
+  if (request.nextUrl.pathname === "/login" && isOwner) return NextResponse.redirect(new URL("/workspace", request.url));
   return response;
 }

@@ -8,6 +8,7 @@ Findly es una aplicación personal para preparar anuncios de eventos en varias c
 
 La aplicación incluye:
 
+- Una página de presentación pública con acceso al espacio de trabajo desde la esquina superior derecha.
 - Un calendario con vistas quincenal, semanal y mensual. Cuando hay más de tres publicaciones en un día, el control «+N más» muestra todas con su cuenta, red y estado; cada una abre su detalle sin cambiar el intervalo.
 - Alta manual con datos o pegando la URL pública de Meetup/Luma para extraer los datos disponibles, revisarlos y corregirlos antes de guardar.
 - Borradores para LinkedIn, X y Bluesky, con fechas recordatorio a 14, 7 y 1 día del evento, a las 13:00 de `Europe/Madrid`. Se omiten las fechas cuyo horario ya pasó.
@@ -32,7 +33,7 @@ npm ci
 npm run dev
 ```
 
-Abre http://localhost:3000. Sin variables de Supabase, la aplicación inicia en modo demo. Para configurar persistencia y acceso con Google, sigue [docs/setup.md](docs/setup.md) y usa `.env.example` como referencia; las credenciales reales no deben añadirse al repositorio. La validación y aplicación automática de migraciones se describe en [docs/database-migrations.md](docs/database-migrations.md).
+Abre http://localhost:3000 para ver la página de presentación; **Acceder** abre el espacio de trabajo en `/workspace`. Sin variables de Supabase, el espacio funciona en modo demo en desarrollo. En producción, el espacio requiere Supabase y la cuenta autorizada. Para configurar persistencia y acceso con Google, sigue [docs/setup.md](docs/setup.md) y usa `.env.example` como referencia; las credenciales reales no deben añadirse al repositorio. La validación y aplicación automática de migraciones se describe en [docs/database-migrations.md](docs/database-migrations.md).
 
 ## Comprobaciones
 

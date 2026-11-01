@@ -5,7 +5,7 @@ This guide describes the intended setup for the personal event publishing app. I
 ## Local development
 
 1. Install the Node.js version supported by the `package.json` in the repository.
-2. Install dependencies with `npm ci` and start the Next.js development server with `npm run dev`.
+2. Install dependencies with `npm ci` and start the Next.js development server with `npm run dev`. The public landing is `/`; **Acceder** opens `/workspace`, where the calendar and settings live.
 3. Copy the committed environment template when one is available. Put secrets only in an ignored local environment file; never commit it.
 4. Until Supabase credentials are configured, sign-in, database-backed scheduling and provider calls cannot be exercised end to end.
 
@@ -15,7 +15,7 @@ This guide describes the intended setup for the personal event publishing app. I
 
 1. Create one Supabase project on a plan that meets the availability expectations.
 2. Enable Google as an Auth provider and configure Google OAuth credentials and redirect URLs for local and deployed origins.
-3. Restrict application access to the owner's Google identity. There is one application user; do not add self-service registration for other members.
+3. Restrict workspace access to the owner's Google identity. The landing page is public, while `/workspace` and the server actions remain protected. Successful sign-in returns to `/workspace`. There is one application user; do not add self-service registration for other members.
 4. Apply the checked-in database migrations. Verify access policies before exposing the service to the public internet.
 5. Keep elevated Supabase credentials on the server. A browser may receive only the public/publishable key, protected by row-level security. The cron importer uses `SUPABASE_SERVICE_ROLE_KEY` because it has no interactive owner session; it is server-only and must never use a `NEXT_PUBLIC_` name.
 
