@@ -13,8 +13,10 @@ import { bufferCredentialForAccount } from "@/lib/buffer-account-credentials";
 import { sourceForEventUrl } from "@/lib/event-source";
 import { selectEventAccounts } from "@/lib/event-targets";
 import { extractUserProfile, type UserProfile } from "@/lib/user-profile";
+import { validateSource, type SourceInput, type SourceType } from "@/lib/source-validation";
 
 export type { UserProfile } from "@/lib/user-profile";
+export type { SourceInput, SourceType } from "@/lib/source-validation";
 
 export type AccountView = {
   id?: string;
@@ -61,8 +63,6 @@ export type PostView = {
   language?: PostLanguage;
 };
 
-export type SourceType = "luma_ical" | "meetup";
-
 export type SourceView = {
   id: string;
   name: string;
@@ -71,8 +71,6 @@ export type SourceView = {
   enabled: boolean;
   accountIds: string[];
 };
-
-export type SourceInput = Omit<SourceView, "id">;
 
 export type WorkspaceSnapshot = {
   accounts: AccountView[];
@@ -131,11 +129,17 @@ export async function loadWorkspace(): Promise<WorkspaceSnapshot> {
   let accountResult = await supabase.from("accounts").select("id,name,account_type,voice_prompt,networks,enabled").order("created_at");
   if (accountResult.error) throw new Error("No se pudieron cargar las cuentas.");
   if ((accountResult.data ?? []).length === 0) {
-    accountResult = await supabase.from("accounts").insert(DEFAULT_ACCOUNTS.map((account) => ({ ...account, owner_id: ownerId })))
-      .select("id,name,account_type,voice_prompt,networks,enabled").order("created_at");
-    if (accountResult.error) throw new Error("No se pudieron crear las cuentas iniciales.");
+    const insertResult = await supabase.from("accounts").insert(DEFAULT_ACCOUNTS.map((account) => ({ ...account, owner_id: ownerId })));
+    if (insertResult.error) throw new Error("No se pudieron crear las cuentas iniciales.");
+    accountResult = await supabase.from("accounts").select("id,name,account_type,voice_prompt,networks,enabled").order("created_at");
+    if (accountResult.error) throw new Error("No se pudieron cargar las cuentas creadas.");
   }
-  const rows = accountResult.data ?? [];
+  const defaultOrder = new Map(DEFAULT_ACCOUNTS.map((acc, index) => [acc.name, index]));
+  const rows = [...(accountResult.data ?? [])].sort((a, b) => {
+    const orderA = defaultOrder.get(a.name) ?? 999;
+    const orderB = defaultOrder.get(b.name) ?? 999;
+    return orderA - orderB;
+  });
   const accounts = rows.map((row, index) => accountView(row, index));
   const accountNames = new Map(accounts.map((account) => [account.id, account.name]));
 
@@ -211,63 +215,81 @@ export async function loadWorkspace(): Promise<WorkspaceSnapshot> {
   return { accounts: accountsWithChannels, events, posts, sources, mode: settings?.mode === "automatic" ? "automatic" : "review", profile: extractUserProfile(user) };
 }
 
-function validateSource(input: SourceInput): SourceInput {
-  if (!input || typeof input.name !== "string" || typeof input.url !== "string" || !Array.isArray(input.accountIds)) {
-    throw new Error("Los datos de la fuente no son válidos.");
+export type SaveSourceResult =
+  | { success: true; source: SourceView }
+  | { success: false; error: string };
+
+export type ActionOutcome =
+  | { success: true }
+  | { success: false; error: string };
+
+export async function saveSource(input: SourceInput, sourceId?: string): Promise<SaveSourceResult> {
+  try {
+    const { supabase } = await authorizedClient();
+    const source = validateSource(input);
+    if (sourceId && !/^[0-9a-f-]{36}$/i.test(sourceId)) {
+      return { success: false, error: "La fuente no es válida." };
+    }
+    const { data: result, error } = await supabase.rpc("save_source", {
+      p_source_id: sourceId ?? null,
+      p_name: source.name,
+      p_source_type: source.type,
+      p_feed_url: source.url,
+      p_enabled: source.enabled,
+      p_account_ids: source.accountIds,
+    }).single();
+    if (error) {
+      return { success: false, error: error.message || "No se pudo guardar la fuente en Supabase." };
+    }
+    const data = result as { id: string; name: string; source_type: SourceType; feed_url: string; enabled: boolean; account_ids: string[] } | null;
+    if (!data) {
+      return { success: false, error: "No se pudieron obtener los datos de la fuente guardada." };
+    }
+    return {
+      success: true,
+      source: {
+        id: data.id,
+        name: data.name,
+        type: data.source_type,
+        url: data.feed_url,
+        enabled: data.enabled,
+        accountIds: data.account_ids ?? [],
+      },
+    };
+  } catch (caught) {
+    return {
+      success: false,
+      error: caught instanceof Error ? caught.message : "Error inesperado al guardar la fuente.",
+    };
   }
-  const name = input.name.trim();
-  if (!name || name.length > 120) throw new Error("El nombre de la fuente debe tener entre 1 y 120 caracteres.");
-  if (input.type !== "luma_ical" && input.type !== "meetup") throw new Error("El tipo de fuente no es válido.");
-  let parsed: URL;
-  try { parsed = new URL(input.url.trim()); }
-  catch { throw new Error("Introduce una URL válida para la fuente."); }
-  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") throw new Error("La URL debe usar HTTP o HTTPS.");
-  if (input.type === "meetup" && parsed.hostname !== "meetup.com" && !parsed.hostname.endsWith(".meetup.com")) {
-    throw new Error("La URL de Meetup debe pertenecer a meetup.com.");
-  }
-  const accountIds = [...new Set(input.accountIds)];
-  if (accountIds.length === 0 || accountIds.length > 20 || accountIds.some((id) => !/^[0-9a-f-]{36}$/i.test(id))) {
-    throw new Error("Asocia la fuente al menos con una cuenta válida.");
-  }
-  return { ...input, name, url: parsed.toString(), accountIds };
 }
 
-export async function saveSource(input: SourceInput, sourceId?: string): Promise<SourceView> {
-  const { supabase } = await authorizedClient();
-  const source = validateSource(input);
-  if (sourceId && !/^[0-9a-f-]{36}$/i.test(sourceId)) throw new Error("La fuente no es válida.");
-  const { data: result, error } = await supabase.rpc("save_source", {
-    p_source_id: sourceId ?? null,
-    p_name: source.name,
-    p_source_type: source.type,
-    p_feed_url: source.url,
-    p_enabled: source.enabled,
-    p_account_ids: source.accountIds,
-  }).single();
-  const data = result as { id: string; name: string; source_type: SourceType; feed_url: string; enabled: boolean; account_ids: string[] } | null;
-  if (error || !data) throw new Error("No se pudo guardar la fuente y sus cuentas asociadas. Comprueba que has aplicado las migraciones.");
-  return {
-    id: data.id,
-    name: data.name,
-    type: data.source_type,
-    url: data.feed_url,
-    enabled: data.enabled,
-    accountIds: data.account_ids ?? [],
-  };
+export async function setSourceEnabled(sourceId: string, enabled: boolean): Promise<ActionOutcome> {
+  try {
+    const { supabase } = await authorizedClient();
+    if (!/^[0-9a-f-]{36}$/i.test(sourceId) || typeof enabled !== "boolean") {
+      return { success: false, error: "La fuente no es válida." };
+    }
+    const { data, error } = await supabase.from("sources").update({ enabled }).eq("id", sourceId).select("id").single();
+    if (error || !data) return { success: false, error: "No se pudo actualizar la fuente." };
+    return { success: true };
+  } catch (caught) {
+    return { success: false, error: caught instanceof Error ? caught.message : "No se pudo actualizar la fuente." };
+  }
 }
 
-export async function setSourceEnabled(sourceId: string, enabled: boolean): Promise<void> {
-  const { supabase } = await authorizedClient();
-  if (!/^[0-9a-f-]{36}$/i.test(sourceId) || typeof enabled !== "boolean") throw new Error("La fuente no es válida.");
-  const { data, error } = await supabase.from("sources").update({ enabled }).eq("id", sourceId).select("id").single();
-  if (error || !data) throw new Error("No se pudo actualizar la fuente.");
-}
-
-export async function deleteSource(sourceId: string): Promise<void> {
-  const { supabase } = await authorizedClient();
-  if (!/^[0-9a-f-]{36}$/i.test(sourceId)) throw new Error("La fuente no es válida.");
-  const { data, error } = await supabase.from("sources").delete().eq("id", sourceId).select("id").single();
-  if (error || !data) throw new Error("No se pudo eliminar la fuente.");
+export async function deleteSource(sourceId: string): Promise<ActionOutcome> {
+  try {
+    const { supabase } = await authorizedClient();
+    if (!/^[0-9a-f-]{36}$/i.test(sourceId)) {
+      return { success: false, error: "La fuente no es válida." };
+    }
+    const { data, error } = await supabase.from("sources").delete().eq("id", sourceId).select("id").single();
+    if (error || !data) return { success: false, error: "No se pudo eliminar la fuente." };
+    return { success: true };
+  } catch (caught) {
+    return { success: false, error: caught instanceof Error ? caught.message : "No se pudo eliminar la fuente." };
+  }
 }
 
 export async function deleteEvent(eventId: string): Promise<void> {

@@ -19,16 +19,35 @@ export function SourceSettings({ accounts, sources, persistent, onSourcesChange,
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const accountsReady = !persistent || accounts.some((a) => /^[0-9a-f-]{36}$/i.test(a.id ?? ""));
 
   async function addSource(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setPending(true);
     setError("");
     setMessage("");
+    if (draft.accountIds.length === 0) {
+      setError("Asocia la fuente al menos a una cuenta.");
+      setPending(false);
+      return;
+    }
+    if (persistent && draft.accountIds.some((id) => !/^[0-9a-f-]{36}$/i.test(id))) {
+      setError("Las cuentas aún no se han sincronizado con Supabase. Espera un momento.");
+      setPending(false);
+      return;
+    }
     const input: SourceInput = { ...draft, enabled: true };
     try {
-      const saved = persistent ? await saveSource(input) : { ...input, id: crypto.randomUUID() };
-      onSourcesChange([...sources, saved]);
+      if (persistent) {
+        const result = await saveSource(input);
+        if (!result.success) {
+          setError(result.error);
+          return;
+        }
+        onSourcesChange([...sources, result.source]);
+      } else {
+        onSourcesChange([...sources, { ...input, enabled: true, id: crypto.randomUUID() }]);
+      }
       setDraft(emptySource);
       setMessage("La fuente y sus cuentas asociadas se han guardado.");
     } catch (caught) {
@@ -42,7 +61,13 @@ export function SourceSettings({ accounts, sources, persistent, onSourcesChange,
     setPending(true);
     setError("");
     try {
-      if (persistent) await setSourceEnabled(source.id, !source.enabled);
+      if (persistent) {
+        const result = await setSourceEnabled(source.id, !source.enabled);
+        if (!result.success) {
+          setError(result.error);
+          return;
+        }
+      }
       onSourcesChange(sources.map((item) => item.id === source.id ? { ...item, enabled: !item.enabled } : item));
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "No se pudo actualizar la fuente.");
@@ -55,7 +80,13 @@ export function SourceSettings({ accounts, sources, persistent, onSourcesChange,
     setPending(true);
     setError("");
     try {
-      if (persistent) await deleteSource(source.id);
+      if (persistent) {
+        const result = await deleteSource(source.id);
+        if (!result.success) {
+          setError(result.error);
+          return;
+        }
+      }
       onSourcesChange(sources.filter((item) => item.id !== source.id));
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "No se pudo eliminar la fuente.");
@@ -153,7 +184,9 @@ export function SourceSettings({ accounts, sources, persistent, onSourcesChange,
       <p className={styles.sourceHelp}>{draft.type === "luma_ical" ? "Puedes asociar una fuente a varias cuentas. Los feeds Luma iCal activos se consultan al sincronizar." : "Puedes guardar el enlace y asociar cuentas, pero Meetup todavía no se importa automáticamente. Para eventos individuales, pega la URL en Añadir evento."}</p>
       {error && <p role="alert" className={styles.sourceError}>{error}</p>}
       {message && <p role="status" className={styles.sourceSuccess}>{message}</p>}
-      <button className={styles.approveButton} type="submit" disabled={pending || accounts.length === 0}>Guardar fuente</button>
+      <button className={styles.approveButton} type="submit" disabled={pending || accounts.length === 0 || !accountsReady}>
+        {!accountsReady ? "Cargando cuentas…" : "Guardar fuente"}
+      </button>
     </form>
   </section>;
 }
