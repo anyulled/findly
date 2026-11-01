@@ -89,6 +89,7 @@ function Dashboard() {
                   ws.setEditing(post.text);
                   ws.setReconciliationId("");
                   ws.setAbsenceConfirmed(false);
+                  ws.setDraftDeleteError("");
                 }}
               />
             </WorkspaceErrorBoundary>
@@ -152,6 +153,9 @@ function Dashboard() {
       {ws.selected && (
         <PostDetailModal
           selected={ws.selected}
+          deletingDraft={ws.deletingDraft}
+          draftDeleteError={ws.draftDeleteError}
+          onRemoveDraft={(post) => { void ws.removeDraft(post); }}
           onClose={() => ws.setSelected(null)}
           currentEvent={ws.currentEvent}
           editing={ws.editing}

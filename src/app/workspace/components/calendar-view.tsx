@@ -129,7 +129,7 @@ export function CalendarView({
             const key = dayKey(date);
             const offMonth = range === "Mes" && date.getMonth() !== anchor.getMonth();
             const dayPosts = posts
-              .filter((p) => p.date === key)
+              .filter((p) => p.date === key && p.status !== "discarded")
               .sort((a, b) => a.time.localeCompare(b.time));
             const expanded = expandedDay === key;
             const visiblePosts = expanded ? dayPosts : dayPosts.slice(0, 3);

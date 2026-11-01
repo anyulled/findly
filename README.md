@@ -12,7 +12,7 @@ La aplicación incluye:
 - Un calendario con vistas quincenal, semanal y mensual. Cuando hay más de tres publicaciones en un día, el control «+N más» muestra todas con su cuenta, red y estado; cada una abre su detalle sin cambiar el intervalo.
 - Alta manual con datos o pegando la URL pública de Meetup/Luma para extraer los datos disponibles, revisarlos y corregirlos antes de guardar. Elige las cuentas destinatarias; la selección se conserva para completar recordatorios.
 - Borradores para LinkedIn, X y Bluesky, con fechas recordatorio a 14, 7 y 1 día del evento, a las 13:00 de `Europe/Madrid`. Se omiten las fechas cuyo horario ya pasó.
-- Tres cuentas de ejemplo con prompts de voz editables, edición de borradores y validación local del límite de texto por red.
+- Tres cuentas de ejemplo con prompts de voz editables, edición y eliminación de borradores en revisión, y validación local del límite de texto por red. Los recordatorios descartados no vuelven a generarse; los ya aprobados o enviados no se pueden eliminar desde este control.
 - El primer acceso persistente crea las tres cuentas mediante una operación de base de datos idempotente; las cargas simultáneas o una recarga tras una creación parcial no duplican cuentas.
 - Modos globales de revisión y automático. En revisión, una aprobación programa el texto en Buffer y guarda ese mismo texto como ejemplo de estilo; en automático, los borradores nuevos se programan al generarse, sin convertirse en ejemplos.
 - IDs de canal de Buffer configurables por cuenta y red. Las publicaciones usan el instante `due_at` (13:00 `Europe/Madrid`) convertido a UTC y la programación exacta `customScheduled`.

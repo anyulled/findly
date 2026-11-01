@@ -251,3 +251,24 @@ test("creates an event for selected accounts only and retains the selection afte
   expect(state.events[0].accountIds).toEqual(["acc-personal"]);
   expect([...new Set(state.posts.map((post: { account: string }) => post.account))]).toEqual(["Personal"]);
 });
+
+test("discards a review draft and preserves scheduled posts", async ({ page }) => {
+  const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Madrid", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+  await page.evaluate((date) => localStorage.setItem("findly-state-v1", JSON.stringify({
+    events: [{ id: "draft-event", title: "Borrado de prueba", date, time: "19:00", place: "Barcelona", description: "Prueba", source: "Manual" }],
+    posts: [
+      { id: "draft-one", eventId: "draft-event", date, time: "13:00", account: "Personal", network: "LinkedIn", text: "Borrador de prueba", status: "review" },
+      { id: "scheduled-one", eventId: "draft-event", date, time: "14:00", account: "Personal", network: "X", text: "Programada", status: "scheduled", bufferPostId: "buffer-id" },
+    ], mode: "review",
+  })), today);
+  await page.reload();
+  await page.getByRole("button", { name: "Borrado de prueba · Personal · LinkedIn · Pendiente de revisión" }).click();
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.getByRole("button", { name: "Eliminar borrador" }).click();
+  await expect(page.getByText("Borrador eliminado.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Borrado de prueba · Personal · LinkedIn · Pendiente de revisión" })).toHaveCount(0);
+  await page.reload();
+  await expect(page.getByRole("button", { name: "Borrado de prueba · Personal · LinkedIn · Pendiente de revisión" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Borrado de prueba · Personal · X · Programada" }).click();
+  await expect(page.getByRole("button", { name: "Eliminar borrador" })).toHaveCount(0);
+});

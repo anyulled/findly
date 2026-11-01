@@ -72,7 +72,7 @@ export function EventList({
                   <h3>{event.title}</h3>
                   <p>{event.description}</p>
                   <div className={styles.eventFoot}>
-                    {eventPosts.length} publicaciones previstas{" "}
+                    {eventPosts.filter((post) => post.status !== "discarded").length} publicaciones previstas{" "}
                     {persistent && missing && (
                       <button
                         className={styles.morePosts}
