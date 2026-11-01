@@ -11,6 +11,7 @@ import { AccountSettings } from "./components/account-settings";
 import { SettingsView } from "./components/settings-view";
 import { PostDetailModal } from "./components/post-detail-modal";
 import { AddEventModal } from "./components/add-event-modal";
+import { WorkspaceErrorBoundary } from "./components/workspace-error-boundary";
 
 function Dashboard() {
   const ws = useWorkspace();
@@ -65,77 +66,85 @@ function Dashboard() {
           )}
 
           {ws.tab === "Calendario" && (
-            <CalendarView
-              persistent={ws.persistent}
-              range={ws.range}
-              setRange={ws.setRange}
-              anchor={ws.anchor}
-              setAnchor={ws.setAnchor}
-              navigate={ws.navigate}
-              dates={ws.dates}
-              monthLabel={ws.monthLabel}
-              expandedDay={ws.expandedDay}
-              setExpandedDay={ws.setExpandedDay}
-              firstRevealedPost={ws.firstRevealedPost}
-              events={ws.events}
-              posts={ws.posts}
-              reviewCount={ws.reviewCount}
-              openAddForm={ws.openAddForm}
-              setTab={ws.setTab}
-              onSelectPost={(post) => {
-                ws.setSelected(post);
-                ws.setEditing(post.text);
-                ws.setReconciliationId("");
-                ws.setAbsenceConfirmed(false);
-              }}
-            />
+            <WorkspaceErrorBoundary fallbackTitle="Error al cargar el calendario">
+              <CalendarView
+                persistent={ws.persistent}
+                range={ws.range}
+                setRange={ws.setRange}
+                anchor={ws.anchor}
+                setAnchor={ws.setAnchor}
+                navigate={ws.navigate}
+                dates={ws.dates}
+                monthLabel={ws.monthLabel}
+                expandedDay={ws.expandedDay}
+                setExpandedDay={ws.setExpandedDay}
+                firstRevealedPost={ws.firstRevealedPost}
+                events={ws.events}
+                posts={ws.posts}
+                reviewCount={ws.reviewCount}
+                openAddForm={ws.openAddForm}
+                setTab={ws.setTab}
+                onSelectPost={(post) => {
+                  ws.setSelected(post);
+                  ws.setEditing(post.text);
+                  ws.setReconciliationId("");
+                  ws.setAbsenceConfirmed(false);
+                }}
+              />
+            </WorkspaceErrorBoundary>
           )}
 
           {ws.tab === "Eventos" && (
-            <EventList
-              events={ws.events}
-              posts={ws.posts}
-              sources={ws.sources}
-              accountList={ws.accountList}
-              persistent={ws.persistent}
-              openAddForm={ws.openAddForm}
-              onRetryDrafts={(event) => {
-                void ws.retryDrafts(event);
-              }}
-              onRemoveEvent={(eventId) => {
-                void ws.removeEvent(eventId);
-              }}
-            />
+            <WorkspaceErrorBoundary fallbackTitle="Error al cargar la lista de eventos">
+              <EventList
+                events={ws.events}
+                posts={ws.posts}
+                sources={ws.sources}
+                accountList={ws.accountList}
+                persistent={ws.persistent}
+                openAddForm={ws.openAddForm}
+                onRetryDrafts={(event) => {
+                  void ws.retryDrafts(event);
+                }}
+                onRemoveEvent={(eventId) => {
+                  void ws.removeEvent(eventId);
+                }}
+              />
+            </WorkspaceErrorBoundary>
           )}
 
           {ws.tab === "Cuentas" && (
-            <AccountSettings
-              accountList={ws.accountList}
-              setAccountList={ws.setAccountList}
-              posts={ws.posts}
-              persistent={ws.persistent}
-              onChangeVoice={(account, prompt) => {
-                void ws.changeVoice(account, prompt);
-              }}
-              onChangeBufferChannel={(account, network, channelId) => {
-                void ws.changeBufferChannel(account, network, channelId);
-              }}
-            />
+            <WorkspaceErrorBoundary fallbackTitle="Error al cargar la configuración de cuentas">
+              <AccountSettings
+                accountList={ws.accountList}
+                setAccountList={ws.setAccountList}
+                posts={ws.posts}
+                persistent={ws.persistent}
+                onChangeVoice={(account, prompt) => {
+                  void ws.changeVoice(account, prompt);
+                }}
+                onChangeBufferChannel={(account, network, channelId) => {
+                  void ws.changeBufferChannel(account, network, channelId);
+                }}
+              />
+            </WorkspaceErrorBoundary>
           )}
 
           {ws.tab === "Ajustes" && (
-            <SettingsView
-              mode={ws.mode}
-              persistent={ws.persistent}
-              bufferApiKeyConfigured={ws.bufferApiKeyConfigured}
-              sources={ws.sources}
-              accountList={ws.accountList}
-              onChangeMode={(mode) => {
-                void ws.changeMode(mode);
-              }}
-              onSourcesChange={ws.setSources}
-              onSyncComplete={ws.refreshWorkspaceAfterSync}
-            />
+            <WorkspaceErrorBoundary fallbackTitle="Error al cargar los ajustes">
+              <SettingsView
+                mode={ws.mode}
+                persistent={ws.persistent}
+                bufferApiKeyConfigured={ws.bufferApiKeyConfigured}
+                sources={ws.sources}
+                accountList={ws.accountList}
+                onChangeMode={(mode) => {
+                  void ws.changeMode(mode);
+                }}
+                onSourcesChange={ws.setSources}
+                onSyncComplete={ws.refreshWorkspaceAfterSync}
+              />
+            </WorkspaceErrorBoundary>
           )}
         </div>
       </section>

@@ -4,6 +4,7 @@ import type { ApprovedStyleExample } from "./groq";
 import { NETWORKS, type SocialNetwork } from "./social-validation";
 import type { PostLanguage } from "./language";
 import { selectEventAccounts } from "./event-targets";
+import { managedAccount } from "./managed-accounts";
 import { dispatchApprovedPostsWithSupabase, type DispatchBudget } from "./approved-dispatch";
 
 export interface SupabaseDraftRepositoryOptions {
@@ -85,6 +86,7 @@ export function createSupabaseDraftRepository(
         name: account.name,
         voice: account.voice_prompt,
         networks: account.networks.filter((n): n is SocialNetwork => NETWORKS.includes(n as SocialNetwork)),
+        kind: managedAccount(account.name)?.kind ?? "Asociación",
       }));
     },
 
