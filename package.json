@@ -10,7 +10,8 @@
     "test:e2e": "playwright test",
     "test:unit": "tsx --test unit/*.test.ts",
     "test:coverage": "c8 --all --include='src/lib/*.ts' --per-file --reporter=text --reporter=json --check-coverage --lines=80 tsx --test unit/*.test.ts",
-    "test:crap": "node scripts/check-crap-score.mjs"
+    "test:crap": "node scripts/check-crap-score.mjs",
+    "test:duplication": "jscpd src --min-tokens 50 --threshold 1"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.7",
@@ -28,6 +29,7 @@
     "c8": "^12.0.0",
     "eslint": "^9",
     "eslint-config-next": "16.4.3",
+    "jscpd": "^5.4.2",
     "tsx": "^4.23.15",
     "typescript": "^5"
   }

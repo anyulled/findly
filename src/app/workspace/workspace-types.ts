@@ -1,4 +1,4 @@
-import type { PostLanguage } from "@/lib/language";
+import type { EventView, PostView } from "../workspace-actions";
 
 export type Range = "Quincena" | "Semana" | "Mes";
 export type Status =
@@ -11,36 +11,8 @@ export type Status =
   | "needs_reconciliation";
 export type Network = "LinkedIn" | "X" | "Bluesky";
 
-export type EventItem = {
-  id: string;
-  title: string;
-  date: string;
-  time: string;
-  place: string;
-  description: string;
-  source: string;
-  sourceId?: string | null;
-  accountIds?: string[] | null;
-  url?: string;
-  imageUrl?: string;
-  language?: PostLanguage;
-};
-
-export type Post = {
-  id: string;
-  eventId: string;
-  date: string;
-  time: string;
-  account: string;
-  accountId?: string;
-  network: Network;
-  text: string;
-  status: Status;
-  leadDays?: 14 | 7 | 1;
-  language?: PostLanguage;
-  lastError?: string | null;
-  bufferPostId?: string | null;
-};
+export type EventItem = EventView;
+export type Post = PostView;
 
 export type Account = {
   id?: string;

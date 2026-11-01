@@ -121,6 +121,26 @@ function localTimeToInstant(parts: LocalDateTime, timeZone: string): Date {
   throw new IcalParseError(`No se pudo interpretar la fecha local en "${timeZone}".`);
 }
 
+function resolveTimezoneInstant(
+  calendar: ICAL.Component,
+  start: ICAL.Time,
+  parts: LocalDateTime,
+  tzid: string,
+): Date {
+  if (tzid.toUpperCase() === "UTC") return start.toJSDate();
+  const timezone = calendar.getTimeZoneByID(tzid);
+  if (timezone) {
+    start.zone = timezone;
+    return start.toJSDate();
+  }
+  try {
+    return localTimeToInstant(parts, tzid);
+  } catch (error) {
+    if (error instanceof IcalParseError) throw error;
+    throw new IcalParseError(`No se pudo interpretar DTSTART con TZID="${tzid}".`);
+  }
+}
+
 function eventInstant(calendar: ICAL.Component, property: ICAL.Property, start: ICAL.Time): Date {
   const parts = dateTimeParts(start);
   if (!validDateTime(parts)) throw new IcalParseError("DTSTART contiene una fecha u hora no válida.");
@@ -129,27 +149,9 @@ function eventInstant(calendar: ICAL.Component, property: ICAL.Property, start: 
   const rawTzid = property.getParameter("tzid");
   const tzid = Array.isArray(rawTzid) ? rawTzid[0] : rawTzid;
   if (!tzid && start.zone.tzid.toUpperCase() === "UTC") return start.toJSDate();
-  if (!tzid) {
-    // RFC 5545 calls a date-time without Z or TZID "floating". Findly treats
-    // these as Madrid wall-clock times, matching the application's convention.
-    return localTimeToInstant(parts, MADRID_TIME_ZONE);
-  }
-  if (tzid.toUpperCase() === "UTC") return start.toJSDate();
+  if (!tzid) return localTimeToInstant(parts, MADRID_TIME_ZONE);
 
-  const timezone = calendar.getTimeZoneByID(tzid);
-  if (timezone) {
-    start.zone = timezone;
-    return start.toJSDate();
-  }
-
-  // Some feeds reference an IANA TZID without embedding VTIMEZONE. Intl has
-  // the host's IANA database, so convert the local wall clock directly.
-  try {
-    return localTimeToInstant(parts, tzid);
-  } catch (error) {
-    if (error instanceof IcalParseError) throw error;
-    throw new IcalParseError(`No se pudo interpretar DTSTART con TZID="${tzid}".`);
-  }
+  return resolveTimezoneInstant(calendar, start, parts, tzid);
 }
 
 function validDateTime(parts: LocalDateTime): boolean {
@@ -184,6 +186,48 @@ function urlValue(event: ICAL.Component): string | null {
   return match?.[0] ?? null;
 }
 
+function parseVeventComponent(
+  component: ICAL.Component,
+  calendar: ICAL.Component,
+): { event?: LumaCalendarEvent; issue?: CalendarParseIssue } {
+  let uid: string | null = null;
+  try {
+    uid = textValue(component, "uid") || null;
+    const title = textValue(component, "summary");
+    const startProperty = component.getFirstProperty("dtstart");
+    if (!uid || !title || !startProperty) {
+      return { issue: { uid, message: "Se omite el evento porque falta UID, SUMMARY o DTSTART." } };
+    }
+    validateRawStart(startProperty.toJSON()[3]);
+    const start = component.getFirstPropertyValue("dtstart");
+    if (!(start instanceof ICAL.Time)) {
+      return { issue: { uid, message: "Se omite el evento porque falta UID, SUMMARY o DTSTART." } };
+    }
+    const instant = eventInstant(calendar, startProperty, start);
+    const madrid = formatMadridDateTime(instant);
+    return {
+      event: {
+        uid,
+        title,
+        description: textValue(component, "description"),
+        location: textValue(component, "location"),
+        url: urlValue(component),
+        startsAt: instant.toISOString(),
+        date: madrid.date,
+        time: madrid.time,
+        allDay: start.isDate,
+      },
+    };
+  } catch (error) {
+    return {
+      issue: {
+        uid,
+        message: error instanceof Error ? error.message : "No se pudo interpretar el evento.",
+      },
+    };
+  }
+}
+
 /** Parse VEVENT records into Findly's fields without fetching the feed. */
 export function parseLumaIcal(input: string): LumaCalendarParseResult {
   let calendar: ICAL.Component;
@@ -200,37 +244,9 @@ export function parseLumaIcal(input: string): LumaCalendarParseResult {
   const issues: CalendarParseIssue[] = [];
   const components = calendar.getAllSubcomponents("vevent");
   for (const component of components) {
-    let uid: string | null = null;
-    try {
-      uid = textValue(component, "uid") || null;
-      const title = textValue(component, "summary");
-      const startProperty = component.getFirstProperty("dtstart");
-      if (!uid || !title || !startProperty) {
-        issues.push({ uid, message: "Se omite el evento porque falta UID, SUMMARY o DTSTART." });
-        continue;
-      }
-      validateRawStart(startProperty.toJSON()[3]);
-      const start = component.getFirstPropertyValue("dtstart");
-      if (!(start instanceof ICAL.Time)) {
-        issues.push({ uid, message: "Se omite el evento porque falta UID, SUMMARY o DTSTART." });
-        continue;
-      }
-      const instant = eventInstant(calendar, startProperty!, start);
-      const madrid = formatMadridDateTime(instant);
-      events.push({
-        uid,
-        title,
-        description: textValue(component, "description"),
-        location: textValue(component, "location"),
-        url: urlValue(component),
-        startsAt: instant.toISOString(),
-        date: madrid.date,
-        time: madrid.time,
-        allDay: start.isDate,
-      });
-    } catch (error) {
-      issues.push({ uid, message: error instanceof Error ? error.message : "No se pudo interpretar el evento." });
-    }
+    const { event, issue } = parseVeventComponent(component, calendar);
+    if (event) events.push(event);
+    if (issue) issues.push(issue);
   }
 
   return { events, issues };

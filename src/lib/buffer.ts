@@ -214,6 +214,20 @@ export class BufferClient {
     }
   }
 
+  private handleUnreadableResponse(response: Response, cause?: unknown): never {
+    if (!response.ok && response.status < 500) {
+      throw new BufferApiError({
+        message: `Buffer rejected the request with HTTP ${response.status}.`,
+        httpStatus: response.status,
+        outcome: "rejected",
+      });
+    }
+    throw new BufferUncertainResultError(
+      "Buffer returned an unreadable response. Reconcile the channel queue before retrying.",
+      { cause, httpStatus: response.status },
+    );
+  }
+
   private async parseResponseEnvelope(response: Response): Promise<GraphQLEnvelope> {
     if (response.status >= 500) {
       throw new BufferUncertainResultError(
@@ -226,38 +240,12 @@ export class BufferClient {
     try {
       rawEnvelope = await response.json();
     } catch (cause) {
-      if (response.status >= 500) {
-        throw new BufferUncertainResultError(
-          "Buffer returned a server error without a readable result. Reconcile the channel queue before retrying.",
-          { cause, httpStatus: response.status },
-        );
-      }
-      if (!response.ok) {
-        throw new BufferApiError({
-          message: `Buffer rejected the request with HTTP ${response.status}.`,
-          httpStatus: response.status,
-          outcome: "rejected",
-        });
-      }
-      throw new BufferUncertainResultError(
-        "Buffer returned an unreadable response. Reconcile the channel queue before retrying.",
-        { cause, httpStatus: response.status },
-      );
+      this.handleUnreadableResponse(response, cause);
     }
 
     const envelope = asRecord(rawEnvelope) as GraphQLEnvelope | null;
     if (!envelope) {
-      if (!response.ok && response.status < 500) {
-        throw new BufferApiError({
-          message: `Buffer rejected the request with HTTP ${response.status}.`,
-          httpStatus: response.status,
-          outcome: "rejected",
-        });
-      }
-      throw new BufferUncertainResultError(
-        "Buffer returned a response without a GraphQL result. Reconcile the channel queue before retrying.",
-        { httpStatus: response.status },
-      );
+      this.handleUnreadableResponse(response);
     }
     return envelope;
   }
@@ -290,36 +278,44 @@ export class BufferClient {
     );
   }
 
+  private extractScheduledPost(
+    response: Response,
+    payload: Record<string, unknown>,
+    errors: BufferGraphQLError[],
+  ): ScheduleBufferPostResult {
+    if (!response.ok) {
+      throw new BufferApiError({
+        message: `Buffer rejected the request with HTTP ${response.status}.`,
+        httpStatus: response.status,
+        outcome: "rejected",
+        errors,
+      });
+    }
+    const post = asRecord(payload.post);
+    if (!post || typeof post.id !== "string" || typeof post.text !== "string") {
+      throw new BufferUncertainResultError(
+        "Buffer accepted the mutation but returned incomplete post data. Reconcile before retrying.",
+        { httpStatus: response.status },
+      );
+    }
+    return {
+      kind: "scheduled",
+      post: {
+        id: post.id,
+        text: post.text,
+        dueAt: typeof post.dueAt === "string" ? post.dueAt : null,
+      },
+      warnings: errors,
+    };
+  }
+
   private processCreatePostPayload(
     response: Response,
     payload: Record<string, unknown> | null,
     errors: BufferGraphQLError[],
   ): ScheduleBufferPostResult {
-    if (payload && payload.__typename === "PostActionSuccess") {
-      if (!response.ok) {
-        throw new BufferApiError({
-          message: `Buffer rejected the request with HTTP ${response.status}.`,
-          httpStatus: response.status,
-          outcome: "rejected",
-          errors,
-        });
-      }
-      const post = asRecord(payload.post);
-      if (!post || typeof post.id !== "string" || typeof post.text !== "string") {
-        throw new BufferUncertainResultError(
-          "Buffer accepted the mutation but returned incomplete post data. Reconcile before retrying.",
-          { httpStatus: response.status },
-        );
-      }
-      return {
-        kind: "scheduled",
-        post: {
-          id: post.id,
-          text: post.text,
-          dueAt: typeof post.dueAt === "string" ? post.dueAt : null,
-        },
-        warnings: errors,
-      };
+    if (payload?.__typename === "PostActionSuccess") {
+      return this.extractScheduledPost(response, payload, errors);
     }
 
     if (payload && typeof payload.message === "string") {

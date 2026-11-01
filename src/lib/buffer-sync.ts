@@ -58,6 +58,25 @@ export interface BufferSlot {
 
 const WEEKDAY_CODES = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"] as const;
 
+function findFirstFreeTime(
+  times: string[],
+  date: string,
+  isToday: boolean,
+  nowTime: string,
+  occupiedSlots: Set<string>,
+): string | null {
+  for (const rawTime of times) {
+    const time = rawTime.slice(0, 5);
+    if (isToday && time <= nowTime) continue;
+    const key = `${date}T${time}`;
+    if (!occupiedSlots.has(key)) {
+      occupiedSlots.add(key);
+      return time;
+    }
+  }
+  return null;
+}
+
 export function computeNextSlotFromSchedule(
   network: SocialNetwork,
   schedule: BufferPostingScheduleDay[] | undefined,
@@ -77,15 +96,8 @@ export function computeNextSlotFromSchedule(
       : { day: dayCode, times: [defaultTime], paused: false };
     if (!dayEntry || dayEntry.paused || dayEntry.times.length === 0) continue;
 
-    for (const rawTime of dayEntry.times) {
-      const time = rawTime.slice(0, 5);
-      if (offset === 0 && time <= nowMadrid.time) continue;
-      const key = `${date}T${time}`;
-      if (!occupiedSlots.has(key)) {
-        occupiedSlots.add(key);
-        return { date, time };
-      }
-    }
+    const freeTime = findFirstFreeTime(dayEntry.times, date, offset === 0, nowMadrid.time, occupiedSlots);
+    if (freeTime) return { date, time: freeTime };
   }
 
   const fallback = new Date(Date.UTC(startYear, startMonth - 1, startDay + 1, 12, 0, 0)).toISOString().slice(0, 10);
@@ -176,6 +188,43 @@ function writeBufferSyncCache(accountId: string, apiKey: string, result: BufferA
   });
 }
 
+function mapDiscoveredChannels(rawChannels: Array<{ id: string; name: string; service: string }>) {
+  const channels: BufferDiscoveredChannel[] = [];
+  const channelNetworkMap = new Map<string, SocialNetwork>();
+  for (const c of rawChannels) {
+    const network = mapServiceToNetwork(c.service);
+    if (!network) continue;
+    channelNetworkMap.set(c.id, network);
+    channels.push({ network, channelId: c.id, channelName: c.name });
+  }
+  return { channels, channelNetworkMap };
+}
+
+function mapDiscoveredPosts(
+  edges: Array<{ node: { id: string; text: string; dueAt: string; channelId: string; status: string } }>,
+  channelNetworkMap: Map<string, SocialNetwork>,
+  accountName: string,
+  accountId: string,
+): BufferScheduledPostItem[] {
+  const posts: BufferScheduledPostItem[] = [];
+  for (const edge of edges) {
+    const node = edge.node;
+    if (!node?.id || !node.text || !node.dueAt) continue;
+    const network = channelNetworkMap.get(node.channelId);
+    if (!network) continue;
+    posts.push({
+      id: node.id,
+      bufferPostId: node.id,
+      accountName,
+      accountId,
+      network,
+      text: node.text,
+      dueAt: node.dueAt,
+    });
+  }
+  return posts;
+}
+
 export async function fetchScheduledPostsForAccount(
   apiKey: string,
   accountName: string,
@@ -226,35 +275,8 @@ export async function fetchScheduledPostsForAccount(
     ),
   ]);
 
-  const rawChannels = channelsData?.channels ?? [];
-  const channels: BufferDiscoveredChannel[] = [];
-  const channelNetworkMap = new Map<string, SocialNetwork>();
-
-  for (const c of rawChannels) {
-    const network = mapServiceToNetwork(c.service);
-    if (!network) continue;
-    channelNetworkMap.set(c.id, network);
-    channels.push({ network, channelId: c.id, channelName: c.name });
-  }
-
-  const edges = postsData?.posts?.edges ?? [];
-  const posts: BufferScheduledPostItem[] = [];
-
-  for (const edge of edges) {
-    const node = edge.node;
-    if (!node?.id || !node.text || !node.dueAt) continue;
-    const network = channelNetworkMap.get(node.channelId);
-    if (!network) continue;
-    posts.push({
-      id: node.id,
-      bufferPostId: node.id,
-      accountName,
-      accountId,
-      network,
-      text: node.text,
-      dueAt: node.dueAt,
-    });
-  }
+  const { channels, channelNetworkMap } = mapDiscoveredChannels(channelsData?.channels ?? []);
+  const posts = mapDiscoveredPosts(postsData?.posts?.edges ?? [], channelNetworkMap, accountName, accountId);
 
   const result = { posts, channels };
   writeBufferSyncCache(accountId, apiKey, result, useCache);
@@ -332,6 +354,79 @@ export async function syncBufferScheduledPosts(
   return resultPosts;
 }
 
+function recordChannelSchedules(
+  channels: ChannelsData["channels"] | undefined,
+  schedulesByNetwork: Map<SocialNetwork, BufferPostingScheduleDay[]>,
+): Map<string, SocialNetwork> {
+  const channelNetworkMap = new Map<string, SocialNetwork>();
+  for (const chan of channels ?? []) {
+    const net = mapServiceToNetwork(chan.service);
+    if (!net) continue;
+    channelNetworkMap.set(chan.id, net);
+    if (chan.postingSchedule) schedulesByNetwork.set(net, chan.postingSchedule);
+  }
+  return channelNetworkMap;
+}
+
+function recordOccupiedPostSlots(
+  edges: NonNullable<PostsData["posts"]>["edges"] | undefined,
+  channelNetworkMap: Map<string, SocialNetwork>,
+  occupiedByNetwork: Record<SocialNetwork, Set<string>>,
+): void {
+  for (const edge of edges ?? []) {
+    const node = edge.node;
+    const net = node?.channelId ? channelNetworkMap.get(node.channelId) : undefined;
+    if (!net || !node?.dueAt) continue;
+    const dt = formatMadridDateTime(node.dueAt);
+    occupiedByNetwork[net].add(`${dt.date}T${dt.time}`);
+  }
+}
+
+async function loadBufferSchedulesAndOccupied(
+  apiKey: string,
+  fetchImpl: typeof fetch,
+  occupiedByNetwork: Record<SocialNetwork, Set<string>>,
+  schedulesByNetwork: Map<SocialNetwork, BufferPostingScheduleDay[]>,
+): Promise<void> {
+  const orgData = await queryBufferGraphql<AccountOrgData>(
+    apiKey,
+    "query { account { organizations { id name } } }",
+    undefined,
+    fetchImpl,
+  );
+  const orgId = orgData?.account?.organizations?.[0]?.id;
+  if (!orgId) return;
+
+  const [channelsData, postsData] = await Promise.all([
+    queryBufferGraphql<ChannelsData>(
+      apiKey,
+      `query GetChannelsWithSchedule($input: ChannelsInput!) {
+        channels(input: $input) {
+          id
+          name
+          service
+          postingSchedule { day times paused }
+        }
+      }`,
+      { input: { organizationId: orgId } },
+      fetchImpl,
+    ),
+    queryBufferGraphql<PostsData>(
+      apiKey,
+      `query GetScheduledPosts($input: PostsInput!) {
+        posts(first: 50, input: $input) {
+          edges { node { id text dueAt channelId status } }
+        }
+      }`,
+      { input: { organizationId: orgId, filter: { status: ["scheduled"] } } },
+      fetchImpl,
+    ),
+  ]);
+
+  const channelNetworkMap = recordChannelSchedules(channelsData?.channels, schedulesByNetwork);
+  recordOccupiedPostSlots(postsData?.posts?.edges, channelNetworkMap, occupiedByNetwork);
+}
+
 export async function fetchNextChannelSlotsForAccount(
   apiKey: string | null | undefined,
   networks: SocialNetwork[],
@@ -347,53 +442,7 @@ export async function fetchNextChannelSlotsForAccount(
   };
 
   if (apiKey?.trim()) {
-    const orgData = await queryBufferGraphql<AccountOrgData>(
-      apiKey,
-      "query { account { organizations { id name } } }",
-      undefined,
-      fetchImpl,
-    );
-    const orgId = orgData?.account?.organizations?.[0]?.id;
-    if (orgId) {
-      const channelsData = await queryBufferGraphql<ChannelsData>(
-        apiKey,
-        `query GetChannelsWithSchedule($input: ChannelsInput!) {
-          channels(input: $input) {
-            id
-            name
-            service
-            postingSchedule { day times paused }
-          }
-        }`,
-        { input: { organizationId: orgId } },
-        fetchImpl,
-      );
-      const channelNetworkMap = new Map<string, SocialNetwork>();
-      for (const chan of channelsData?.channels ?? []) {
-        const net = mapServiceToNetwork(chan.service);
-        if (!net) continue;
-        channelNetworkMap.set(chan.id, net);
-        if (chan.postingSchedule) schedulesByNetwork.set(net, chan.postingSchedule);
-      }
-
-      const postsData = await queryBufferGraphql<PostsData>(
-        apiKey,
-        `query GetScheduledPosts($input: PostsInput!) {
-          posts(first: 50, input: $input) {
-            edges { node { id text dueAt channelId status } }
-          }
-        }`,
-        { input: { organizationId: orgId, filter: { status: ["scheduled"] } } },
-        fetchImpl,
-      );
-      for (const edge of postsData?.posts?.edges ?? []) {
-        const node = edge.node;
-        const net = node?.channelId ? channelNetworkMap.get(node.channelId) : undefined;
-        if (!net || !node?.dueAt) continue;
-        const dt = formatMadridDateTime(node.dueAt);
-        occupiedByNetwork[net].add(`${dt.date}T${dt.time}`);
-      }
-    }
+    await loadBufferSchedulesAndOccupied(apiKey.trim(), fetchImpl, occupiedByNetwork, schedulesByNetwork);
   }
 
   const result = {} as Record<SocialNetwork, BufferSlot>;

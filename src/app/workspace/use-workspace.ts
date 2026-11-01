@@ -38,6 +38,16 @@ import {
   starterPosts,
 } from "./workspace-calendar-dates";
 
+function toPublishingStatus(kind: string): Status {
+  return kind === "scheduled"
+    ? "scheduled"
+    : kind === "failed"
+      ? "failed"
+      : kind === "needs_reconciliation"
+        ? "needs_reconciliation"
+        : "scheduling";
+}
+
 export function useWorkspace() {
   const [tab, setTab] = useState("Calendario");
   const [range, setRange] = useState<Range>("Quincena");
@@ -98,6 +108,41 @@ export function useWorkspace() {
     setShowAdd(false);
   }
 
+  function applyWorkspaceSnapshot(snapshot: Awaited<ReturnType<typeof loadWorkspace>>) {
+    if (snapshot.error) {
+      setFeedback(snapshot.error);
+      return;
+    }
+    setEvents(snapshot.events);
+    setPosts(snapshot.posts);
+    setMode(snapshot.mode);
+    setBufferApiKeyConfigured(snapshot.accounts.every((account) => account.bufferApiKeyConfigured));
+    setAccountList(snapshot.accounts);
+    setSources(snapshot.sources);
+    if (snapshot.profile) setProfile(snapshot.profile);
+    try {
+      localStorage.setItem("findly-workspace-cache-v1", JSON.stringify(snapshot));
+    } catch {
+      /* Ignore quota errors */
+    }
+  }
+
+  function resetAddForm() {
+    closeAddForm();
+    setNewEvent({
+      title: "",
+      date: "",
+      time: "",
+      place: "",
+      description: "",
+      source: "Manual",
+      imageUrl: "",
+    });
+    setSourceUrl("");
+    setExtractionMessage("");
+    setTab("Eventos");
+  }
+
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (persistent) {
@@ -125,23 +170,7 @@ export function useWorkspace() {
         .then((snapshot) => {
           if (!active) return;
           setSyncingWorkspace(false);
-          if (snapshot.error) {
-            setFeedback(snapshot.error);
-            setHydrated(true);
-            return;
-          }
-          setEvents(snapshot.events);
-          setPosts(snapshot.posts);
-          setMode(snapshot.mode);
-          setBufferApiKeyConfigured(snapshot.accounts.every((account) => account.bufferApiKeyConfigured));
-          setAccountList(snapshot.accounts);
-          setSources(snapshot.sources);
-          if (snapshot.profile) setProfile(snapshot.profile);
-          try {
-            localStorage.setItem("findly-workspace-cache-v1", JSON.stringify(snapshot));
-          } catch {
-            /* Ignore quota errors */
-          }
+          applyWorkspaceSnapshot(snapshot);
           setHydrated(true);
         })
         .catch((error: unknown) => {
@@ -215,14 +244,7 @@ export function useWorkspace() {
           setFeedback("No se pudo reservar la publicación. Revisa su estado y la cuenta asociada a la fuente.");
           return;
         }
-        const status: Status =
-          outcome.kind === "scheduled"
-            ? "scheduled"
-            : outcome.kind === "failed"
-              ? "failed"
-              : outcome.kind === "needs_reconciliation"
-                ? "needs_reconciliation"
-                : "scheduling";
+        const status = toPublishingStatus(outcome.kind);
         const message = "message" in outcome ? outcome.message : null;
         changes = { ...next, status, lastError: message };
         setAccountList((all) =>
@@ -315,21 +337,13 @@ export function useWorkspace() {
         setFeedback(
           `El evento quedó guardado, pero no se guardaron todos sus borradores. Puedes reintentarlo desde la ficha del evento. ${error instanceof Error ? error.message : ""}`,
         );
-        closeAddForm();
-        setNewEvent({ title: "", date: "", time: "", place: "", description: "", source: "Manual", imageUrl: "" });
-        setSourceUrl("");
-        setExtractionMessage("");
-        setTab("Eventos");
+        resetAddForm();
       } else {
         setFeedback(error instanceof Error ? error.message : "No se pudo guardar el evento.");
       }
       return;
     }
-    closeAddForm();
-    setNewEvent({ title: "", date: "", time: "", place: "", description: "", source: "Manual", imageUrl: "" });
-    setSourceUrl("");
-    setExtractionMessage("");
-    setTab("Eventos");
+    resetAddForm();
   }
 
   async function extractEventFromUrl() {
@@ -402,22 +416,7 @@ export function useWorkspace() {
     setSyncingWorkspace(true);
     const snapshot = await loadWorkspace();
     setSyncingWorkspace(false);
-    if (snapshot.error) {
-      setFeedback(snapshot.error);
-      return;
-    }
-    setEvents(snapshot.events);
-    setPosts(snapshot.posts);
-    setMode(snapshot.mode);
-    setBufferApiKeyConfigured(snapshot.accounts.every((account) => account.bufferApiKeyConfigured));
-    setAccountList(snapshot.accounts);
-    setSources(snapshot.sources);
-    if (snapshot.profile) setProfile(snapshot.profile);
-    try {
-      localStorage.setItem("findly-workspace-cache-v1", JSON.stringify(snapshot));
-    } catch {
-      /* Ignore quota errors */
-    }
+    applyWorkspaceSnapshot(snapshot);
   }
 
   async function changeMode(nextMode: "review" | "automatic") {
@@ -483,14 +482,7 @@ export function useWorkspace() {
         setFeedback("No se pudo reservar la publicación. Revisa su estado y la cuenta asociada a la fuente.");
         return;
       }
-      const status: Status =
-        outcome.kind === "scheduled"
-          ? "scheduled"
-          : outcome.kind === "failed"
-            ? "failed"
-            : outcome.kind === "needs_reconciliation"
-              ? "needs_reconciliation"
-              : "scheduling";
+      const status = toPublishingStatus(outcome.kind);
       const message = "message" in outcome ? outcome.message : null;
       const changes: Partial<Post> = { status, lastError: message };
       setPosts((all) => all.map((item) => (item.id === post.id ? { ...item, ...changes } : item)));

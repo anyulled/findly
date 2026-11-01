@@ -61,8 +61,11 @@ jobs:
       - name: Enforce per-file business logic coverage
         run: npm run test:coverage
 
-      - name: Enforce CRAP metric threshold (P20)
+      - name: Enforce CRAP metric threshold (<= 10) and duplication
         run: npm run test:crap
+
+      - name: Enforce code duplication threshold (0 clones, <= 1%)
+        run: npm run test:duplication
 
   database-migrations:
     name: Database migrations

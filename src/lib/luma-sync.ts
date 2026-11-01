@@ -67,6 +67,62 @@ function parseSourceRows(source: LumaSource, rawContent: string): { rows: Persis
   return { rows, skippedEvents: parsed.issues.length };
 }
 
+async function generateDraftsForPersistedEvents(
+  source: LumaSource,
+  persisted: { inserted: ImportedLumaEvent[]; available: ImportedLumaEvent[] },
+  generateDrafts: DraftGenerator | undefined,
+  result: SyncResult,
+): Promise<void> {
+  const newlyInsertedIds = new Set(persisted.inserted.map((event) => event.id));
+  for (const event of persisted.available) {
+    if (!generateDrafts) {
+      if (newlyInsertedIds.has(event.id)) result.draftEventsSkipped += 1;
+      continue;
+    }
+    try {
+      result.draftsCreated += await generateDrafts(source, event);
+    } catch (error) {
+      logger.warn("Failed to generate drafts for event during sync", { sourceId: source.id, eventId: event.id }, error);
+      result.draftEventsFailed += 1;
+      result.issues.push({ sourceId: source.id, eventId: event.id, code: "draft_generation_failed" });
+    }
+  }
+}
+
+async function syncSingleSource(
+  source: LumaSource,
+  fetchFeed: FeedFetcher,
+  repository: SyncRepository,
+  generateDrafts: DraftGenerator | undefined,
+  result: SyncResult,
+): Promise<void> {
+  let parsed: { rows: PersistableEvent[]; skippedEvents: number };
+  try {
+    parsed = parseSourceRows(source, await fetchFeed(source.feedUrl));
+    result.feedsSucceeded += 1;
+  } catch (error) {
+    logger.warn("Failed to fetch or parse feed for source", { sourceId: source.id, feedUrl: source.feedUrl }, error);
+    result.feedsFailed += 1;
+    result.issues.push({ sourceId: source.id, code: error instanceof IcalParseError ? "invalid_calendar" : "feed_unavailable" });
+    return;
+  }
+  if (parsed.skippedEvents) result.issues.push({ sourceId: source.id, code: "invalid_calendar", skippedEvents: parsed.skippedEvents });
+  const rows = parsed.rows;
+  if (!rows.length) return;
+
+  let persisted: { inserted: ImportedLumaEvent[]; available: ImportedLumaEvent[] };
+  try {
+    persisted = await repository.upsertEvents(rows);
+    result.eventsInserted += persisted.inserted.length;
+  } catch (error) {
+    logger.error("Failed to persist imported events for source", { sourceId: source.id, count: rows.length }, error);
+    result.issues.push({ sourceId: source.id, code: "database_error" });
+    return;
+  }
+
+  await generateDraftsForPersistedEvents(source, persisted, generateDrafts, result);
+}
+
 export async function syncLumaSources(
   repository: SyncRepository,
   fetchFeed: FeedFetcher,
@@ -78,41 +134,7 @@ export async function syncLumaSources(
     draftsCreated: 0, draftEventsSkipped: 0, draftEventsFailed: 0, issues: [],
   };
   for (const source of sources) {
-    let parsed: { rows: PersistableEvent[]; skippedEvents: number };
-    try {
-      parsed = parseSourceRows(source, await fetchFeed(source.feedUrl));
-      result.feedsSucceeded += 1;
-    } catch (error) {
-      logger.warn("Failed to fetch or parse feed for source", { sourceId: source.id, feedUrl: source.feedUrl }, error);
-      result.feedsFailed += 1;
-      result.issues.push({ sourceId: source.id, code: error instanceof IcalParseError ? "invalid_calendar" : "feed_unavailable" });
-      continue;
-    }
-    if (parsed.skippedEvents) result.issues.push({ sourceId: source.id, code: "invalid_calendar", skippedEvents: parsed.skippedEvents });
-    const rows = parsed.rows;
-    if (!rows.length) continue;
-    let persisted: { inserted: ImportedLumaEvent[]; available: ImportedLumaEvent[] };
-    try {
-      persisted = await repository.upsertEvents(rows);
-      result.eventsInserted += persisted.inserted.length;
-    } catch (error) {
-      logger.error("Failed to persist imported events for source", { sourceId: source.id, count: rows.length }, error);
-      result.issues.push({ sourceId: source.id, code: "database_error" });
-      continue;
-    }
-    const newlyInsertedIds = new Set(persisted.inserted.map((event) => event.id));
-    for (const event of persisted.available) {
-      if (!generateDrafts) {
-        if (newlyInsertedIds.has(event.id)) result.draftEventsSkipped += 1;
-        continue;
-      }
-      try { result.draftsCreated += await generateDrafts(source, event); }
-      catch (error) {
-        logger.warn("Failed to generate drafts for event during sync", { sourceId: source.id, eventId: event.id }, error);
-        result.draftEventsFailed += 1;
-        result.issues.push({ sourceId: source.id, eventId: event.id, code: "draft_generation_failed" });
-      }
-    }
+    await syncSingleSource(source, fetchFeed, repository, generateDrafts, result);
   }
   return result;
 }
@@ -147,18 +169,23 @@ async function readLimitedFeedBody(response: Response): Promise<string> {
 
 const PRIVATE_HOST_PATTERN = /^(?:localhost|.*\.localhost|.*\.local|::1|127\..*|10\..*|192\.168\..*|169\.254\..*|172\.(?:1[6-9]|2\d|3[01])\..*)$/iu;
 
+function normalizeSourceFeedUrl(parsed: URL): URL {
+  const urlStr = parsed.toString();
+  if (isSubstackUrl(urlStr) && /\/feed\/?$/iu.test(parsed.pathname)) {
+    return new URL(normalizeSubstackPostsApiUrl(urlStr));
+  }
+  if (isMeetupUrl(urlStr)) {
+    return new URL(normalizeMeetupRssUrl(urlStr));
+  }
+  return parsed;
+}
+
 function resolvePublicFeedUrl(url: string): URL {
   let parsed: URL;
   try { parsed = new URL(url); } catch { throw new Error("Invalid feed URL"); }
   if (parsed.protocol !== "https:" || parsed.username || parsed.password) throw new Error("Feed URL must use HTTPS");
   if (PRIVATE_HOST_PATTERN.test(parsed.hostname)) throw new Error("Private feed host is not allowed");
-  if (isSubstackUrl(parsed.toString()) && /\/feed\/?$/iu.test(parsed.pathname)) {
-    return new URL(normalizeSubstackPostsApiUrl(parsed.toString()));
-  }
-  if (isMeetupUrl(parsed.toString())) {
-    return new URL(normalizeMeetupRssUrl(parsed.toString()));
-  }
-  return parsed;
+  return normalizeSourceFeedUrl(parsed);
 }
 
 export async function fetchLumaFeed(url: string): Promise<string> {

@@ -198,56 +198,29 @@ function buildSchedulePayload(
   };
 }
 
-export async function schedulePostWithBuffer(
-  postId: string,
+async function validatePostAndChannel(
+  post: PostToSchedule,
   repository: PostPublishingRepository,
-  createClient: (accountId: string) => Promise<BufferClient> | BufferClient,
-): Promise<PostPublishingOutcome> {
-  const post = await repository.claim(postId);
-  if (!post) return { kind: "not_claimed" };
-
+): Promise<{ channelId: string; network: SocialNetwork } | { failure: string }> {
   const network = networkFromDatabase(post.network);
-  if (!network) {
-    const message = "La red de la publicación no está admitida por Buffer.";
-    await repository.markFailure(post.id, post.attempt_id, message, false);
-    return { kind: "failed", message };
-  }
+  if (!network) return { failure: "La red de la publicación no está admitida por Buffer." };
   const validation = validatePost(network, post.content);
-  if (!validation.valid) {
-    await repository.markFailure(post.id, post.attempt_id, validation.message, false);
-    return { kind: "failed", message: validation.message };
-  }
-
-  let channelId: string | null;
+  if (!validation.valid) return { failure: validation.message };
   try {
-    channelId = await repository.bufferChannelId(post.account_id, network);
+    const channelId = await repository.bufferChannelId(post.account_id, network);
+    if (!channelId) return { failure: `Configura el ID del canal de Buffer para ${network} en esta cuenta.` };
+    return { channelId, network };
   } catch (error) {
-    const message = errorMessage(error);
-    await repository.markFailure(post.id, post.attempt_id, message, false);
-    return { kind: "failed", message };
+    return { failure: errorMessage(error) };
   }
-  if (!channelId) {
-    const message = `Configura el ID del canal de Buffer para ${network} en esta cuenta.`;
-    await repository.markFailure(post.id, post.attempt_id, message, false);
-    return { kind: "failed", message };
-  }
+}
 
-  const context = await repository.postContext?.(post.id).catch(() => null) ?? null;
-  const payload = buildSchedulePayload(post, channelId, context);
-  if (!payload.ok) {
-    await repository.markFailure(post.id, post.attempt_id, payload.message, false);
-    return { kind: "failed", message: payload.message };
-  }
-
-  let client: BufferClient;
-  try {
-    client = await createClient(post.account_id);
-  } catch (error) {
-    const message = errorMessage(error);
-    await repository.markFailure(post.id, post.attempt_id, message, false);
-    return { kind: "failed", message };
-  }
-
+async function dispatchClaimedPostToBuffer(
+  client: BufferClient,
+  post: PostToSchedule,
+  payload: { ok: true; input: ScheduleBufferPostInput },
+  repository: PostPublishingRepository,
+): Promise<PostPublishingOutcome> {
   let result: ScheduleBufferPostResult;
   try {
     result = await client.schedulePost(payload.input);
@@ -270,6 +243,39 @@ export async function schedulePostWithBuffer(
     return { kind: "needs_reconciliation", message };
   }
   return { kind: "scheduled", bufferPostId: result.post.id };
+}
+
+export async function schedulePostWithBuffer(
+  postId: string,
+  repository: PostPublishingRepository,
+  createClient: (accountId: string) => Promise<BufferClient> | BufferClient,
+): Promise<PostPublishingOutcome> {
+  const post = await repository.claim(postId);
+  if (!post) return { kind: "not_claimed" };
+
+  const check = await validatePostAndChannel(post, repository);
+  if ("failure" in check) {
+    await repository.markFailure(post.id, post.attempt_id, check.failure, false);
+    return { kind: "failed", message: check.failure };
+  }
+
+  const context = await repository.postContext?.(post.id).catch(() => null) ?? null;
+  const payload = buildSchedulePayload(post, check.channelId, context);
+  if (!payload.ok) {
+    await repository.markFailure(post.id, post.attempt_id, payload.message, false);
+    return { kind: "failed", message: payload.message };
+  }
+
+  let client: BufferClient;
+  try {
+    client = await createClient(post.account_id);
+  } catch (error) {
+    const message = errorMessage(error);
+    await repository.markFailure(post.id, post.attempt_id, message, false);
+    return { kind: "failed", message };
+  }
+
+  return dispatchClaimedPostToBuffer(client, post, payload, repository);
 }
 
 export async function schedulePostWithSupabase(
