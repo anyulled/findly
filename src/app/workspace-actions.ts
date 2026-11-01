@@ -83,6 +83,7 @@ export type WorkspaceSnapshot = {
   sources: SourceView[];
   mode: "review" | "automatic";
   profile: UserProfile;
+  error?: string;
 };
 
 const DEFAULT_ACCOUNTS = [
@@ -129,119 +130,156 @@ function sourceForUrl(value: string | null): string {
 }
 
 export async function loadWorkspace(): Promise<WorkspaceSnapshot> {
-  const { supabase, ownerId, user } = await authorizedClient();
-  const bootstrapResult = await supabase.rpc("ensure_managed_accounts");
-  if (bootstrapResult.error) throw new Error("No se pudieron preparar las cuentas iniciales.");
-  const accountResult = await supabase.from("accounts").select("id,name,account_type,voice_prompt,networks,enabled").order("created_at");
-  if (accountResult.error) throw new Error("No se pudieron cargar las cuentas.");
-  const defaultOrder = new Map(DEFAULT_ACCOUNTS.map((acc, index) => [acc.name, index]));
-  const rows = [...(accountResult.data ?? [])].sort((a, b) => {
-    const orderA = defaultOrder.get(a.name) ?? 999;
-    const orderB = defaultOrder.get(b.name) ?? 999;
-    return orderA - orderB;
-  });
-  const accounts = rows.map((row, index) => accountView(row, index));
-  const accountNames = new Map(accounts.map((account) => [account.id, account.name]));
+  try {
+    const { supabase, ownerId, user } = await authorizedClient();
+    const bootstrapResult = await supabase.rpc("ensure_managed_accounts");
+    if (bootstrapResult.error && bootstrapResult.error.code !== "PGRST202") {
+      throw new Error("No se pudieron preparar las cuentas iniciales.");
+    }
+    let accountResult = await supabase.from("accounts").select("id,name,account_type,voice_prompt,networks,enabled").order("created_at");
+    if (accountResult.error) throw new Error("No se pudieron cargar las cuentas.");
+    const existingNames = new Set((accountResult.data ?? []).map((row) => row.name));
+    const missingAccounts = DEFAULT_ACCOUNTS.filter((acc) => !existingNames.has(acc.name));
+    if (missingAccounts.length > 0) {
+      const insertResult = await supabase.from("accounts").insert(
+        missingAccounts.map((account) => ({
+          owner_id: ownerId,
+          name: account.name,
+          account_type: account.account_type,
+          voice_prompt: account.voice_prompt,
+          networks: [...account.networks],
+        })),
+      );
+      if (insertResult.error) throw new Error("No se pudieron preparar las cuentas iniciales.");
+      accountResult = await supabase.from("accounts").select("id,name,account_type,voice_prompt,networks,enabled").order("created_at");
+      if (accountResult.error) throw new Error("No se pudieron cargar las cuentas.");
+    }
+    const defaultOrder = new Map(DEFAULT_ACCOUNTS.map((acc, index) => [acc.name, index]));
+    const seenNames = new Set<string>();
+    const rows = [...(accountResult.data ?? [])]
+      .filter((row) => {
+        if (seenNames.has(row.name)) return false;
+        seenNames.add(row.name);
+        return true;
+      })
+      .sort((a, b) => {
+        const orderA = defaultOrder.get(a.name) ?? 999;
+        const orderB = defaultOrder.get(b.name) ?? 999;
+        return orderA - orderB;
+      });
+    const accounts = rows.map((row, index) => accountView(row, index));
+    const accountNames = new Map(accounts.map((account) => [account.id, account.name]));
 
-  const [eventsResult, postsResult, settingsResult, sourcesResult, sourceAccountsResult, channelResult, examplesResult] = await Promise.all([
-    supabase.from("events").select("id,title,starts_at,location,description,event_url,detected_language,source_id").order("starts_at"),
-    supabase.from("posts").select("id,event_id,account_id,network,lead_days,due_at,content,status,language,last_error,buffer_post_id").order("due_at"),
-    supabase.from("app_settings").select("value").eq("key", "publishing_mode").maybeSingle(),
-    supabase.from("sources").select("id,name,source_type,feed_url,enabled").order("created_at"),
-    supabase.from("source_accounts").select("source_id,account_id"),
-    supabase.from("account_buffer_channels").select("account_id,network,buffer_channel_id"),
-    supabase.from("style_examples").select("account_id"),
-  ]);
-  if (eventsResult.error || postsResult.error || settingsResult.error || sourcesResult.error || sourceAccountsResult.error || channelResult.error || examplesResult.error) {
-    throw new Error("No se pudo cargar el calendario desde Supabase. Comprueba que has aplicado las migraciones.");
-  }
+    const [eventsResult, postsResult, settingsResult, sourcesResult, sourceAccountsResult, channelResult, examplesResult] = await Promise.all([
+      supabase.from("events").select("id,title,starts_at,location,description,event_url,detected_language,source_id").order("starts_at"),
+      supabase.from("posts").select("id,event_id,account_id,network,lead_days,due_at,content,status,language,last_error,buffer_post_id").order("due_at"),
+      supabase.from("app_settings").select("value").eq("key", "publishing_mode").maybeSingle(),
+      supabase.from("sources").select("id,name,source_type,feed_url,enabled").order("created_at"),
+      supabase.from("source_accounts").select("source_id,account_id"),
+      supabase.from("account_buffer_channels").select("account_id,network,buffer_channel_id"),
+      supabase.from("style_examples").select("account_id"),
+    ]);
+    if (eventsResult.error || postsResult.error || settingsResult.error || sourcesResult.error || sourceAccountsResult.error || channelResult.error || examplesResult.error) {
+      throw new Error("No se pudo cargar el calendario desde Supabase. Comprueba que has aplicado las migraciones.");
+    }
 
-  const events: EventView[] = (eventsResult.data ?? []).map((row) => {
-    const scheduled = formatMadridDateTime(row.starts_at);
-    const unpacked = unpackLocationAndImage(row.location);
-    return {
-      id: row.id,
-      title: row.title,
-      date: scheduled.date,
-      time: scheduled.time,
-      place: unpacked.place,
-      description: row.description,
-      source: sourceForUrl(row.event_url),
-      sourceId: row.source_id,
-      url: row.event_url ?? undefined,
-      imageUrl: unpacked.imageUrl,
-      language: row.detected_language as PostLanguage,
-    };
-  });
-  const channelIdsByAccount = new Map<string, Partial<Record<SocialNetwork, string>>>();
-  for (const channel of channelResult.data ?? []) {
-    if (!NETWORKS.includes(channel.network as SocialNetwork)) continue;
-    const channels = channelIdsByAccount.get(channel.account_id) ?? {};
-    channels[channel.network as SocialNetwork] = channel.buffer_channel_id;
-    channelIdsByAccount.set(channel.account_id, channels);
-  }
-  const exampleCounts = new Map<string, number>();
-  for (const example of examplesResult.data ?? []) exampleCounts.set(example.account_id, (exampleCounts.get(example.account_id) ?? 0) + 1);
-  const accountsWithChannels = rows.map((row, index) => accountView(row, index, channelIdsByAccount.get(row.id), exampleCounts.get(row.id) ?? 0));
-  const posts: PostView[] = (postsResult.data ?? []).flatMap((row) => {
-    const network = NETWORKS.find((value) => value === row.network);
-    if (!network) return [];
-    const scheduled = formatMadridDateTime(row.due_at);
-    return [{
-      id: row.id,
-      eventId: row.event_id,
-      date: scheduled.date,
-      time: scheduled.time,
-      account: accountNames.get(row.account_id) ?? "Cuenta",
-      accountId: row.account_id,
-      network,
-      text: row.content,
-      status: row.status as PostView["status"],
-      lastError: row.last_error,
-      bufferPostId: row.buffer_post_id,
-      leadDays: row.lead_days as PostView["leadDays"],
-      language: row.language as PostLanguage,
-    }];
-  });
-  const settings = settingsResult.data?.value as { mode?: string } | null;
-  const accountIdsBySource = new Map<string, string[]>();
-  for (const link of sourceAccountsResult.data ?? []) {
-    const accountIds = accountIdsBySource.get(link.source_id) ?? [];
-    accountIds.push(link.account_id);
-    accountIdsBySource.set(link.source_id, accountIds);
-  }
-  const sources: SourceView[] = (sourcesResult.data ?? []).flatMap((row) => {
-    if (row.source_type !== "luma_ical" && row.source_type !== "meetup" && row.source_type !== "substack") return [];
-    const resolvedType: SourceType = isSubstackUrl(row.feed_url) || row.source_type === "substack"
-      ? "substack"
-      : row.source_type;
-    return [{ id: row.id, name: row.name, type: resolvedType, url: row.feed_url ?? "", enabled: row.enabled, accountIds: accountIdsBySource.get(row.id) ?? [] }];
-  });
-
-  const existingBufferPostIds = new Set(
-    posts.map((p) => p.bufferPostId).filter((id): id is string => Boolean(id)),
-  );
-  const syncAccounts = accountsWithChannels.map((acc) => ({
-    id: acc.id ?? "",
-    name: acc.name,
-    apiKey: bufferCredentialForAccount(acc.name).apiKey,
-    bufferChannels: acc.bufferChannels,
-  }));
-  const bufferScheduledPosts = await syncBufferScheduledPosts(
-    syncAccounts,
-    events,
-    existingBufferPostIds,
-    async (accountId, network, channelId) => {
-      await supabase.from("account_buffer_channels").upsert({
-        owner_id: ownerId,
-        account_id: accountId,
+    const events: EventView[] = (eventsResult.data ?? []).map((row) => {
+      const scheduled = formatMadridDateTime(row.starts_at);
+      const unpacked = unpackLocationAndImage(row.location);
+      return {
+        id: row.id,
+        title: row.title,
+        date: scheduled.date,
+        time: scheduled.time,
+        place: unpacked.place,
+        description: row.description,
+        source: sourceForUrl(row.event_url),
+        sourceId: row.source_id,
+        url: row.event_url ?? undefined,
+        imageUrl: unpacked.imageUrl,
+        language: row.detected_language as PostLanguage,
+      };
+    });
+    const channelIdsByAccount = new Map<string, Partial<Record<SocialNetwork, string>>>();
+    for (const channel of channelResult.data ?? []) {
+      if (!NETWORKS.includes(channel.network as SocialNetwork)) continue;
+      const channels = channelIdsByAccount.get(channel.account_id) ?? {};
+      channels[channel.network as SocialNetwork] = channel.buffer_channel_id;
+      channelIdsByAccount.set(channel.account_id, channels);
+    }
+    const exampleCounts = new Map<string, number>();
+    for (const example of examplesResult.data ?? []) exampleCounts.set(example.account_id, (exampleCounts.get(example.account_id) ?? 0) + 1);
+    const accountsWithChannels = rows.map((row, index) => accountView(row, index, channelIdsByAccount.get(row.id), exampleCounts.get(row.id) ?? 0));
+    const posts: PostView[] = (postsResult.data ?? []).flatMap((row) => {
+      const network = NETWORKS.find((value) => value === row.network);
+      if (!network) return [];
+      const scheduled = formatMadridDateTime(row.due_at);
+      return [{
+        id: row.id,
+        eventId: row.event_id,
+        date: scheduled.date,
+        time: scheduled.time,
+        account: accountNames.get(row.account_id) ?? "Cuenta",
+        accountId: row.account_id,
         network,
-        buffer_channel_id: channelId,
-      }, { onConflict: "owner_id,account_id,network" });
-    },
-  );
+        text: row.content,
+        status: row.status as PostView["status"],
+        lastError: row.last_error,
+        bufferPostId: row.buffer_post_id,
+        leadDays: row.lead_days as PostView["leadDays"],
+        language: row.language as PostLanguage,
+      }];
+    });
+    const settings = settingsResult.data?.value as { mode?: string } | null;
+    const accountIdsBySource = new Map<string, string[]>();
+    for (const link of sourceAccountsResult.data ?? []) {
+      const accountIds = accountIdsBySource.get(link.source_id) ?? [];
+      accountIds.push(link.account_id);
+      accountIdsBySource.set(link.source_id, accountIds);
+    }
+    const sources: SourceView[] = (sourcesResult.data ?? []).flatMap((row) => {
+      if (row.source_type !== "luma_ical" && row.source_type !== "meetup" && row.source_type !== "substack") return [];
+      const resolvedType: SourceType = isSubstackUrl(row.feed_url) || row.source_type === "substack"
+        ? "substack"
+        : row.source_type;
+      return [{ id: row.id, name: row.name, type: resolvedType, url: row.feed_url ?? "", enabled: row.enabled, accountIds: accountIdsBySource.get(row.id) ?? [] }];
+    });
 
-  return { accounts: accountsWithChannels, events, posts: [...posts, ...bufferScheduledPosts], sources, mode: settings?.mode === "automatic" ? "automatic" : "review", profile: extractUserProfile(user) };
+    const existingBufferPostIds = new Set(
+      posts.map((p) => p.bufferPostId).filter((id): id is string => Boolean(id)),
+    );
+    const syncAccounts = accountsWithChannels.map((acc) => ({
+      id: acc.id ?? "",
+      name: acc.name,
+      apiKey: bufferCredentialForAccount(acc.name).apiKey,
+      bufferChannels: acc.bufferChannels,
+    }));
+    const bufferScheduledPosts = await syncBufferScheduledPosts(
+      syncAccounts,
+      events,
+      existingBufferPostIds,
+      async (accountId, network, channelId) => {
+        await supabase.from("account_buffer_channels").upsert({
+          owner_id: ownerId,
+          account_id: accountId,
+          network,
+          buffer_channel_id: channelId,
+        }, { onConflict: "owner_id,account_id,network" });
+      },
+    );
+
+    return { accounts: accountsWithChannels, events, posts: [...posts, ...bufferScheduledPosts], sources, mode: settings?.mode === "automatic" ? "automatic" : "review", profile: extractUserProfile(user) };
+  } catch (caught) {
+    return {
+      accounts: [],
+      events: [],
+      posts: [],
+      sources: [],
+      mode: "review",
+      profile: { name: "Administrador", email: "", initials: "A" },
+      error: caught instanceof Error ? caught.message : "No se pudieron cargar los datos.",
+    };
+  }
 }
 
 export type SaveSourceResult =
