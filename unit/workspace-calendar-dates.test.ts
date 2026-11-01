@@ -7,6 +7,7 @@ import {
   makeDates,
   madridClock,
   scheduleDates,
+  sortEventsReverseChronological,
   starterPosts,
 } from "../src/app/workspace/workspace-calendar-dates";
 import type { EventItem, Account } from "../src/app/workspace/workspace-types";
@@ -141,5 +142,21 @@ describe("workspace-calendar-dates", () => {
     // 3 lead days * 2 networks = 6 posts
     assert.equal(posts.length, 6);
     assert.ok(posts.every((p) => p.status === "review"));
+  });
+
+  it("sortEventsReverseChronological sorts events from latest to earliest", () => {
+    const events: EventItem[] = [
+      { id: "1", title: "Abril", date: "2026-04-01", time: "18:30", place: "BCN", description: "", source: "Luma" },
+      { id: "2", title: "Mayo", date: "2026-05-20", time: "18:30", place: "BCN", description: "", source: "Luma" },
+      { id: "3", title: "Noviembre Mañana", date: "2026-11-20", time: "10:00", place: "BCN", description: "", source: "Luma" },
+      { id: "4", title: "Noviembre Tarde", date: "2026-11-20", time: "19:00", place: "BCN", description: "", source: "Luma" },
+      { id: "5", title: "Noviembre Final", date: "2026-11-25", time: "18:30", place: "BCN", description: "", source: "Luma" },
+    ];
+
+    const sorted = sortEventsReverseChronological(events);
+    assert.deepEqual(
+      sorted.map((e) => e.id),
+      ["5", "4", "3", "2", "1"],
+    );
   });
 });

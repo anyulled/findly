@@ -1,8 +1,9 @@
+import { useMemo } from "react";
 import styles from "../../page.module.css";
 import { selectEventAccounts, hasMissingReminders } from "@/lib/event-targets";
 import type { SourceView } from "../../workspace-actions";
 import type { Account, EventItem, Post } from "../workspace-types";
-import { dateAt, scheduleDates } from "../workspace-calendar-dates";
+import { dateAt, scheduleDates, sortEventsReverseChronological } from "../workspace-calendar-dates";
 
 interface EventListProps {
   events: EventItem[];
@@ -27,6 +28,8 @@ export function EventList({
   onRetryDrafts,
   onRemoveEvent,
 }: EventListProps) {
+  const sortedEvents = useMemo(() => sortEventsReverseChronological(events), [events]);
+
   return (
     <>
       <div className={styles.pageHeading}>
@@ -40,11 +43,11 @@ export function EventList({
         </button>
       </div>
 
-      {events.length === 0 ? (
+      {sortedEvents.length === 0 ? (
         <p className={styles.emptyNotice}>Aún no hay eventos registrados.</p>
       ) : (
         <div className={styles.eventsList}>
-          {events.map((event) => {
+          {sortedEvents.map((event) => {
             const eventPosts = posts.filter((post) => post.eventId === event.id);
             const links = sources.flatMap((source) =>
               source.accountIds.map((accountId) => ({ sourceId: source.id, accountId })),
