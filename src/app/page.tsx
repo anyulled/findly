@@ -5,7 +5,7 @@ import styles from "./page.module.css";
 import { validatePost } from "@/lib/social-validation";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import { detectTitleLanguage, type PostLanguage } from "@/lib/language";
-import { approvePost, confirmPostMissingFromBuffer, createEvent, generateReviewPosts, loadWorkspace, reconcileScheduledPost, retryFailedPost, saveBufferChannel, updateAccountVoice, updatePostContent, updatePublishingMode, type SourceView } from "./workspace-actions";
+import { approvePost, confirmPostMissingFromBuffer, createEvent, generateReviewPosts, loadWorkspace, reconcileScheduledPost, retryFailedPost, saveBufferChannel, updateAccountVoice, updatePostContent, updatePublishingMode, type SourceView, type UserProfile } from "./workspace-actions";
 import { SourceSettings } from "./source-settings";
 import Image from "next/image";
 import { sourceForEventUrl } from "@/lib/event-source";
@@ -100,6 +100,7 @@ function Dashboard() {
   const [sources, setSources] = useState<SourceView[]>([]);
   const [posts, setPosts] = useState(initialPosts);
   const [mode, setMode] = useState<"review" | "automatic">("review");
+  const [profile, setProfile] = useState<UserProfile>({ name: "Administrador", email: "", initials: "A" });
   const [bufferApiKeyConfigured, setBufferApiKeyConfigured] = useState(false);
   const [selected, setSelected] = useState<Post | null>(null);
   const [editing, setEditing] = useState("");
@@ -145,6 +146,7 @@ function Dashboard() {
         setBufferApiKeyConfigured(snapshot.accounts.every((account) => account.bufferApiKeyConfigured));
         setAccountList(snapshot.accounts);
         setSources(snapshot.sources);
+        if (snapshot.profile) setProfile(snapshot.profile);
         setHydrated(true);
       }).catch((error: unknown) => {
         if (!active) return;
@@ -155,13 +157,13 @@ function Dashboard() {
     }
     const saved = localStorage.getItem("findly-state-v1");
     if (saved) {
-      try { const value = JSON.parse(saved); setEvents(value.events ?? initialEvents); setPosts(value.posts ?? initialPosts); setMode(value.mode ?? "review"); setAccountList(value.accounts ?? accounts); setSources(value.sources ?? []); }
+      try { const value = JSON.parse(saved); setEvents(value.events ?? initialEvents); setPosts(value.posts ?? initialPosts); setMode(value.mode ?? "review"); setAccountList(value.accounts ?? accounts); setSources(value.sources ?? []); if (value.profile) setProfile(value.profile); }
       catch { localStorage.removeItem("findly-state-v1"); }
     }
     setHydrated(true);
   }, [persistent]);
   /* eslint-enable react-hooks/set-state-in-effect */
-  useEffect(() => { if (!persistent && hydrated) localStorage.setItem("findly-state-v1", JSON.stringify({ events, posts, mode, accounts: accountList, sources })); }, [events, posts, mode, accountList, sources, hydrated, persistent]);
+  useEffect(() => { if (!persistent && hydrated) localStorage.setItem("findly-state-v1", JSON.stringify({ events, posts, mode, accounts: accountList, sources, profile })); }, [events, posts, mode, accountList, sources, profile, hydrated, persistent]);
 
   const dates = useMemo(() => makeDates(anchor, range), [anchor, range]);
   const first = dates[0];
@@ -404,7 +406,8 @@ function Dashboard() {
       <div className={styles.workspace}><div className={styles.workspaceIcon}>✳</div><div><b>Mi espacio</b><small>3 cuentas conectadas</small></div><span className={styles.chevron}>⌄</span></div>
       <p className={styles.navLabel}>ESPACIO DE TRABAJO</p>
       <nav>{side.map((item, i) => <button key={item} onClick={() => setTab(item)} className={tab === item ? styles.navActive : styles.navItem}><span className={styles.navIcon}>{["▦", "◷", "♙", "⚙"][i]}</span>{item}{item === "Eventos" && <span className={styles.navCount}>{events.length}</span>}{item === "Calendario" && reviewCount > 0 && <span className={styles.navCount}>{reviewCount}</span>}</button>)}</nav>
-      <div className={styles.sidebarBottom}><div className={styles.planCard}><div className={styles.planIcon}>✦</div><b>Tu contenido, en orden</b><p>Todo lo que necesitas para que cada evento llegue a más gente.</p><button onClick={() => setTab("Ajustes")}>Configurar espacio <span>→</span></button></div><div className={styles.profile}><div className={styles.avatar}>A</div><div><b>Alex</b><small>Administrador</small></div><span className={styles.chevron}>···</span></div></div>
+      <div className={styles.sidebarBottom}><div className={styles.planCard}><div className={styles.planIcon}>✦</div><b>Tu contenido, en orden</b><p>Todo lo que necesitas para que cada evento llegue a más gente.</p><button onClick={() => setTab("Ajustes")}>Configurar espacio <span>→</span></button></div><div className={styles.profile}><div className={styles.avatar}>{profile.avatarUrl ? (// eslint-disable-next-line @next/next/no-img-element
+<img src={profile.avatarUrl} alt={profile.name} className={styles.avatarImg} referrerPolicy="no-referrer" />) : profile.initials}</div><div><b>{profile.name}</b><small>Administrador</small></div><span className={styles.chevron}>···</span></div></div>
     </aside>
 
     <section className={styles.main}>

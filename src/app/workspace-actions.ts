@@ -12,6 +12,9 @@ import { MANAGED_ACCOUNTS, managedAccount } from "@/lib/managed-accounts";
 import { bufferCredentialForAccount } from "@/lib/buffer-account-credentials";
 import { sourceForEventUrl } from "@/lib/event-source";
 import { selectEventAccounts } from "@/lib/event-targets";
+import { extractUserProfile, type UserProfile } from "@/lib/user-profile";
+
+export type { UserProfile } from "@/lib/user-profile";
 
 export type AccountView = {
   id?: string;
@@ -77,6 +80,7 @@ export type WorkspaceSnapshot = {
   posts: PostView[];
   sources: SourceView[];
   mode: "review" | "automatic";
+  profile: UserProfile;
 };
 
 const DEFAULT_ACCOUNTS = [
@@ -93,7 +97,7 @@ async function authorizedClient() {
   if (error || !user || !ownerEmail || user.email?.toLowerCase() !== ownerEmail) {
     throw new Error("No tienes acceso a este espacio.");
   }
-  return { supabase, ownerId: user.id };
+  return { supabase, ownerId: user.id, user };
 }
 
 function accountView(row: { id: string; name: string; account_type: string; voice_prompt: string; networks: string[]; enabled: boolean }, index: number, bufferChannels: Partial<Record<SocialNetwork, string>> = {}, styleExampleCount = 0): AccountView {
@@ -123,7 +127,7 @@ function sourceForUrl(value: string | null): string {
 }
 
 export async function loadWorkspace(): Promise<WorkspaceSnapshot> {
-  const { supabase, ownerId } = await authorizedClient();
+  const { supabase, ownerId, user } = await authorizedClient();
   let accountResult = await supabase.from("accounts").select("id,name,account_type,voice_prompt,networks,enabled").order("created_at");
   if (accountResult.error) throw new Error("No se pudieron cargar las cuentas.");
   if ((accountResult.data ?? []).length === 0) {
@@ -204,7 +208,7 @@ export async function loadWorkspace(): Promise<WorkspaceSnapshot> {
     if (row.source_type !== "luma_ical" && row.source_type !== "meetup") return [];
     return [{ id: row.id, name: row.name, type: row.source_type, url: row.feed_url ?? "", enabled: row.enabled, accountIds: accountIdsBySource.get(row.id) ?? [] }];
   });
-  return { accounts: accountsWithChannels, events, posts, sources, mode: settings?.mode === "automatic" ? "automatic" : "review" };
+  return { accounts: accountsWithChannels, events, posts, sources, mode: settings?.mode === "automatic" ? "automatic" : "review", profile: extractUserProfile(user) };
 }
 
 function validateSource(input: SourceInput): SourceInput {
