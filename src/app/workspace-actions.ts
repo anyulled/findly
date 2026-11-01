@@ -47,6 +47,7 @@ export type EventView = {
   description: string;
   source: string;
   sourceId?: string | null;
+  accountIds?: string[] | null;
   url?: string;
   imageUrl?: string;
   language?: PostLanguage;
@@ -208,7 +209,7 @@ export async function loadWorkspace(): Promise<WorkspaceSnapshot> {
     for (const account of accounts) if (account.id) accountNames.set(account.id, account.name);
 
     const [eventsResult, postsResult, settingsResult, sourcesResult, sourceAccountsResult, channelResult, examplesResult] = await Promise.all([
-      supabase.from("events").select("id,title,starts_at,location,description,event_url,detected_language,source_id").order("starts_at"),
+      supabase.from("events").select("id,title,starts_at,location,description,event_url,detected_language,source_id,target_account_ids").order("starts_at"),
       supabase.from("posts").select("id,event_id,account_id,network,lead_days,due_at,content,status,language,last_error,buffer_post_id").order("due_at"),
       supabase.from("app_settings").select("value").eq("key", "publishing_mode").maybeSingle(),
       supabase.from("sources").select("id,name,source_type,feed_url,enabled").order("created_at"),
@@ -232,6 +233,7 @@ export async function loadWorkspace(): Promise<WorkspaceSnapshot> {
         description: row.description,
         source: sourceForUrl(row.event_url),
         sourceId: row.source_id,
+        accountIds: row.target_account_ids,
         url: row.event_url ?? undefined,
         imageUrl: unpacked.imageUrl,
         language: row.detected_language as PostLanguage,
@@ -397,6 +399,11 @@ export async function createEvent(input: Omit<EventView, "id">): Promise<CreateE
     if (!title || title.length > 200 || (!substack && (!input.date || !input.time))) {
       throw new UserFacingError("Completa título, fecha y hora del evento.");
     }
+    if (!Array.isArray(input.accountIds) || input.accountIds.length === 0 || input.accountIds.length > 3 || input.accountIds.some((id) => typeof id !== "string" || !/^[0-9a-f-]{36}$/i.test(id)) || new Set(input.accountIds).size !== input.accountIds.length) {
+      throw new UserFacingError("Selecciona al menos una cuenta válida.");
+    }
+    const accountResult = await supabase.from("accounts").select("id").eq("owner_id", ownerId).eq("enabled", true).in("id", input.accountIds);
+    if (accountResult.error || accountResult.data?.length !== input.accountIds.length) throw new UserFacingError("Una de las cuentas seleccionadas no está disponible.");
     let url: string | null = null;
     if (input.url) {
       try {
@@ -412,6 +419,7 @@ export async function createEvent(input: Omit<EventView, "id">): Promise<CreateE
     const resolvedImageUrl = input.imageUrl?.trim() || (url ? await fetchOpenGraphImage(url) : null);
     const { data, error } = await supabase.from("events").insert({
       owner_id: ownerId,
+      target_account_ids: input.accountIds,
       title,
       starts_at: startsAt,
       timezone: "Europe/Madrid",
@@ -419,7 +427,7 @@ export async function createEvent(input: Omit<EventView, "id">): Promise<CreateE
       description: input.description.trim(),
       event_url: url,
       detected_language: detectTitleLanguage(title),
-    }).select("id,title,starts_at,location,description,event_url,detected_language,source_id").single();
+    }).select("id,title,starts_at,location,description,event_url,detected_language,source_id,target_account_ids").single();
     if (error || !data) throw new UserFacingError("No se pudo guardar el evento en Supabase.");
     const scheduled = formatMadridDateTime(data.starts_at);
     const unpacked = unpackLocationAndImage(data.location);
@@ -432,6 +440,7 @@ export async function createEvent(input: Omit<EventView, "id">): Promise<CreateE
       description: data.description,
       source: sourceForUrl(data.event_url),
       sourceId: data.source_id,
+      accountIds: data.target_account_ids,
       url: data.event_url ?? undefined,
       imageUrl: unpacked.imageUrl,
       language: data.detected_language as PostLanguage,
@@ -449,7 +458,7 @@ export async function generateReviewPosts(eventId: string): Promise<GenerateRevi
 
     const eventResult = await supabase
       .from("events")
-      .select("id,owner_id,source_id,title,starts_at,location,description,event_url,detected_language")
+      .select("id,owner_id,source_id,target_account_ids,title,starts_at,location,description,event_url,detected_language")
       .eq("id", eventId)
       .eq("owner_id", ownerId)
       .single();

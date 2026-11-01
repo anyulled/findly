@@ -227,3 +227,27 @@ test("deletes an event from the events list", async ({ page }) => {
   await eventCard.getByRole("button", { name: /Eliminar evento/ }).click();
   await expect(page.getByRole("heading", { name: "Temporary Event to Delete" })).toHaveCount(0);
 });
+
+
+test("creates an event for selected accounts only and retains the selection after reload", async ({ page }) => {
+  const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Madrid", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date());
+  const values = Object.fromEntries(parts.map(({ type, value }) => [type, value]));
+  const date = new Date(Date.UTC(Number(values.year), Number(values.month) - 1, Number(values.day) + 30)).toISOString().slice(0, 10);
+  await page.getByRole("button", { name: "Añadir evento" }).first().click();
+  await page.getByLabel("TÍTULO").fill("Selected account event");
+  await page.getByLabel("FECHA").fill(date);
+  await page.getByLabel("HORA").fill("19:00");
+  await page.getByRole("checkbox", { name: "Barcelona JUG" }).uncheck();
+  await page.getByRole("checkbox", { name: "Software Crafters Barcelona" }).uncheck();
+  await page.getByRole("checkbox", { name: "Personal" }).uncheck();
+  await expect(page.getByRole("button", { name: "Crear evento" })).toBeDisabled();
+  await page.getByRole("checkbox", { name: "Personal" }).check();
+  await page.getByRole("button", { name: "Crear evento" }).click();
+  await expect(page.getByText("9 publicaciones previstas")).toBeVisible();
+  await page.reload();
+  await page.getByRole("button", { name: "Eventos" }).click();
+  await expect(page.getByText("9 publicaciones previstas")).toBeVisible();
+  const state = await page.evaluate(() => JSON.parse(localStorage.getItem("findly-state-v1") ?? "{}"));
+  expect(state.events[0].accountIds).toEqual(["acc-personal"]);
+  expect([...new Set(state.posts.map((post: { account: string }) => post.account))]).toEqual(["Personal"]);
+});

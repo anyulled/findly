@@ -94,6 +94,24 @@ describe("draft-repository", () => {
     assert.deepEqual(linked[0].networks, ["LinkedIn", "X"]);
   });
 
+  it("uses persisted account selection for manual event generation and retries", async () => {
+    const supabase: SupabaseClientLike = {
+      from<T>(table: string): SupabaseTableBuilder<T> {
+        assert.equal(table, "accounts");
+        return mockTable<T>({ select: () => ({ eq: () => ({ eq: () => ({
+          order: () => ({ data: [
+            { id: "acc-1", name: "Personal", voice_prompt: "Direct", networks: ["LinkedIn"] },
+            { id: "acc-2", name: "JUG", voice_prompt: "Tech", networks: ["X"] },
+          ], error: null }),
+        }) }) }) });
+      },
+    };
+    const repo = createSupabaseDraftRepository(supabase, "owner-1");
+    const accounts = await repo.listLinkedAccounts("owner-1", null, ["acc-2"]);
+    assert.deepEqual(accounts.map((account) => account.id), ["acc-2"]);
+    assert.deepEqual(await repo.listLinkedAccounts("owner-1", null, []), []);
+  });
+
   it("listExistingReminders queries posts for event", async () => {
     const supabase: SupabaseClientLike = {
       from<T>(table: string): SupabaseTableBuilder<T> {

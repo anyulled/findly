@@ -6,6 +6,7 @@ import { validatePost } from "@/lib/social-validation";
 import { detectTitleLanguage } from "@/lib/language";
 import { sourceForEventUrl } from "@/lib/event-source";
 import { isSubstackUrl } from "@/lib/substack";
+import { selectEventAccounts } from "@/lib/event-targets";
 import {
   approvePost,
   confirmPostMissingFromBuffer,
@@ -69,6 +70,7 @@ export function useWorkspace() {
     imageUrl: "",
   });
   const [sourceUrl, setSourceUrl] = useState("");
+  const [selectedAccountIds, setSelectedAccountIds] = useState<string[]>([]);
   const [extractingEvent, setExtractingEvent] = useState(false);
   const [extractionMessage, setExtractionMessage] = useState("");
   const extractionRequestId = useRef(0);
@@ -85,6 +87,7 @@ export function useWorkspace() {
   function openAddForm() {
     extractionRequestId.current += 1;
     addFormOpen.current = true;
+    setSelectedAccountIds(accountList.flatMap((account) => account.id && account.enabled !== false ? [account.id] : []));
     setShowAdd(true);
   }
 
@@ -265,7 +268,7 @@ export function useWorkspace() {
   const isSubstackDraft = newEvent.source === "Substack" || isSubstackUrl(sourceUrl.trim());
 
   async function addEvent() {
-    if (extractingEvent) return;
+    if (extractingEvent || selectedAccountIds.length === 0) return;
     if (!newEvent.title.trim() || (!isSubstackDraft && (!newEvent.date || !newEvent.time))) return;
     let parsedUrl: URL | null = null;
     try {
@@ -280,6 +283,7 @@ export function useWorkspace() {
     const fallbackTime = `${madrid.hour}:${madrid.minute}`;
     const draftEvent = {
       ...newEvent,
+      accountIds: selectedAccountIds,
       date: newEvent.date || fallbackDate,
       time: newEvent.time || fallbackTime,
       source,
@@ -303,7 +307,7 @@ export function useWorkspace() {
         if (!generated.success) throw new Error(generated.error);
         setPosts((all) => [...all, ...generated.posts]);
       } else {
-        setPosts((all) => [...all, ...starterPosts([event], accountList)]);
+        setPosts((all) => [...all, ...starterPosts([event], selectEventAccounts(accountList, null, [], event.accountIds))]);
       }
       setFeedback("");
     } catch (error) {
@@ -606,6 +610,8 @@ export function useWorkspace() {
     setNewEvent,
     sourceUrl,
     setSourceUrl,
+    selectedAccountIds,
+    setSelectedAccountIds,
     extractingEvent,
     extractionMessage,
     setExtractionMessage,

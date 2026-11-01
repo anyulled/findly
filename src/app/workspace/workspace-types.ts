@@ -20,6 +20,7 @@ export type EventItem = {
   description: string;
   source: string;
   sourceId?: string | null;
+  accountIds?: string[] | null;
   url?: string;
   imageUrl?: string;
   language?: PostLanguage;
