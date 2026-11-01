@@ -202,8 +202,18 @@ test("fetchLumaFeed rejects invalid, private, unsuccessful, and oversized feeds"
     globalThis.fetch = async () => new Response("unavailable", { status: 503 });
     await assert.rejects(fetchLumaFeed("https://example.test/feed.ics"), /Feed request failed/);
 
-    globalThis.fetch = async () => new Response("", { headers: { "content-length": "2000001" } });
+    let declaredOversizeChunks = 0;
+    let declaredOversizeCancelled = false;
+    globalThis.fetch = async () => new Response(new ReadableStream<Uint8Array>({
+      pull(controller) {
+        declaredOversizeChunks += 1;
+        controller.enqueue(new Uint8Array(1));
+      },
+      cancel() { declaredOversizeCancelled = true; },
+    }, { highWaterMark: 0 }), { headers: { "content-length": "2000001" } });
     await assert.rejects(fetchLumaFeed("https://example.test/feed.ics"), /Feed is too large/);
+    assert.equal(declaredOversizeChunks, 0);
+    assert.equal(declaredOversizeCancelled, true);
 
     let chunksProduced = 0;
     let streamCancelled = false;
