@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { generateSocialPost, PostGenerationError, type PostGenerationInput } from "../src/lib/groq";
+import {
+  buildFallbackDraftText,
+  generateSocialPost,
+  generateSocialPostOrFallback,
+  PostGenerationError,
+  type PostGenerationInput,
+} from "../src/lib/groq";
+import { validatePost } from "../src/lib/social-validation";
 
 const input: PostGenerationInput = {
   accountId: "account-1",
@@ -88,5 +95,98 @@ describe("generateSocialPost", () => {
       (error: Error) => error instanceof PostGenerationError
         && error.code === "provider_error"
         && !error.message.includes("network details"));
+  });
+
+  it("builds valid fallback drafts across languages, networks, Substack, and long event details", () => {
+    for (const language of ["es", "en", "ca"] as const) {
+      for (const network of ["X", "Bluesky", "LinkedIn"] as const) {
+        for (const reminderDays of [14, 7, 1] as const) {
+          const text = buildFallbackDraftText({
+            ...input,
+            language,
+            network,
+            reminderDays,
+            event: {
+              ...input.event,
+              title: "Barcelona MuleSoft Meetup Nov 2026",
+              place: "Carrer de la Diputació, 280",
+            },
+          });
+          assert.equal(validatePost(network, text).valid, true);
+        }
+      }
+    }
+
+    const longPlaceText = buildFallbackDraftText({
+      ...input,
+      network: "X",
+      language: "es",
+      event: {
+        ...input.event,
+        title: "A".repeat(160),
+        place: "B".repeat(160),
+      },
+    });
+    assert.equal(validatePost("X", longPlaceText).valid, true);
+
+    const extremeTitleText = buildFallbackDraftText({
+      ...input,
+      network: "X",
+      language: "ca",
+      event: {
+        ...input.event,
+        title: "C".repeat(290),
+        place: "D".repeat(160),
+      },
+    });
+    assert.equal(validatePost("X", extremeTitleText).valid, true);
+
+    const substackFull = buildFallbackDraftText({
+      ...input,
+      network: "LinkedIn",
+      event: {
+        ...input.event,
+        title: "La eternidad está en el presente",
+        description: "Reflexiones sobre el tiempo.",
+        url: "https://etsideusnondaretur.substack.com/p/la-eternidad",
+      },
+    });
+    assert.equal(validatePost("LinkedIn", substackFull).valid, true);
+
+    const substackLong = buildFallbackDraftText({
+      ...input,
+      network: "X",
+      event: {
+        ...input.event,
+        title: "La eternidad está en el presente",
+        description: "R".repeat(300),
+        url: "https://etsideusnondaretur.substack.com/p/la-eternidad",
+      },
+    });
+    assert.equal(validatePost("X", substackLong).valid, true);
+  });
+
+  it("falls back deterministically when Groq is unconfigured, over-limit, or errors", async () => {
+    const unconfigured = await generateSocialPostOrFallback(input, { apiKey: "", model: "" });
+    assert.equal(unconfigured.model, "fallback");
+    assert.equal(unconfigured.validation.valid, true);
+
+    const overLimitFetch: typeof fetch = async () => response("x".repeat(350));
+    const overLimit = await generateSocialPostOrFallback(input, {
+      apiKey: "mock-secret",
+      model: "mock-model",
+      fetchImpl: overLimitFetch,
+    });
+    assert.equal(overLimit.model, "fallback");
+    assert.equal(overLimit.validation.valid, true);
+
+    const validFetch: typeof fetch = async () => response("Short valid post!");
+    const valid = await generateSocialPostOrFallback(input, {
+      apiKey: "mock-secret",
+      model: "mock-model",
+      fetchImpl: validFetch,
+    });
+    assert.equal(valid.model, "mock-model");
+    assert.equal(valid.text, "Short valid post!");
   });
 });
