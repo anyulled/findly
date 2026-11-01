@@ -32,14 +32,15 @@ Supabase free projects may pause after a week of sufficiently low activity. This
 5. Explicit Buffer rejections are marked failed; correct configuration or content and retry them. A timeout, server error or incomplete response is marked as needing reconciliation. Findly never retries that state automatically. Look up the post in Buffer and record its ID in the post detail before treating it as scheduled.
 6. `scheduled` means Buffer accepted the queued post; it does not mean the social network has published it. No live Buffer credentials are included, so validate against the owner account before relying on production publication.
 
-### Groq
+### Groq and OpenAI Fallback
 
-1. Create an API key and store it only in server-side secrets.
-2. Configure a production model ID explicitly rather than relying on an implicit default.
-3. Expect account-specific rate limits. A throttled or failed request should leave a visible retryable item and must not create a partial schedule.
-4. Account voice instructions belong to the per-account system prompt. Only final texts approved in review mode are added as style examples; generated text must still pass deterministic length checks.
-5. Persistent-mode event creation requires `GROQ_API_KEY` and `GROQ_MODEL`; without them, the event remains saved and its reminders can be retried after configuration. Local demo mode uses deterministic templates without calling Groq.
-6. Draft generation supports the configured maximum of 3 accounts × 3 networks × 3 reminder offsets (27 posts per event); larger configurations are rejected safely.
+1. Configure `GROQ_API_KEY` and `GROQ_MODEL` as the primary draft generation provider.
+2. Configure `OPENAI_API_KEY` and `OPENAI_MODEL` (e.g. `gpt-6-luna`) as the secondary fallback provider. If Groq is unavailable, rate-limited (HTTP 429), or fails, Findly automatically falls back to OpenAI with structured logging before using local deterministic templates.
+3. Configure production model IDs explicitly rather than relying on implicit defaults.
+4. Expect account-specific rate limits. A throttled or failed request should leave a visible retryable item and must not create a partial schedule.
+5. Account voice instructions belong to the per-account system prompt. Only final texts approved in review mode are added as style examples; generated text must still pass deterministic length checks.
+6. Persistent-mode event creation uses the LLM fallback chain (`Groq` -> `OpenAI` -> deterministic templates). Local demo mode uses deterministic templates without calling external LLMs.
+7. Draft generation supports the configured maximum of 3 accounts × 3 networks × 3 reminder offsets (27 posts per event); larger configurations are rejected safely.
 
 ### Luma and event links
 
@@ -64,7 +65,7 @@ A connected owner can run **Ajustes → Fuentes → Sincronizar ahora** even wit
 
 ## Secret inventory
 
-Use the names in `.env.example`. Persistent-mode Groq draft generation needs `GROQ_API_KEY` and `GROQ_MODEL`; the deployment also needs Supabase URL/publishable key and owner email. The Luma sync endpoint needs server-side Supabase service-role and cron secrets. Buffer scheduling needs the three server-only per-account Buffer API keys and a Buffer channel ID for every account/network pair in **Cuentas**. The public Supabase URL and publishable key are configuration values, not privileged credentials; browser database access remains protected by RLS. Never place Buffer/Groq/service-role/cron values in a `NEXT_PUBLIC_` variable. `JEV_API_KEY` is a reserved empty placeholder; the application does not call Jev.
+Use the names in `.env.example`. Persistent-mode draft generation uses `GROQ_API_KEY` and `GROQ_MODEL` (with optional `OPENAI_API_KEY` and `OPENAI_MODEL` as intelligent fallback); the deployment also needs Supabase URL/publishable key and owner email. The Luma sync endpoint needs server-side Supabase service-role and cron secrets. Buffer scheduling needs the three server-only per-account Buffer API keys and a Buffer channel ID for every account/network pair in **Cuentas**. The public Supabase URL and publishable key are configuration values, not privileged credentials; browser database access remains protected by RLS. Never place Buffer/Groq/OpenAI/service-role/cron values in a `NEXT_PUBLIC_` variable. `JEV_API_KEY` is a reserved empty placeholder; the application does not call Jev.
 
 ## Review and automatic modes
 
