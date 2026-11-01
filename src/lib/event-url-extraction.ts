@@ -1,5 +1,6 @@
 import { formatMadridDateTime } from "@/lib/madrid-time";
 import { isSubstackUrl, normalizeSubstackPostsApiUrl, parseSubstackFeed } from "@/lib/substack";
+import { enrichMeetupRssItems, isMeetupUrl, parseMeetupRssFeed } from "@/lib/meetup";
 
 const MAX_HTML_BYTES = 1_000_000;
 const MAX_REDIRECTS = 3;
@@ -299,6 +300,42 @@ async function readHtml(response: Response): Promise<string> {
   return output + decoder.decode();
 }
 
+async function parseMeetupFeedExtraction(rawContent: string, feedUrl: string, fetchImpl: typeof fetch): Promise<EventPageExtraction> {
+  const items = await enrichMeetupRssItems(parseMeetupRssFeed(rawContent, feedUrl), feedUrl, fetchImpl);
+  const latest = items[0];
+  if (!latest) throw new EventUrlExtractionError("No se encontraron eventos activos en ese feed de Meetup.");
+  const scheduled = formatMadridDateTime(latest.startsAt);
+  const event: EventPageDetails = {
+    title: latest.title,
+    date: scheduled.date,
+    time: scheduled.time,
+    place: latest.location,
+    description: latest.description,
+    url: latest.url,
+    ...(latest.coverImage ? { imageUrl: latest.coverImage } : {}),
+  };
+  return {
+    event,
+    missingFields: (["date", "time", "place", "description"] as const).filter((field) => !event[field]),
+  };
+}
+
+async function parseFetchedResponse(response: Response, current: URL, fetchImpl: typeof fetch): Promise<EventPageExtraction> {
+  const urlString = current.toString();
+  const contentType = response.headers.get("content-type") ?? "";
+  if (isSubstackUrl(urlString) && (/json|xml|rss/iu.test(contentType) || /\/(?:feed|api\/v1\/posts)\b/iu.test(current.pathname))) {
+    const extracted = parseSubstackFeedExtraction(await readHtml(response), urlString);
+    return enrichSubstackCoverFromApi(extracted, urlString, fetchImpl);
+  }
+  if (isMeetupUrl(urlString) && (/xml|rss/iu.test(contentType) || /\/events\/rss\/?$/iu.test(current.pathname))) {
+    return parseMeetupFeedExtraction(await readHtml(response), urlString, fetchImpl);
+  }
+  if (!/text\/html|application\/xhtml\+xml/iu.test(contentType)) {
+    throw new EventUrlExtractionError("La URL no devolvió una página HTML de evento.");
+  }
+  return parseEventPage(await readHtml(response), urlString);
+}
+
 export async function extractEventPageDetails(input: string, fetchImpl: typeof fetch = fetch): Promise<EventPageExtraction> {
   if (typeof input !== "string" || input.length > 2_048) throw new EventUrlExtractionError("El enlace del evento debe tener menos de 2048 caracteres.");
   let current: URL;
@@ -325,14 +362,7 @@ export async function extractEventPageDetails(input: string, fetchImpl: typeof f
       continue;
     }
     if (!response.ok) throw new EventUrlExtractionError("El proveedor no pudo cargar esa página del evento.");
-    const contentType = response.headers.get("content-type") ?? "";
-    const isSubstack = isSubstackUrl(current.toString());
-    if (isSubstack && (/json|xml|rss/iu.test(contentType) || /\/(?:feed|api\/v1\/posts)\b/iu.test(current.pathname))) {
-      const extracted = parseSubstackFeedExtraction(await readHtml(response), current.toString());
-      return enrichSubstackCoverFromApi(extracted, current.toString(), fetchImpl);
-    }
-    if (!/text\/html|application\/xhtml\+xml/iu.test(contentType)) throw new EventUrlExtractionError("La URL no devolvió una página HTML de evento.");
-    return parseEventPage(await readHtml(response), current.toString());
+    return parseFetchedResponse(response, current, fetchImpl);
   }
   throw new EventUrlExtractionError("La página redirigió demasiadas veces.");
 }
