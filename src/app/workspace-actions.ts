@@ -14,6 +14,7 @@ import { sourceForEventUrl } from "@/lib/event-source";
 import { selectEventAccounts } from "@/lib/event-targets";
 import { extractUserProfile, type UserProfile } from "@/lib/user-profile";
 import { validateSource, type SourceInput, type SourceType } from "@/lib/source-validation";
+import { syncBufferScheduledPosts } from "@/lib/buffer-sync";
 
 export type { UserProfile } from "@/lib/user-profile";
 export type { SourceInput, SourceType } from "@/lib/source-validation";
@@ -212,7 +213,31 @@ export async function loadWorkspace(): Promise<WorkspaceSnapshot> {
     if (row.source_type !== "luma_ical" && row.source_type !== "meetup") return [];
     return [{ id: row.id, name: row.name, type: row.source_type, url: row.feed_url ?? "", enabled: row.enabled, accountIds: accountIdsBySource.get(row.id) ?? [] }];
   });
-  return { accounts: accountsWithChannels, events, posts, sources, mode: settings?.mode === "automatic" ? "automatic" : "review", profile: extractUserProfile(user) };
+
+  const existingBufferPostIds = new Set(
+    posts.map((p) => p.bufferPostId).filter((id): id is string => Boolean(id)),
+  );
+  const syncAccounts = accountsWithChannels.map((acc) => ({
+    id: acc.id ?? "",
+    name: acc.name,
+    apiKey: bufferCredentialForAccount(acc.name).apiKey,
+    bufferChannels: acc.bufferChannels,
+  }));
+  const bufferScheduledPosts = await syncBufferScheduledPosts(
+    syncAccounts,
+    events,
+    existingBufferPostIds,
+    async (accountId, network, channelId) => {
+      await supabase.from("account_buffer_channels").upsert({
+        owner_id: ownerId,
+        account_id: accountId,
+        network,
+        buffer_channel_id: channelId,
+      }, { onConflict: "owner_id,account_id,network" });
+    },
+  );
+
+  return { accounts: accountsWithChannels, events, posts: [...posts, ...bufferScheduledPosts], sources, mode: settings?.mode === "automatic" ? "automatic" : "review", profile: extractUserProfile(user) };
 }
 
 export type SaveSourceResult =
