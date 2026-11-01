@@ -268,9 +268,15 @@ export async function loadWorkspace(): Promise<WorkspaceSnapshot> {
       accountIds.push(link.account_id);
       accountIdsBySource.set(link.source_id, accountIds);
     }
+    // Count per source with head queries: the calendar list above is capped by the API row limit and would undercount.
     const eventCountsBySource = new Map<string, number>();
-    for (const row of eventsResult.data ?? []) {
-      if (row.source_id) eventCountsBySource.set(row.source_id, (eventCountsBySource.get(row.source_id) ?? 0) + 1);
+    const countResults = await Promise.all((sourcesResult.data ?? []).map(async (row) => ({
+      id: row.id,
+      ...(await supabase.from("events").select("id", { count: "exact", head: true }).eq("source_id", row.id)),
+    })));
+    for (const result of countResults) {
+      if (result.error) throw new Error("No se pudo cargar el calendario desde Supabase. Comprueba que has aplicado las migraciones.");
+      eventCountsBySource.set(result.id, result.count ?? 0);
     }
     const sources: SourceView[] = (sourcesResult.data ?? []).flatMap((row) => {
       if (row.source_type !== "luma_ical" && row.source_type !== "meetup" && row.source_type !== "substack") return [];

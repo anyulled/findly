@@ -315,13 +315,16 @@ test("cancelling deletion confirmation leaves the item unchanged", async ({ page
 });
 
 test("retires a source with imported events instead of deleting it", async ({ page }) => {
-  await page.evaluate(() => localStorage.setItem("findly-state-v1", JSON.stringify({
-    events: [], posts: [], mode: "review",
+  const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Madrid", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+  await page.evaluate((date) => localStorage.setItem("findly-state-v1", JSON.stringify({
+    events: [{ id: "imported-event", title: "Evento importado", date, time: "19:00", place: "Barcelona", description: "", source: "Luma", sourceId: "imported-source" }],
+    posts: [{ id: "imported-post", eventId: "imported-event", date, time: "13:00", account: "Personal", network: "LinkedIn", text: "Borrador importado", status: "review" }],
+    mode: "review",
     sources: [
       { id: "imported-source", name: "Fuente importada", type: "luma_ical", url: "https://example.com/a.ics", enabled: true, accountIds: ["acc-personal"], eventCount: 3 },
       { id: "empty-source", name: "Fuente vacía", type: "luma_ical", url: "https://example.com/b.ics", enabled: true, accountIds: ["acc-personal"], eventCount: 0 },
     ],
-  })));
+  })), today);
   await page.reload();
   await page.getByRole("button", { name: "Ajustes" }).click();
   const imported = page.getByRole("article").filter({ hasText: "Fuente importada" });
@@ -333,4 +336,7 @@ test("retires a source with imported events instead of deleting it", async ({ pa
   await expect(page.getByText("Se conservan sus eventos y publicaciones.")).toBeVisible();
   await expect(imported).toHaveCount(0);
   await expect(empty).toBeVisible();
+  await page.reload();
+  await page.getByRole("button", { name: "Calendario" }).click();
+  await expect(page.getByRole("button", { name: /Evento importado.*Personal.*LinkedIn/ })).toBeVisible();
 });
