@@ -332,10 +332,11 @@ export function useWorkspace() {
         const generated = await generateReviewPosts(event.id);
         if (!generated.success) throw new Error(generated.error);
         setPosts((all) => [...all, ...generated.posts]);
+        setFeedback(generated.warning ?? "");
       } else {
         setPosts((all) => [...all, ...starterPosts([event], selectEventAccounts(accountList, null, [], event.accountIds))]);
+        setFeedback("");
       }
-      setFeedback("");
     } catch (error) {
       if (savedEvent) {
         const sanitized = sanitizeClientErrorMessage(error, "");
@@ -411,7 +412,7 @@ export function useWorkspace() {
         return;
       }
       setPosts((all) => [...new Map([...all, ...saved].map((post) => [post.id, post])).values()]);
-      setFeedback("Se han sincronizado los borradores de recordatorio.");
+      setFeedback(result.warning ?? "Se han sincronizado los borradores de recordatorio.");
     } catch (error) {
       setFeedback(sanitizeClientErrorMessage(error, "No se pudieron crear los borradores."));
     }

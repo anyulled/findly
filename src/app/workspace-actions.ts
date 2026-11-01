@@ -385,7 +385,7 @@ export type CreateEventResult =
   | { success: false; error: string };
 
 export type GenerateReviewPostsResult =
-  | { success: true; posts: PostView[] }
+  | { success: true; posts: PostView[]; warning?: string }
   | { success: false; posts: PostView[]; error: string };
 
 export async function deleteEvent(eventId: string): Promise<ActionOutcome> {
@@ -498,7 +498,16 @@ export async function generateReviewPosts(eventId: string): Promise<GenerateRevi
     return posts;
   }, { defaultErrorMessage: "No se pudieron crear los borradores." });
 
-  if (result.success) return { success: true, posts: result.data };
+  if (result.success) {
+    const hasFallback = result.data.some((p) => p.lastError?.includes("plantilla de respaldo"));
+    return {
+      success: true,
+      posts: result.data,
+      warning: hasFallback
+        ? "No se pudo generar el texto con IA; se ha utilizado la plantilla de respaldo."
+        : undefined,
+    };
+  }
   return { success: false, posts: [], error: result.error };
 }
 

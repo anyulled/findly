@@ -5,6 +5,7 @@ import { isSubstackUrl } from "./substack";
 import { managedAccount } from "./managed-accounts";
 
 const REQUEST_TIMEOUT_MS = 20_000;
+const MAX_COMPLETION_TOKENS = 1500;
 const MAX_STYLE_EXAMPLES = 3;
 
 export type ApprovedStyleExample = {
@@ -80,9 +81,9 @@ export function isPersonalAccount(input: PostGenerationInput): boolean {
 
 function getPerspectiveInstruction(isPersonal: boolean): string {
   if (isPersonal) {
-    return "Perspective: You are the speaker participating in this event. Write in first person singular ('I', 'me', 'estaré participando / dando una charla'). Announce that you will be participating or giving a talk at the event, mention the title and the topic/theme of your talk based on the event details, and invite everyone to attend.";
+    return "Perspective: You are the speaker participating in this event. Write in first person singular ('I', 'me', 'estaré dando una charla / participando'). Inspect the event description: highlight a specific session, talk title, or topic in first person only when the event description explicitly associates that talk with you or your name; if multiple speakers are listed or no session is explicitly attributed to you, announce your participation generally based on the event title without claiming another speaker's talk. Warmly invite everyone to attend.";
   }
-  return "Perspective: You are the community/association organizing team. Write in first person plural ('we', 'us', 'estamos organizando / os esperamos'). Announce that our community/association is organizing and hosting this event, highlight the talk topic, and invite everyone to join.";
+  return "Perspective: You are the community/association organizing team. Write in first person plural ('we', 'us', 'estamos organizando / os esperamos'). Inspect the event description to highlight the key sessions, talk topics, or speakers, announce that our community/association is organizing and hosting this event, and invite everyone to join.";
 }
 
 function getTimingInstruction(reminderDays: 14 | 7 | 1, language: PostLanguage): string {
@@ -320,8 +321,7 @@ async function callChatCompletionsApi(
       body: JSON.stringify({
         model,
         messages: buildMessages(input),
-        temperature: 0.6,
-        max_completion_tokens: 350,
+        max_completion_tokens: MAX_COMPLETION_TOKENS,
       }),
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
