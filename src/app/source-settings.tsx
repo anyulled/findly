@@ -178,7 +178,7 @@ export function SourceSettings({ accounts, sources, persistent, onSourcesChange,
         <legend>ASOCIAR A CUENTAS</legend>
         {accounts.map((account) => {
           const id = account.id ?? account.name;
-          return <label key={id}><input type="checkbox" checked={draft.accountIds.includes(id)} onChange={() => toggleAccount(id)}/>{account.name}</label>;
+          return <label key={id}><input type="checkbox" disabled={pending || !accountsReady} checked={draft.accountIds.includes(id)} onChange={() => toggleAccount(id)}/>{account.name}</label>;
         })}
       </fieldset>
       <p className={styles.sourceHelp}>{draft.type === "luma_ical" ? "Puedes asociar una fuente a varias cuentas. Los feeds Luma iCal activos se consultan al sincronizar." : "Puedes guardar el enlace y asociar cuentas, pero Meetup todavía no se importa automáticamente. Para eventos individuales, pega la URL en Añadir evento."}</p>
