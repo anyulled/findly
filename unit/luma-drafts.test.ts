@@ -154,3 +154,35 @@ test("source sync and automatic retries restrict generation and dispatch to sour
     assert.equal(dispatched.length, mode === "automatic" ? 6 : 0);
   }
 });
+
+
+test("manual event generation and retry retain persisted target accounts", async () => {
+  const manualEvent: ImportedLumaEvent = { ...event, source_id: null, target_account_ids: ["personal"] };
+  const accounts: GenerationAccount[] = [
+    { id: "personal", name: "Personal", voice: "personal", networks: ["LinkedIn"] },
+    { id: "jug", name: "Barcelona JUG", voice: "community", networks: ["LinkedIn"] },
+  ];
+  const inserted: LumaDraftRow[] = [];
+  const generated: string[] = [];
+  let selections = 0;
+  const repository: LumaDraftRepository = {
+    async listLinkedAccounts(ownerId, sourceId, selectedAccountIds) {
+      assert.equal(ownerId, manualEvent.owner_id);
+      assert.equal(sourceId, null);
+      assert.deepEqual(selectedAccountIds, ["personal"]);
+      selections += 1;
+      return selectEventAccounts(accounts, sourceId, [], selectedAccountIds);
+    },
+    async listExistingReminders() { return inserted.map((row) => ({ accountId: row.account_id, network: row.network, leadDays: row.lead_days })); },
+    async listApprovedExamples(_ownerId, accountIds) { assert.deepEqual(accountIds, ["personal"]); return []; },
+    async insertDrafts(rows) { inserted.push(...rows); return rows.length; },
+  };
+  const generate = async (input: PostGenerationInput) => { generated.push(input.accountId); return { text: "Join us!" }; };
+  const now = new Date("2029-12-01T00:00:00.000Z");
+  assert.equal(await generateLumaEventDrafts(manualEvent, repository, generate, now), 3);
+  inserted.pop(); // Simulate one missing reminder after partial persistence.
+  assert.equal(await generateLumaEventDrafts(manualEvent, repository, generate, now), 1);
+  assert.equal(selections, 2);
+  assert.deepEqual(new Set(generated), new Set(["personal"]));
+  assert.deepEqual(new Set(inserted.map((row) => row.account_id)), new Set(["personal"]));
+});
