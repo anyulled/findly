@@ -23,6 +23,18 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 - Keep the solution within free tiers where practical. Do not enable paid services or incur costs.
 - Do not commit secrets, credentials, or real user data.
 
+## Error reports and decision-making
+
+- When the user reports an error, troubleshoot before changing code: reproduce it or gather evidence (logs, screenshots, stack traces, CI output, data), trace the execution path, and identify every root cause, not only the visible symptom.
+- Report findings to the user with: the root cause(s) and the evidence behind them, two or more alternative fixes with trade-offs (scope, risk, effort, user-visible impact), and a recommended option.
+- Do not choose or implement a fix without the user's confirmation, unless the change is minor. A change is minor when it is small, low-risk, easily reversible, and does not alter user-visible behavior, data/schema, public interfaces, architecture, or dependencies (for example a typo, an obvious one-line bug, a missing null check, or a log message). When in doubt, ask.
+
+## Code quality
+
+- Follow SOLID and KISS: keep modules and functions focused on a single responsibility, depend on small interfaces (inject I/O such as Supabase, Buffer, Groq, and `fetch`), avoid duplicated business rules, and prefer the simplest design that meets the requirement.
+- Never swallow errors silently. Either handle them with an explicit, commented fallback or log them with context (operation, identifiers, error code) without leaking secrets or personal data, and surface a safe, user-friendly message.
+- Server Actions must not throw across the client boundary: return typed result objects so production builds never mask failures as minified React errors.
+
 ## Workstream ownership
 
 - Application: `src/`, database migrations, and application dependencies/configuration needed by the feature.
