@@ -162,15 +162,32 @@ function validDateTime(parts: LocalDateTime): boolean {
 function rawStartValues(input: string): Array<string | null> {
   const lines = input.replace(/\r?\n[ \t]/g, "").split(/\r?\n/);
   const values: Array<string | null> = [];
-  let inEvent = false;
+  const components: string[] = [];
+  let activeEvent: number | null = null;
   for (const line of lines) {
-    if (/^BEGIN:VEVENT\s*$/i.test(line)) {
-      inEvent = true;
-      values.push(null);
-    } else if (/^END:VEVENT\s*$/i.test(line)) {
-      inEvent = false;
-    } else if (inEvent && /^DTSTART(?:;[^:]*)?:(.*)$/i.test(line)) {
-      values[values.length - 1] = line.slice(line.indexOf(":") + 1);
+    const begin = /^BEGIN:([^;:\s]+)\s*$/i.exec(line);
+    if (begin) {
+      const name = begin[1].toLowerCase();
+      if (name === "vevent" && activeEvent === null && components.length === 1 && components[0] === "vcalendar") {
+        activeEvent = values.length;
+        values.push(null);
+      }
+      components.push(name);
+      continue;
+    }
+
+    const end = /^END:([^;:\s]+)\s*$/i.exec(line);
+    if (end) {
+      const name = end[1].toLowerCase();
+      if (name === "vevent" && activeEvent !== null && components.length === 2 && components[1] === "vevent") {
+        activeEvent = null;
+      }
+      if (components[components.length - 1] === name) components.pop();
+      continue;
+    }
+
+    if (activeEvent !== null && components.length === 2 && /^DTSTART(?:;[^:]*)?:(.*)$/i.test(line) && values[activeEvent] === null) {
+      values[activeEvent] = line.slice(line.indexOf(":") + 1);
     }
   }
   return values;

@@ -85,6 +85,16 @@ describe("Luma iCalendar parsing", () => {
     assert.deepEqual(result.issues.map(({ uid }) => uid), ["broken"]);
   });
 
+  it("validates the first direct DTSTART and ignores nested or duplicate properties", () => {
+    const duplicate = parseLumaIcal(`BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:duplicate-start\r\nDTSTART:20260231T180000Z\r\nDTSTART:20261205T180000Z\r\nSUMMARY:Duplicate start\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n`);
+    assert.deepEqual(duplicate.events, []);
+    assert.deepEqual(duplicate.issues.map(({ uid }) => uid), ["duplicate-start"]);
+
+    const nested = parseLumaIcal(`BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:nested-property\r\nDTSTART:20261205T180000Z\r\nSUMMARY:Nested property\r\nBEGIN:VALARM\r\nACTION:DISPLAY\r\nDTSTART:20260231T180000Z\r\nDESCRIPTION:Reminder\r\nEND:VALARM\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n`);
+    assert.deepEqual(nested.events.map(({ uid }) => uid), ["nested-property"]);
+    assert.deepEqual(nested.issues, []);
+  });
+
   it("rejects data that is not an iCalendar VCALENDAR", () => {
     assert.throws(() => parseLumaIcal("BEGIN:VCARD\r\nVERSION:4.0\r\nEND:VCARD\r\n"), IcalParseError);
   });
