@@ -38,12 +38,21 @@ export type GeneratedPost = {
   model: string;
   provider?: "groq" | "openai" | "fallback";
   validation: ReturnType<typeof validatePost>;
+  generationError?: PostGenerationError["code"];
+  isFallback?: boolean;
 };
 
 export class PostGenerationError extends Error {
   constructor(
     message: string,
-    readonly code: "not_configured" | "provider_error" | "empty_response" | "over_limit",
+    readonly code:
+      | "not_configured"
+      | "provider_error"
+      | "provider_auth"
+      | "rate_limited"
+      | "empty_response"
+      | "over_limit"
+      | "output_truncated",
     readonly validation?: ReturnType<typeof validatePost>,
   ) {
     super(message);
@@ -430,7 +439,14 @@ export class LLMFallbackChain {
         continue;
       }
       try {
-        return await provider.generate(input, fetchImpl);
+        const result = await provider.generate(input, fetchImpl);
+        if (provider.id === "fallback") {
+          return {
+            ...result,
+            generationError: lastErrorCode,
+          };
+        }
+        return result;
       } catch (error) {
         if (error instanceof PostGenerationError) {
           lastErrorCode = error.code;
