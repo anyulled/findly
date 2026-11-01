@@ -186,6 +186,10 @@ test("stores a Luma iCal source linked to multiple accounts", async ({ page }) =
   await page.getByRole("button", { name: "Ajustes" }).click();
   const restored = page.getByRole("article").filter({ hasText: "BarcelonaJS Luma" });
   await expect(restored.getByRole("checkbox", { name: "Activa" })).not.toBeChecked();
+  page.once("dialog", (dialog) => {
+    expect(dialog.message()).toContain("BarcelonaJS Luma");
+    void dialog.accept();
+  });
   await restored.getByRole("button", { name: "Eliminar" }).click();
   await expect(page.getByText("Aún no hay fuentes configuradas.")).toBeVisible();
 });
@@ -225,6 +229,10 @@ test("deletes an event from the events list", async ({ page }) => {
 
   await expect(page.getByRole("heading", { name: "Temporary Event to Delete" })).toBeVisible();
   const eventCard = page.getByRole("article").filter({ hasText: "Temporary Event to Delete" });
+  page.once("dialog", (dialog) => {
+    expect(dialog.message()).toContain("Temporary Event to Delete");
+    void dialog.accept();
+  });
   await eventCard.getByRole("button", { name: /Eliminar evento/ }).click();
   await expect(page.getByRole("heading", { name: "Temporary Event to Delete" })).toHaveCount(0);
 });
@@ -286,4 +294,22 @@ test("shows safe generation diagnostics on the affected draft", async ({ page })
   await page.getByRole("button", { name: /Diagnostic event.*Personal.*LinkedIn/ }).click();
   await expect(page.getByText(/No se pudo generar con Groq; se creó un borrador básico/)).toBeVisible();
   await expect(page.getByText(/Groq alcanzó su límite de solicitudes/)).toBeVisible();
+});
+
+test("cancelling deletion confirmation leaves the item unchanged", async ({ page }) => {
+  await page.getByRole("button", { name: "Añadir evento" }).first().click();
+  await page.getByLabel("TÍTULO").fill("Event Kept After Cancel");
+  await page.getByLabel("FECHA").fill("2026-12-20");
+  await page.getByLabel("HORA").fill("11:00");
+  await page.getByRole("button", { name: "Crear evento" }).click();
+
+  const eventCard = page.getByRole("article").filter({ hasText: "Event Kept After Cancel" });
+  await expect(eventCard).toBeVisible();
+
+  page.once("dialog", (dialog) => {
+    expect(dialog.message()).toContain("Event Kept After Cancel");
+    void dialog.dismiss();
+  });
+  await eventCard.getByRole("button", { name: /Eliminar evento/ }).click();
+  await expect(page.getByRole("heading", { name: "Event Kept After Cancel" })).toBeVisible();
 });

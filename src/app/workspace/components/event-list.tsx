@@ -10,6 +10,7 @@ interface EventListProps {
   sources: SourceView[];
   accountList: Account[];
   persistent: boolean;
+  deletingEventId?: string | null;
   openAddForm: () => void;
   onRetryDrafts: (event: EventItem) => void;
   onRemoveEvent: (eventId: string) => void;
@@ -21,6 +22,7 @@ export function EventList({
   sources,
   accountList,
   persistent,
+  deletingEventId,
   openAddForm,
   onRetryDrafts,
   onRemoveEvent,
@@ -103,12 +105,13 @@ export function EventList({
                   <button
                     type="button"
                     className={styles.secondaryButton}
+                    disabled={deletingEventId === event.id}
                     onClick={() => {
                       onRemoveEvent(event.id);
                     }}
                     aria-label={`Eliminar evento ${event.title}`}
                   >
-                    Eliminar
+                    {deletingEventId === event.id ? "Eliminando…" : "Eliminar"}
                   </button>
                 </div>
               </article>

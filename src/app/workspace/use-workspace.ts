@@ -70,6 +70,7 @@ export function useWorkspace() {
   const [selected, setSelected] = useState<Post | null>(null);
   const [editing, setEditing] = useState("");
   const [deletingDraft, setDeletingDraft] = useState(false);
+  const [deletingEventId, setDeletingEventId] = useState<string | null>(null);
   const [draftDeleteError, setDraftDeleteError] = useState("");
   const [reconciliationId, setReconciliationId] = useState("");
   const [absenceConfirmed, setAbsenceConfirmed] = useState(false);
@@ -575,6 +576,13 @@ export function useWorkspace() {
   }
 
   async function removeEvent(eventId: string) {
+    if (deletingEventId) return;
+    const event = events.find((e) => e.id === eventId);
+    const eventTitle = event?.title ? ` "${event.title}"` : "";
+    if (!window.confirm(`¿Eliminar el evento${eventTitle}? Se eliminarán también todas sus publicaciones asociadas.`)) {
+      return;
+    }
+    setDeletingEventId(eventId);
     try {
       if (persistent) {
         const result = await deleteEvent(eventId);
@@ -585,9 +593,11 @@ export function useWorkspace() {
       }
       setEvents((all) => all.filter((e) => e.id !== eventId));
       setPosts((all) => all.filter((p) => p.eventId !== eventId));
-      setFeedback("");
+      setFeedback("Evento eliminado.");
     } catch (error) {
       setFeedback(sanitizeClientErrorMessage(error, "No se pudo eliminar el evento."));
+    } finally {
+      setDeletingEventId(null);
     }
   }
 
@@ -618,6 +628,7 @@ export function useWorkspace() {
     bufferApiKeyConfigured,
     selected,
     deletingDraft,
+    deletingEventId,
     draftDeleteError,
     setDraftDeleteError,
     removeDraft,
