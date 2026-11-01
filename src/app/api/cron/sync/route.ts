@@ -3,15 +3,11 @@ import { fetchLumaFeed, syncLumaSources, type DraftGenerator, type SyncRepositor
 import { isAuthorizedCronRequest } from "@/lib/cron-auth";
 import { generateSocialPostOrFallback } from "@/lib/groq";
 import { generateLumaEventDrafts, type LumaDraftRepository } from "@/lib/luma-drafts";
-import type { PostLanguage } from "@/lib/language";
-import type { SocialNetwork } from "@/lib/social-validation";
+import { createSupabaseDraftRepository } from "@/lib/draft-repository";
 import { createClient } from "@/lib/supabase/server";
 import { isSameOriginSessionRequest } from "@/lib/sync-request-auth";
-import { selectEventAccounts } from "@/lib/event-targets";
 import { dispatchApprovedPostsWithSupabase, hasDispatchFailures, recordDispatchBatch, RECOVERY_BUDGET_MS, type ApprovedDispatchResult } from "@/lib/approved-dispatch";
 import { logger } from "@/lib/logger";
-
-const NETWORKS: SocialNetwork[] = ["LinkedIn", "X", "Bluesky"];
 
 export async function POST(request: Request): Promise<Response> {
   const secret = process.env.CRON_SECRET;
@@ -52,60 +48,9 @@ export async function POST(request: Request): Promise<Response> {
   // generation, which happen between dispatches.
   const deliveryBudget = { remainingMs: RECOVERY_BUDGET_MS };
   const automaticDelivery: ApprovedDispatchResult = { selected: 0, scheduled: 0, failed: 0, needsReconciliation: 0, notClaimed: 0, errors: 0, deferred: 0 };
+  const baseDraftRepository = createSupabaseDraftRepository(supabase, ownerId, { deliveryBudget });
   const draftRepository: LumaDraftRepository = {
-    async getPublishingMode(ownerId) {
-      const { data, error } = await supabase.from("app_settings").select("value")
-        .eq("owner_id", ownerId).eq("key", "publishing_mode").maybeSingle();
-      if (error) throw new Error("Unable to read publishing mode");
-      return (data?.value as { mode?: string } | null)?.mode === "automatic" ? "automatic" : "review";
-    },
-    async listLinkedAccounts(ownerId, sourceId) {
-      const { data: links, error: linkError } = await supabase.from("source_accounts")
-        .select("account_id").eq("owner_id", ownerId).eq("source_id", sourceId);
-      if (linkError) throw new Error("Unable to read source account links");
-      const sourceLinks = (links ?? []).map((link) => ({ sourceId, accountId: link.account_id }));
-      if (sourceLinks.length === 0) return [];
-      const { data, error } = await supabase.from("accounts")
-        .select("id,name,voice_prompt,networks").eq("owner_id", ownerId).eq("enabled", true)
-        .order("created_at");
-      if (error) throw new Error("Unable to read linked accounts");
-      return selectEventAccounts(data ?? [], sourceId, sourceLinks).map((account) => ({
-        id: account.id,
-        name: account.name,
-        voice: account.voice_prompt,
-        networks: account.networks.filter((network: string): network is SocialNetwork => NETWORKS.includes(network as SocialNetwork)),
-      }));
-    },
-    async listExistingReminders(ownerId, eventId) {
-      const { data, error } = await supabase.from("posts").select("account_id,network,lead_days")
-        .eq("owner_id", ownerId).eq("event_id", eventId);
-      if (error) throw new Error("Unable to read existing reminders");
-      return (data ?? []).flatMap((post) => NETWORKS.includes(post.network as SocialNetwork)
-        ? [{ accountId: post.account_id, network: post.network as SocialNetwork, leadDays: post.lead_days }]
-        : []);
-    },
-    async listApprovedExamples(ownerId, accountIds) {
-      const { data, error } = await supabase.from("style_examples")
-        .select("content,account_id,network,language").eq("owner_id", ownerId)
-        .in("account_id", accountIds).order("created_at", { ascending: false }).limit(72);
-      if (error) throw new Error("Unable to read approved style examples");
-      return (data ?? []).flatMap((example) => {
-        if (!NETWORKS.includes(example.network as SocialNetwork) || !["en", "es", "ca"].includes(example.language)) return [];
-        return [{
-          text: example.content,
-          accountId: example.account_id,
-          network: example.network as SocialNetwork,
-          language: example.language as PostLanguage,
-        }];
-      });
-    },
-    async insertDrafts(rows) {
-      const { data, error } = await supabase.from("posts").upsert(rows, {
-        onConflict: "event_id,account_id,network,lead_days", ignoreDuplicates: true,
-      }).select("id");
-      if (error) throw new Error("Unable to persist generated drafts");
-      return data?.length ?? 0;
-    },
+    ...baseDraftRepository,
     async scheduleAutomaticPosts(ownerId, eventId, accountIds) {
       if (accountIds.length === 0) return;
       await recordDispatchBatch(automaticDelivery, () =>

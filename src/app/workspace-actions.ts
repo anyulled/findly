@@ -2,19 +2,18 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { formatMadridDateTime, madridDateTimeToIso } from "@/lib/madrid-time";
-import { validatePost, type SocialNetwork } from "@/lib/social-validation";
+import { validatePost, NETWORKS, type SocialNetwork } from "@/lib/social-validation";
 import { detectTitleLanguage, type PostLanguage } from "@/lib/language";
 import { generateSocialPostOrFallback } from "@/lib/groq";
-import { generateEventDrafts } from "@/lib/groq-workflow";
-import { dispatchApprovedPostsWithSupabase } from "@/lib/approved-dispatch";
+import { generateLumaEventDrafts } from "@/lib/luma-drafts";
+import { createSupabaseDraftRepository } from "@/lib/draft-repository";
 import { approveAndSchedulePost, schedulePostWithSupabase, type PostPublishingOutcome } from "@/lib/post-publishing";
 import { MANAGED_ACCOUNTS, managedAccount } from "@/lib/managed-accounts";
 import { bufferCredentialForAccount } from "@/lib/buffer-account-credentials";
 import { sourceForEventUrl } from "@/lib/event-source";
-import { selectEventAccounts } from "@/lib/event-targets";
 import { extractUserProfile, type UserProfile } from "@/lib/user-profile";
 import { validateSource, type SourceInput, type SourceType } from "@/lib/source-validation";
-import { fetchNextChannelSlotsForAccount, invalidateBufferSyncCache, syncBufferScheduledPosts } from "@/lib/buffer-sync";
+import { invalidateBufferSyncCache, syncBufferScheduledPosts } from "@/lib/buffer-sync";
 import { isSubstackUrl, packLocationAndImage, unpackLocationAndImage } from "@/lib/substack";
 import { fetchOpenGraphImage } from "@/lib/opengraph";
 import { runAction, runVoidAction, UserFacingError, type ActionVoidResult } from "@/lib/action-result";
@@ -93,7 +92,6 @@ const DEFAULT_ACCOUNTS = [
   { name: "Barcelona JUG", account_type: "association", voice_prompt: "Comunidad tecnológica abierta. Entusiasta, inclusiva y concreta.", networks: ["LinkedIn", "X"] },
   { name: "Software Crafters Barcelona", account_type: "association", voice_prompt: "Tono profesional y acogedor. Destaca la comunidad y el aprendizaje.", networks: ["LinkedIn", "Bluesky"] },
 ] as const;
-const NETWORKS: SocialNetwork[] = ["LinkedIn", "X", "Bluesky"];
 
 async function authorizedClient() {
   const supabase = await createClient();
@@ -124,6 +122,42 @@ function accountView(row: { id: string; name: string; account_type: string; voic
     networks,
     bufferChannels,
     styleExampleCount,
+  };
+}
+
+function mapPostRowToView(
+  row: {
+    id: string;
+    event_id: string;
+    account_id: string;
+    network: string;
+    lead_days: number;
+    due_at: string;
+    content: string;
+    status: string;
+    language: string;
+    last_error?: string | null;
+    buffer_post_id?: string | null;
+  },
+  accountNames: Map<string, string>,
+): PostView | null {
+  const network = NETWORKS.find((value) => value === row.network);
+  if (!network) return null;
+  const scheduled = formatMadridDateTime(row.due_at);
+  return {
+    id: row.id,
+    eventId: row.event_id,
+    date: scheduled.date,
+    time: scheduled.time,
+    account: accountNames.get(row.account_id) ?? "Cuenta",
+    accountId: row.account_id,
+    network,
+    text: row.content,
+    status: row.status as PostView["status"],
+    lastError: row.last_error,
+    bufferPostId: row.buffer_post_id,
+    leadDays: row.lead_days as PostView["leadDays"],
+    language: row.language as PostLanguage,
   };
 }
 
@@ -170,7 +204,8 @@ export async function loadWorkspace(): Promise<WorkspaceSnapshot> {
         return orderA - orderB;
       });
     const accounts = rows.map((row, index) => accountView(row, index));
-    const accountNames = new Map(accounts.map((account) => [account.id, account.name]));
+    const accountNames = new Map<string, string>();
+    for (const account of accounts) if (account.id) accountNames.set(account.id, account.name);
 
     const [eventsResult, postsResult, settingsResult, sourcesResult, sourceAccountsResult, channelResult, examplesResult] = await Promise.all([
       supabase.from("events").select("id,title,starts_at,location,description,event_url,detected_language,source_id").order("starts_at"),
@@ -213,24 +248,8 @@ export async function loadWorkspace(): Promise<WorkspaceSnapshot> {
     for (const example of examplesResult.data ?? []) exampleCounts.set(example.account_id, (exampleCounts.get(example.account_id) ?? 0) + 1);
     const accountsWithChannels = rows.map((row, index) => accountView(row, index, channelIdsByAccount.get(row.id), exampleCounts.get(row.id) ?? 0));
     const posts: PostView[] = (postsResult.data ?? []).flatMap((row) => {
-      const network = NETWORKS.find((value) => value === row.network);
-      if (!network) return [];
-      const scheduled = formatMadridDateTime(row.due_at);
-      return [{
-        id: row.id,
-        eventId: row.event_id,
-        date: scheduled.date,
-        time: scheduled.time,
-        account: accountNames.get(row.account_id) ?? "Cuenta",
-        accountId: row.account_id,
-        network,
-        text: row.content,
-        status: row.status as PostView["status"],
-        lastError: row.last_error,
-        bufferPostId: row.buffer_post_id,
-        leadDays: row.lead_days as PostView["leadDays"],
-        language: row.language as PostLanguage,
-      }];
+      const view = mapPostRowToView(row, accountNames);
+      return view ? [view] : [];
     });
     const settings = settingsResult.data?.value as { mode?: string } | null;
     const accountIdsBySource = new Map<string, string[]>();
@@ -428,127 +447,29 @@ export async function generateReviewPosts(eventId: string): Promise<GenerateRevi
     const { supabase, ownerId } = await authorizedClient();
     if (!/^[0-9a-f-]{36}$/i.test(eventId)) throw new UserFacingError("Solicitud de publicaciones no válida.");
 
-    const [eventResult, accountResult, existingResult, settingsResult] = await Promise.all([
-      supabase.from("events").select("id,title,starts_at,location,description,event_url,detected_language,source_id")
-        .eq("id", eventId).eq("owner_id", ownerId).single(),
-      supabase.from("accounts").select("id,name,voice_prompt,networks").eq("owner_id", ownerId).eq("enabled", true).order("created_at"),
-      supabase.from("posts").select("account_id,network,lead_days").eq("owner_id", ownerId).eq("event_id", eventId),
-      supabase.from("app_settings").select("value").eq("owner_id", ownerId).eq("key", "publishing_mode").maybeSingle(),
-    ]);
+    const eventResult = await supabase
+      .from("events")
+      .select("id,owner_id,source_id,title,starts_at,location,description,event_url,detected_language")
+      .eq("id", eventId)
+      .eq("owner_id", ownerId)
+      .single();
+
     if (eventResult.error || !eventResult.data) throw new UserFacingError("No se encontró el evento en este espacio.");
-    if (accountResult.error || !accountResult.data) throw new UserFacingError("No se pudieron cargar las cuentas.");
-    if (existingResult.error || !existingResult.data) throw new UserFacingError("No se pudo comprobar si ya existen recordatorios.");
-    if (settingsResult.error) throw new UserFacingError("No se pudo cargar el modo de publicación.");
 
-    let sourceLinks: { sourceId: string; accountId: string }[] = [];
-    if (eventResult.data.source_id) {
-      const { data, error } = await supabase.from("source_accounts").select("source_id,account_id")
-        .eq("owner_id", ownerId).eq("source_id", eventResult.data.source_id);
-      if (error) throw new UserFacingError("No se pudieron cargar las cuentas asociadas a la fuente.");
-      sourceLinks = (data ?? []).map((link) => ({ sourceId: link.source_id, accountId: link.account_id }));
-    }
-    const eligibleAccounts = selectEventAccounts(accountResult.data, eventResult.data.source_id, sourceLinks);
-    const accountIds = eligibleAccounts.map((account) => account.id);
-    const exampleResult = accountIds.length === 0
-      ? { data: [], error: null }
-      : await supabase.from("style_examples").select("content,account_id,network,language")
-        .eq("owner_id", ownerId).in("account_id", accountIds).order("created_at", { ascending: false }).limit(72);
-    if (exampleResult.error || !exampleResult.data) throw new UserFacingError("No se pudieron cargar los ejemplos de estilo aprobados.");
+    const draftRepo = createSupabaseDraftRepository(supabase, ownerId);
+    await generateLumaEventDrafts(eventResult.data, draftRepo, generateSocialPostOrFallback);
 
-    const eventTime = formatMadridDateTime(eventResult.data.starts_at);
-    const unpacked = unpackLocationAndImage(eventResult.data.location);
-    const mappedAccounts = eligibleAccounts.map((account) => ({
-      id: account.id,
-      name: account.name,
-      voice: account.voice_prompt,
-      networks: (account.networks as string[]).filter((network): network is SocialNetwork => NETWORKS.includes(network as SocialNetwork)),
-    }));
-    const slotByAccountNetwork: Record<string, { date: string; time: string }> = {};
-    if (isSubstackUrl(eventResult.data.event_url)) {
-      for (const account of mappedAccounts) {
-        const apiKey = bufferCredentialForAccount(account.name).apiKey;
-        const slots = await fetchNextChannelSlotsForAccount(apiKey, account.networks);
-        for (const network of account.networks) {
-          const slot = slots[network];
-          if (slot) slotByAccountNetwork[`${account.id}:${network}`] = slot;
-        }
-      }
-    }
-    const drafts = await generateEventDrafts({
-      event: {
-        id: eventResult.data.id,
-        title: eventResult.data.title,
-        date: eventTime.date,
-        time: eventTime.time,
-        place: unpacked.place,
-        description: eventResult.data.description,
-        url: eventResult.data.event_url ?? undefined,
-        language: eventResult.data.detected_language as PostLanguage,
-      },
-      accounts: mappedAccounts,
-      approvedExamples: exampleResult.data.flatMap((example) => {
-        if (!NETWORKS.includes(example.network as SocialNetwork) || !["en", "es", "ca"].includes(example.language)) return [];
-        return [{ accountId: example.account_id, network: example.network as SocialNetwork, language: example.language as PostLanguage, text: example.content }];
-      }),
-      existing: existingResult.data.flatMap((post) => {
-        if (!NETWORKS.includes(post.network as SocialNetwork)) return [];
-        return [{ accountId: post.account_id, network: post.network as SocialNetwork, leadDays: post.lead_days }];
-      }),
-      slotByAccountNetwork,
-      generate: generateSocialPostOrFallback,
-    });
+    const [accountResult, postsResult] = await Promise.all([
+      supabase.from("accounts").select("id,name").eq("owner_id", ownerId),
+      supabase.from("posts").select("id,event_id,account_id,network,lead_days,due_at,content,status,language,last_error,buffer_post_id")
+        .eq("owner_id", ownerId).eq("event_id", eventId).order("due_at"),
+    ]);
 
-    const automatic = (settingsResult.data?.value as { mode?: string } | null)?.mode === "automatic";
-    const rows = drafts.map((post) => {
-      const validation = validatePost(post.network, post.text);
-      if (!validation.valid) throw new Error(validation.message);
-      return {
-        owner_id: ownerId,
-        event_id: eventId,
-        account_id: post.accountId,
-        network: post.network,
-        lead_days: post.leadDays,
-        due_at: madridDateTimeToIso(post.date, post.time),
-        timezone: "Europe/Madrid",
-        content: post.text,
-        status: automatic && !post.isFallback ? "approved" : "review",
-        language: post.language,
-      };
-    });
-    if (rows.length > 0) {
-      const { error: upsertError } = await supabase.from("posts").upsert(rows, {
-        onConflict: "event_id,account_id,network,lead_days",
-        ignoreDuplicates: true,
-      });
-      if (upsertError) throw new UserFacingError("No se pudieron guardar las publicaciones pendientes.");
-    }
-    if (automatic) {
-      await dispatchApprovedPostsWithSupabase(supabase, ownerId, eventId);
-    }
-
-    const { data, error } = await supabase.from("posts").select("id,event_id,account_id,network,lead_days,due_at,content,status,language,last_error,buffer_post_id")
-      .eq("owner_id", ownerId).eq("event_id", eventId).order("due_at");
-    if (error || !data) throw new UserFacingError("No se pudieron recuperar las publicaciones pendientes.");
-    const accountNames = new Map(accountResult.data.map((account) => [account.id, account.name]));
-    const posts = data.flatMap((row) => {
-      const network = NETWORKS.find((value) => value === row.network);
-      if (!network) return [];
-      const scheduled = formatMadridDateTime(row.due_at);
-      return [{
-        id: row.id,
-        eventId: row.event_id,
-        date: scheduled.date,
-        time: scheduled.time,
-        account: accountNames.get(row.account_id) ?? "Cuenta",
-        accountId: row.account_id,
-        network,
-        text: row.content,
-        status: row.status as PostView["status"],
-        lastError: row.last_error,
-        bufferPostId: row.buffer_post_id,
-        leadDays: row.lead_days as PostView["leadDays"],
-        language: row.language as PostLanguage,
-      }];
+    if (postsResult.error || !postsResult.data) throw new UserFacingError("No se pudieron recuperar las publicaciones pendientes.");
+    const accountNames = new Map((accountResult.data ?? []).map((account: { id: string; name: string }) => [account.id, account.name]));
+    const posts: PostView[] = (postsResult.data ?? []).flatMap((row: Parameters<typeof mapPostRowToView>[0]) => {
+      const view = mapPostRowToView(row, accountNames);
+      return view ? [view] : [];
     });
     return posts;
   }, { defaultErrorMessage: "No se pudieron crear los borradores." });
