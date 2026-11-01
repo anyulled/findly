@@ -253,7 +253,6 @@ test("creates an event for selected accounts only and retains the selection afte
   expect([...new Set(state.posts.map((post: { account: string }) => post.account))]).toEqual(["Personal"]);
 });
 
-<<<<<<< HEAD
 test("discards a review draft and preserves scheduled posts", async ({ page }) => {
   const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Madrid", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
   await page.evaluate((date) => localStorage.setItem("findly-state-v1", JSON.stringify({

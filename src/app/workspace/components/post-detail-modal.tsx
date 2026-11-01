@@ -9,6 +9,7 @@ const generationErrors: Record<string, string> = {
   provider_error: "No se pudo completar la solicitud a Groq. Revisa el servicio y el modelo configurado.",
   empty_response: "Groq devolvió una respuesta vacía.",
   over_limit: "El texto de Groq superó el límite de caracteres de esta red.",
+  output_truncated: "Groq detuvo la generación antes de completar el texto.",
 };
 
 interface PostDetailModalProps {

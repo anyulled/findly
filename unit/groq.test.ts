@@ -206,3 +206,12 @@ it("classifies provider failures without persisting credentials or response bodi
       assert.doesNotMatch(JSON.stringify(result), /secret-api-key|private-provider-body/u);
     }
   });
+
+
+it("rejects a truncated completion even when the partial text fits the network limit", async () => {
+  const fetchImpl: typeof fetch = async () => new Response(JSON.stringify({ choices: [{ finish_reason: "length", message: { content: "Join us at Carrer" } }] }), { status: 200 });
+  const result = await generateSocialPostOrFallback(input, { apiKey: "test", model: "model", fetchImpl });
+  assert.equal(result.model, "fallback");
+  assert.equal(result.generationError, "output_truncated");
+  assert.doesNotMatch(result.text, /Join us at Carrer/u);
+});
