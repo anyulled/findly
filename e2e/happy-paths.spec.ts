@@ -313,3 +313,24 @@ test("cancelling deletion confirmation leaves the item unchanged", async ({ page
   await eventCard.getByRole("button", { name: /Eliminar evento/ }).click();
   await expect(page.getByRole("heading", { name: "Event Kept After Cancel" })).toBeVisible();
 });
+
+test("retires a source with imported events instead of deleting it", async ({ page }) => {
+  await page.evaluate(() => localStorage.setItem("findly-state-v1", JSON.stringify({
+    events: [], posts: [], mode: "review",
+    sources: [
+      { id: "imported-source", name: "Fuente importada", type: "luma_ical", url: "https://example.com/a.ics", enabled: true, accountIds: ["acc-personal"], eventCount: 3 },
+      { id: "empty-source", name: "Fuente vacía", type: "luma_ical", url: "https://example.com/b.ics", enabled: true, accountIds: ["acc-personal"], eventCount: 0 },
+    ],
+  })));
+  await page.reload();
+  await page.getByRole("button", { name: "Ajustes" }).click();
+  const imported = page.getByRole("article").filter({ hasText: "Fuente importada" });
+  const empty = page.getByRole("article").filter({ hasText: "Fuente vacía" });
+  await expect(imported.getByRole("button", { name: "Eliminar" })).toHaveCount(0);
+  await expect(empty.getByRole("button", { name: "Retirar" })).toHaveCount(0);
+  page.once("dialog", (dialog) => dialog.accept());
+  await imported.getByRole("button", { name: "Retirar" }).click();
+  await expect(page.getByText("Se conservan sus eventos y publicaciones.")).toBeVisible();
+  await expect(imported).toHaveCount(0);
+  await expect(empty).toBeVisible();
+});

@@ -79,6 +79,8 @@ export type SourceView = {
   url: string;
   enabled: boolean;
   accountIds: string[];
+  /** Imported events still linked to this source; a non-zero count blocks physical deletion. */
+  eventCount?: number;
 };
 
 export type WorkspaceSnapshot = {
@@ -218,7 +220,7 @@ export async function loadWorkspace(): Promise<WorkspaceSnapshot> {
       supabase.from("events").select("id,title,starts_at,location,description,event_url,detected_language,source_id,target_account_ids").order("starts_at"),
       supabase.from("posts").select("id,event_id,account_id,network,lead_days,due_at,content,status,language,last_error,buffer_post_id,generation_origin,generation_error_code").order("due_at"),
       supabase.from("app_settings").select("value").eq("key", "publishing_mode").maybeSingle(),
-      supabase.from("sources").select("id,name,source_type,feed_url,enabled").order("created_at"),
+      supabase.from("sources").select("id,name,source_type,feed_url,enabled").is("archived_at", null).order("created_at"),
       supabase.from("source_accounts").select("source_id,account_id"),
       supabase.from("account_buffer_channels").select("account_id,network,buffer_channel_id"),
       supabase.from("style_examples").select("account_id"),
@@ -266,12 +268,16 @@ export async function loadWorkspace(): Promise<WorkspaceSnapshot> {
       accountIds.push(link.account_id);
       accountIdsBySource.set(link.source_id, accountIds);
     }
+    const eventCountsBySource = new Map<string, number>();
+    for (const row of eventsResult.data ?? []) {
+      if (row.source_id) eventCountsBySource.set(row.source_id, (eventCountsBySource.get(row.source_id) ?? 0) + 1);
+    }
     const sources: SourceView[] = (sourcesResult.data ?? []).flatMap((row) => {
       if (row.source_type !== "luma_ical" && row.source_type !== "meetup" && row.source_type !== "substack") return [];
       const resolvedType: SourceType = isSubstackUrl(row.feed_url) || row.source_type === "substack"
         ? "substack"
         : row.source_type;
-      return [{ id: row.id, name: row.name, type: resolvedType, url: row.feed_url ?? "", enabled: row.enabled, accountIds: accountIdsBySource.get(row.id) ?? [] }];
+      return [{ id: row.id, name: row.name, type: resolvedType, url: row.feed_url ?? "", enabled: row.enabled, accountIds: accountIdsBySource.get(row.id) ?? [], eventCount: eventCountsBySource.get(row.id) ?? 0 }];
     });
 
     const existingBufferPostIds = new Set(
@@ -369,12 +375,26 @@ export async function setSourceEnabled(sourceId: string, enabled: boolean): Prom
   }, { defaultErrorMessage: "No se pudo actualizar la fuente." });
 }
 
+export async function retireSource(sourceId: string): Promise<ActionOutcome> {
+  return runVoidAction("retireSource", async () => {
+    const { supabase } = await authorizedClient();
+    if (!/^[0-9a-f-]{36}$/i.test(sourceId)) {
+      throw new UserFacingError("La fuente no es válida.");
+    }
+    const { data, error } = await supabase.rpc("retire_source", { p_source_id: sourceId });
+    if (error || data !== true) throw new UserFacingError("No se pudo retirar la fuente.");
+  }, { defaultErrorMessage: "No se pudo retirar la fuente." });
+}
+
 export async function deleteSource(sourceId: string): Promise<ActionOutcome> {
   return runVoidAction("deleteSource", async () => {
     const { supabase } = await authorizedClient();
     if (!/^[0-9a-f-]{36}$/i.test(sourceId)) {
       throw new UserFacingError("La fuente no es válida.");
     }
+    const { count, error: countError } = await supabase.from("events").select("id", { count: "exact", head: true }).eq("source_id", sourceId);
+    if (countError) throw new UserFacingError("No se pudo eliminar la fuente.");
+    if ((count ?? 0) > 0) throw new UserFacingError("La fuente tiene eventos importados. Retírala para conservarlos.");
     const { data, error } = await supabase.from("sources").delete().eq("id", sourceId).select("id").single();
     if (error || !data) throw new UserFacingError("No se pudo eliminar la fuente.");
   }, { defaultErrorMessage: "No se pudo eliminar la fuente." });

@@ -61,7 +61,7 @@ export async function POST(request: Request): Promise<Response> {
   const repository: SyncRepository = {
     async listEnabledLumaSources() {
       const { data, error } = await supabase.from("sources").select("id,owner_id,name,feed_url")
-        .eq("owner_id", ownerId).eq("enabled", true);
+        .eq("owner_id", ownerId).eq("enabled", true).is("archived_at", null);
       if (error) throw new Error("Unable to read configured sources");
       return (data ?? []).filter((source) => typeof source.feed_url === "string" && source.feed_url.length > 0)
         .map((source) => ({ id: source.id, ownerId: source.owner_id, name: source.name, feedUrl: source.feed_url! }));
