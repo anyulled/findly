@@ -2,7 +2,7 @@
 
 import { useState, type FormEvent } from "react";
 import styles from "./page.module.css";
-import { deleteSource, saveSource, setSourceEnabled, type AccountView, type SourceInput, type SourceType, type SourceView } from "./workspace-actions";
+import { deleteSource, retireSource, saveSource, setSourceEnabled, type AccountView, type SourceInput, type SourceType, type SourceView } from "./workspace-actions";
 
 type Props = {
   accounts: AccountView[];
@@ -77,26 +77,34 @@ export function SourceSettings({ accounts, sources, persistent, onSourcesChange,
     }
   }
 
-  async function removeSource(source: SourceView) {
+  async function removeSource(source: SourceView, mode: "retire" | "delete") {
     if (pending || deletingSourceId) return;
+    const verb = mode === "retire" ? "retirar" : "eliminar";
     const sourceTitle = source.name ? ` "${source.name}"` : "";
-    if (!window.confirm(`¿Eliminar la fuente${sourceTitle}? Ya no se sincronizarán sus eventos.`)) {
+    const question = mode === "retire"
+      ? `¿Retirar la fuente${sourceTitle}? Se conservarán sus eventos y publicaciones, pero ya no se sincronizará.`
+      : `¿Eliminar la fuente${sourceTitle}? Ya no se sincronizarán sus eventos.`;
+    if (!window.confirm(question)) {
       return;
     }
     setDeletingSourceId(source.id);
     setPending(true);
     setError("");
+    setMessage("");
     try {
       if (persistent) {
-        const result = await deleteSource(source.id);
+        const result = mode === "retire" ? await retireSource(source.id) : await deleteSource(source.id);
         if (!result.success) {
           setError(result.error);
           return;
         }
       }
       onSourcesChange(sources.filter((item) => item.id !== source.id));
+      setMessage(mode === "retire"
+        ? `Fuente «${source.name}» retirada. Se conservan sus eventos y publicaciones.`
+        : `Fuente «${source.name}» eliminada.`);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "No se pudo eliminar la fuente.");
+      setError(caught instanceof Error ? caught.message : `No se pudo ${verb} la fuente.`);
     } finally {
       setPending(false);
       setDeletingSourceId(null);
@@ -157,15 +165,26 @@ export function SourceSettings({ accounts, sources, persistent, onSourcesChange,
         <p className={styles.sourceAccounts}><b>Cuentas:</b> {source.accountIds.map(accountLabel).join(", ") || "Sin cuentas"}</p>
         <div className={styles.sourceActions}>
           <label><input type="checkbox" checked={source.enabled} disabled={pending} onChange={() => { void toggleSource(source); }}/> Activa</label>
-          <button
-            type="button"
-            className={styles.secondaryButton}
-            disabled={pending || deletingSourceId === source.id}
-            onClick={() => { void removeSource(source); }}
-            aria-label={`Eliminar fuente ${source.name}`}
-          >
-            {deletingSourceId === source.id ? "Eliminando…" : "Eliminar"}
-          </button>
+          {(source.eventCount ?? 0) > 0
+            ? <button
+              type="button"
+              className={styles.secondaryButton}
+              disabled={pending || deletingSourceId === source.id}
+              title="Conserva los eventos y publicaciones importados"
+              onClick={() => { void removeSource(source, "retire"); }}
+              aria-label={`Retirar fuente ${source.name}`}
+            >
+              {deletingSourceId === source.id ? "Retirando…" : "Retirar"}
+            </button>
+            : <button
+              type="button"
+              className={styles.secondaryButton}
+              disabled={pending || deletingSourceId === source.id}
+              onClick={() => { void removeSource(source, "delete"); }}
+              aria-label={`Eliminar fuente ${source.name}`}
+            >
+              {deletingSourceId === source.id ? "Eliminando…" : "Eliminar"}
+            </button>}
         </div>
       </article>)}
     </div>}
