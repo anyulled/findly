@@ -553,8 +553,10 @@ export function useWorkspace() {
   }
 
   async function removeDraft(post: Post) {
-    if (deletingDraft || post.status !== "review") return;
-    if (!window.confirm("¿Eliminar este borrador? No se volverá a generar al completar los recordatorios.")) return;
+    if (deletingDraft || (post.status !== "review" && post.status !== "failed")) return;
+    if (!window.confirm(post.status === "failed"
+      ? "¿Eliminar esta publicación fallida? No se volverá a generar al completar los recordatorios."
+      : "¿Eliminar este borrador? No se volverá a generar al completar los recordatorios.")) return;
     setDeletingDraft(true);
     setDraftDeleteError("");
     try {
@@ -567,7 +569,7 @@ export function useWorkspace() {
         setPosts((all) => all.filter((item) => item.id !== post.id));
       }
       setSelected(null);
-      setFeedback("Borrador eliminado.");
+      setFeedback(post.status === "failed" ? "Publicación eliminada." : "Borrador eliminado.");
     } catch {
       setDraftDeleteError("No se pudo eliminar el borrador.");
     } finally {
