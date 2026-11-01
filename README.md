@@ -13,6 +13,7 @@ La aplicación incluye:
 - Alta manual con datos o pegando la URL pública de Meetup/Luma para extraer los datos disponibles, revisarlos y corregirlos antes de guardar.
 - Borradores para LinkedIn, X y Bluesky, con fechas recordatorio a 14, 7 y 1 día del evento, a las 13:00 de `Europe/Madrid`. Se omiten las fechas cuyo horario ya pasó.
 - Tres cuentas de ejemplo con prompts de voz editables, edición de borradores y validación local del límite de texto por red.
+- El primer acceso persistente crea las tres cuentas mediante una operación de base de datos idempotente; las cargas simultáneas o una recarga tras una creación parcial no duplican cuentas.
 - Modos globales de revisión y automático. En revisión, una aprobación programa el texto en Buffer y guarda ese mismo texto como ejemplo de estilo; en automático, los borradores nuevos se programan al generarse, sin convertirse en ejemplos.
 - IDs de canal de Buffer configurables por cuenta y red. Las publicaciones usan el instante `due_at` (13:00 `Europe/Madrid`) convertido a UTC y la programación exacta `customScheduled`.
 - Estados persistentes para envíos en curso, confirmados, rechazados y resultados inciertos. Los resultados inciertos requieren conciliación manual; un envío en curso no se puede liberar como ausente ni reintentar. Las respuestas quedan vinculadas al intento que las originó.

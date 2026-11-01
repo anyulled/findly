@@ -126,15 +126,11 @@ function sourceForUrl(value: string | null): string {
 }
 
 export async function loadWorkspace(): Promise<WorkspaceSnapshot> {
-  const { supabase, ownerId, user } = await authorizedClient();
-  let accountResult = await supabase.from("accounts").select("id,name,account_type,voice_prompt,networks,enabled").order("created_at");
+  const { supabase, user } = await authorizedClient();
+  const bootstrapResult = await supabase.rpc("ensure_managed_accounts");
+  if (bootstrapResult.error) throw new Error("No se pudieron preparar las cuentas iniciales.");
+  const accountResult = await supabase.from("accounts").select("id,name,account_type,voice_prompt,networks,enabled").order("created_at");
   if (accountResult.error) throw new Error("No se pudieron cargar las cuentas.");
-  if ((accountResult.data ?? []).length === 0) {
-    const insertResult = await supabase.from("accounts").insert(DEFAULT_ACCOUNTS.map((account) => ({ ...account, owner_id: ownerId })));
-    if (insertResult.error) throw new Error("No se pudieron crear las cuentas iniciales.");
-    accountResult = await supabase.from("accounts").select("id,name,account_type,voice_prompt,networks,enabled").order("created_at");
-    if (accountResult.error) throw new Error("No se pudieron cargar las cuentas creadas.");
-  }
   const defaultOrder = new Map(DEFAULT_ACCOUNTS.map((acc, index) => [acc.name, index]));
   const rows = [...(accountResult.data ?? [])].sort((a, b) => {
     const orderA = defaultOrder.get(a.name) ?? 999;

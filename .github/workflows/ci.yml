@@ -80,6 +80,21 @@ jobs:
       - name: Start local Postgres
         run: supabase db start
 
+      - name: Verify managed account reconciliation with pre-existing data
+        run: |
+          supabase db reset --local --version 202610310006 --no-seed
+          psql postgresql://postgres:postgres@127.0.0.1:55432/postgres -X -v ON_ERROR_STOP=1 -f supabase/verification/managed-account-migration-fixture.sql
+          if supabase migration up --local > /tmp/findly-managed-account-migration.log 2>&1; then
+            echo "Expected the migration to reject unresolved account, channel, and post conflicts." >&2
+            exit 1
+          fi
+          cat /tmp/findly-managed-account-migration.log
+          grep -Fq "Managed account reconciliation requires a manual decision" /tmp/findly-managed-account-migration.log
+          psql postgresql://postgres:postgres@127.0.0.1:55432/postgres -X -v ON_ERROR_STOP=1 -f supabase/verification/managed-account-migration-rollback-check.sql
+          psql postgresql://postgres:postgres@127.0.0.1:55432/postgres -X -v ON_ERROR_STOP=1 -f supabase/verification/managed-account-migration-cleanup.sql
+          supabase migration up --local
+          psql postgresql://postgres:postgres@127.0.0.1:55432/postgres -X -v ON_ERROR_STOP=1 -f supabase/verification/managed-account-migration-success-check.sql
+
       - name: Apply every migration to a clean local database
         run: supabase db reset --local --no-seed
 
@@ -91,6 +106,11 @@ jobs:
           for test_file in supabase/tests/*.sql; do
             psql postgresql://postgres:postgres@127.0.0.1:55432/postgres -X -v ON_ERROR_STOP=1 -f "$test_file"
           done
+
+      - name: Verify concurrent managed account bootstrap
+        env:
+          SUPABASE_TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:55432/postgres
+        run: node scripts/test-managed-account-bootstrap-concurrency.mjs
 
   documentation-sync:
     name: Documentation and Sync
