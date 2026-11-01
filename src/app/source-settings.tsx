@@ -17,6 +17,7 @@ const emptySource = { name: "", type: "luma_ical" as SourceType, url: "", accoun
 export function SourceSettings({ accounts, sources, persistent, onSourcesChange, onSyncComplete }: Props) {
   const [draft, setDraft] = useState(emptySource);
   const [pending, setPending] = useState(false);
+  const [deletingSourceId, setDeletingSourceId] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const accountsReady = !persistent || accounts.some((a) => /^[0-9a-f-]{36}$/i.test(a.id ?? ""));
@@ -77,6 +78,12 @@ export function SourceSettings({ accounts, sources, persistent, onSourcesChange,
   }
 
   async function removeSource(source: SourceView) {
+    if (pending || deletingSourceId) return;
+    const sourceTitle = source.name ? ` "${source.name}"` : "";
+    if (!window.confirm(`¿Eliminar la fuente${sourceTitle}? Ya no se sincronizarán sus eventos.`)) {
+      return;
+    }
+    setDeletingSourceId(source.id);
     setPending(true);
     setError("");
     try {
@@ -92,6 +99,7 @@ export function SourceSettings({ accounts, sources, persistent, onSourcesChange,
       setError(caught instanceof Error ? caught.message : "No se pudo eliminar la fuente.");
     } finally {
       setPending(false);
+      setDeletingSourceId(null);
     }
   }
 
@@ -149,7 +157,15 @@ export function SourceSettings({ accounts, sources, persistent, onSourcesChange,
         <p className={styles.sourceAccounts}><b>Cuentas:</b> {source.accountIds.map(accountLabel).join(", ") || "Sin cuentas"}</p>
         <div className={styles.sourceActions}>
           <label><input type="checkbox" checked={source.enabled} disabled={pending} onChange={() => { void toggleSource(source); }}/> Activa</label>
-          <button type="button" className={styles.secondaryButton} disabled={pending} onClick={() => { void removeSource(source); }}>Eliminar</button>
+          <button
+            type="button"
+            className={styles.secondaryButton}
+            disabled={pending || deletingSourceId === source.id}
+            onClick={() => { void removeSource(source); }}
+            aria-label={`Eliminar fuente ${source.name}`}
+          >
+            {deletingSourceId === source.id ? "Eliminando…" : "Eliminar"}
+          </button>
         </div>
       </article>)}
     </div>}

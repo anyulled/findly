@@ -103,6 +103,7 @@ function Dashboard() {
                 sources={ws.sources}
                 accountList={ws.accountList}
                 persistent={ws.persistent}
+                deletingEventId={ws.deletingEventId}
                 openAddForm={ws.openAddForm}
                 onRetryDrafts={(event) => {
                   void ws.retryDrafts(event);
