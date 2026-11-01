@@ -11,6 +11,7 @@ export type ImportedLumaEvent = {
   id: string;
   owner_id: string;
   source_id?: string | null;
+  target_account_ids?: string[] | null;
   external_id?: string;
   title: string;
   starts_at: string;
@@ -34,7 +35,7 @@ export type LumaDraftRow = {
 };
 
 export type LumaDraftRepository = {
-  listLinkedAccounts(ownerId: string, sourceId?: string | null): Promise<GenerationAccount[]>;
+  listLinkedAccounts(ownerId: string, sourceId?: string | null, selectedAccountIds?: string[] | null): Promise<GenerationAccount[]>;
   listExistingReminders(ownerId: string, eventId: string): Promise<ExistingReminder[]>;
   listApprovedExamples(ownerId: string, accountIds: string[]): Promise<ApprovedStyleExample[]>;
   insertDrafts(rows: LumaDraftRow[]): Promise<number>;
@@ -51,7 +52,7 @@ export async function generateLumaEventDrafts(
   generate: SocialPostGenerator = generateSocialPost,
   now = new Date(),
 ): Promise<number> {
-  const accounts = await repository.listLinkedAccounts(event.owner_id, event.source_id);
+  const accounts = await repository.listLinkedAccounts(event.owner_id, event.source_id, event.target_account_ids);
   if (accounts.length === 0) return 0;
   const accountIds = accounts.map((account) => account.id);
   const [existing, approvedExamples] = await Promise.all([

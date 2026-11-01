@@ -60,9 +60,9 @@ export function createSupabaseDraftRepository(
       return (data?.value as { mode?: string } | null)?.mode === "automatic" ? "automatic" : "review";
     },
 
-    async listLinkedAccounts(_ownerId: string, sourceId?: string | null): Promise<GenerationAccount[]> {
+    async listLinkedAccounts(_ownerId: string, sourceId?: string | null, selectedAccountIds?: string[] | null): Promise<GenerationAccount[]> {
       let sourceLinks: { sourceId: string; accountId: string }[] = [];
-      if (sourceId) {
+      if (sourceId && selectedAccountIds == null) {
         const { data: links, error: linkError } = await client
           .from<{ account_id: string }[]>("source_accounts")
           .select("account_id")
@@ -80,7 +80,7 @@ export function createSupabaseDraftRepository(
         .order("created_at");
       if (error) throw new Error("Unable to read linked accounts");
 
-      return selectEventAccounts(data ?? [], sourceId, sourceLinks).map((account) => ({
+      return selectEventAccounts(data ?? [], sourceId, sourceLinks, selectedAccountIds).map((account) => ({
         id: account.id,
         name: account.name,
         voice: account.voice_prompt,

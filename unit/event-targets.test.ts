@@ -48,3 +48,17 @@ test("missing reminders compare eligible account/network/offset keys, not total 
   assert.equal(hasMissingReminders([], [14], []), false);
   assert.equal(hasMissingReminders(eligible, [], []), false);
 });
+
+
+test("manual event selection is retained when checking and regenerating reminders", async () => {
+  const eligible = selectEventAccounts(accounts, null, [], ["personal", "disabled"]);
+  assert.deepEqual(eligible.map((account) => account.id), ["personal"]);
+  assert.deepEqual(selectEventAccounts(accounts, null, [], []), []);
+  const drafts = await generateEventDrafts({
+    event: { id: "event", title: "Community", date: "2030-01-20", time: "19:00", place: "Barcelona", description: "Talk" },
+    accounts: eligible, approvedExamples: [], existing: [], now: new Date("2029-12-01T00:00:00.000Z"),
+    generate: async () => ({ text: "Join us!" }),
+  });
+  assert.deepEqual(new Set(drafts.map((draft) => draft.accountId)), new Set(["personal"]));
+  assert.equal(drafts.length, 6);
+});

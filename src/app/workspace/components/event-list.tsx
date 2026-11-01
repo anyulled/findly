@@ -47,7 +47,7 @@ export function EventList({
             const links = sources.flatMap((source) =>
               source.accountIds.map((accountId) => ({ sourceId: source.id, accountId })),
             );
-            const eligibleAccounts = selectEventAccounts(accountList, event.sourceId, links);
+            const eligibleAccounts = selectEventAccounts(accountList, event.sourceId, links, event.accountIds);
             const expectedLeadDays =
               event.source === "Substack"
                 ? ([1] as const)

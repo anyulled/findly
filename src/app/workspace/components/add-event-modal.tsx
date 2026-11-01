@@ -1,5 +1,6 @@
 import type { Dispatch, SetStateAction } from "react";
 import styles from "../../page.module.css";
+import type { Account } from "../workspace-types";
 
 interface AddEventFormState {
   title: string;
@@ -21,6 +22,9 @@ interface AddEventModalProps {
   newEvent: AddEventFormState;
   setNewEvent: Dispatch<SetStateAction<AddEventFormState>>;
   isSubstackDraft: boolean;
+  accounts: Account[];
+  selectedAccountIds: string[];
+  setSelectedAccountIds: Dispatch<SetStateAction<string[]>>;
   onExtract: () => void;
   onAddEvent: () => void;
 }
@@ -35,6 +39,9 @@ export function AddEventModal({
   newEvent,
   setNewEvent,
   isSubstackDraft,
+  accounts,
+  selectedAccountIds,
+  setSelectedAccountIds,
   onExtract,
   onAddEvent,
 }: AddEventModalProps) {
@@ -130,6 +137,14 @@ export function AddEventModal({
             placeholder="¿Qué ocurrirá en el evento?"
           />
         </label>
+        <fieldset className={styles.sourceAccountsFieldset}>
+          <legend>CUENTAS</legend>
+          {accounts.flatMap((account) => {
+            if (!account.id || account.enabled === false) return [];
+            const accountId = account.id;
+            return [<label key={accountId}><input type="checkbox" checked={selectedAccountIds.includes(accountId)} onChange={() => setSelectedAccountIds((current) => current.includes(accountId) ? current.filter((id) => id !== accountId) : [...current, accountId])}/>{account.name}</label>];
+          })}
+        </fieldset>
         <div className={styles.modalActions}>
           <button className={styles.secondaryButton} onClick={onClose}>
             Cancelar
@@ -139,6 +154,7 @@ export function AddEventModal({
             onClick={onAddEvent}
             disabled={
               extractingEvent ||
+              selectedAccountIds.length === 0 ||
               !newEvent.title.trim() ||
               (!isSubstackDraft && (!newEvent.date || !newEvent.time))
             }

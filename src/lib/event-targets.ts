@@ -3,7 +3,12 @@ export function selectEventAccounts<T extends { id?: string; enabled?: boolean }
   accounts: readonly T[],
   sourceId: string | null | undefined,
   links: readonly { sourceId: string; accountId: string }[],
+  selectedAccountIds?: readonly string[] | null,
 ): T[] {
+  if (selectedAccountIds != null) {
+    const selected = new Set(selectedAccountIds);
+    return accounts.filter((account) => account.enabled !== false && !!account.id && selected.has(account.id));
+  }
   if (!sourceId) return accounts.filter((account) => account.enabled !== false);
   const linkedIds = new Set(links.filter((link) => link.sourceId === sourceId).map((link) => link.accountId));
   return accounts.filter((account) => account.enabled !== false && !!account.id && linkedIds.has(account.id));

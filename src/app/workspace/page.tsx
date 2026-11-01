@@ -179,6 +179,9 @@ function Dashboard() {
           newEvent={ws.newEvent}
           setNewEvent={ws.setNewEvent}
           isSubstackDraft={ws.isSubstackDraft}
+          accounts={ws.accountList}
+          selectedAccountIds={ws.selectedAccountIds}
+          setSelectedAccountIds={ws.setSelectedAccountIds}
           onExtract={() => {
             void ws.extractEventFromUrl();
           }}
