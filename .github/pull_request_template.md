@@ -1,3 +1,7 @@
+## Related Issue
+
+- Closes #
+
 ## RSI
 
 - **Research:**
@@ -9,6 +13,16 @@
 - Checks run:
 - Result:
 - Coverage check: `npm run test:coverage` passes for every `src/lib/*.ts` module.
+
+## Definition of Done
+
+- [ ] The implementation is done
+- [ ] Tests supporting the development are included and passing
+- [ ] Code is committed and pushed to a pull request
+- [ ] The pull request is linked to a GitHub issue
+- [ ] Branch conflicts are resolved, if any
+- [ ] CodeRabbit comments are resolved, if any
+- [ ] The pull request is auto-merged
 
 ## Mandatory final stage: Documentation and Sync
 
