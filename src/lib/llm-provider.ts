@@ -34,6 +34,25 @@ export type PostGenerationInput = {
   approvedExamples?: ApprovedStyleExample[];
 };
 
+export type TokenUsage = {
+  promptTokens?: number;
+  completionTokens?: number;
+  totalTokens?: number;
+};
+
+export type LLMAttemptRecord = {
+  provider: "groq" | "openai" | "fallback";
+  model: string;
+  status: "success" | "error";
+  errorCode?: PostGenerationError["code"];
+  latencyMs?: number;
+  promptTokens?: number;
+  completionTokens?: number;
+  totalTokens?: number;
+};
+
+export type LLMAttemptHandler = (attempt: LLMAttemptRecord) => void | Promise<void>;
+
 export type GeneratedPost = {
   text: string;
   model: string;
@@ -41,6 +60,8 @@ export type GeneratedPost = {
   validation: ReturnType<typeof validatePost>;
   generationError?: PostGenerationError["code"];
   isFallback?: boolean;
+  latencyMs?: number;
+  usage?: TokenUsage;
 };
 
 export class PostGenerationError extends Error {
@@ -302,6 +323,23 @@ function parseChatResponseContent(payload: unknown, providerName: string): strin
   return content.trim();
 }
 
+function parseChatResponseUsage(payload: unknown): TokenUsage | undefined {
+  if (!payload || typeof payload !== "object") return undefined;
+  const usage = (payload as { usage?: { prompt_tokens?: unknown; completion_tokens?: unknown; total_tokens?: unknown } }).usage;
+  if (!usage || typeof usage !== "object") return undefined;
+  return {
+    promptTokens: typeof usage.prompt_tokens === "number" ? usage.prompt_tokens : undefined,
+    completionTokens: typeof usage.completion_tokens === "number" ? usage.completion_tokens : undefined,
+    totalTokens: typeof usage.total_tokens === "number" ? usage.total_tokens : undefined,
+  };
+}
+
+type ChatApiResult = {
+  text: string;
+  usage?: TokenUsage;
+  latencyMs: number;
+};
+
 async function callChatCompletionsApi(
   url: string,
   providerName: string,
@@ -309,7 +347,8 @@ async function callChatCompletionsApi(
   model: string,
   input: PostGenerationInput,
   fetchImpl: typeof fetch,
-): Promise<string> {
+): Promise<ChatApiResult> {
+  const startTime = Date.now();
   let response: Response;
   try {
     response = await fetchImpl(url, {
@@ -354,7 +393,10 @@ async function callChatCompletionsApi(
       "provider_error",
     );
   }
-  return parseChatResponseContent(payload, providerName);
+  const text = parseChatResponseContent(payload, providerName);
+  const usage = parseChatResponseUsage(payload);
+  const latencyMs = Date.now() - startTime;
+  return { text, usage, latencyMs };
 }
 
 export class OpenAICompatibleProvider implements LLMProvider {
@@ -370,6 +412,10 @@ export class OpenAICompatibleProvider implements LLMProvider {
     return Boolean(this.apiKeyGetter()?.trim() && this.modelGetter()?.trim());
   }
 
+  getModelName(): string {
+    return this.modelGetter()?.trim() ?? this.id;
+  }
+
   async generate(
     input: PostGenerationInput,
     fetchImpl: typeof fetch = fetch,
@@ -383,7 +429,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
       );
     }
 
-    const text = await callChatCompletionsApi(
+    const result = await callChatCompletionsApi(
       this.endpointUrl,
       this.name,
       apiKey,
@@ -391,16 +437,18 @@ export class OpenAICompatibleProvider implements LLMProvider {
       input,
       fetchImpl,
     );
-    const validation = validatePost(input.network, text);
+    const validation = validatePost(input.network, result.text);
     if (!validation.valid) {
       throw new PostGenerationError(validation.message, "over_limit", validation);
     }
 
     return {
-      text,
+      text: result.text,
       model,
       provider: this.id as "groq" | "openai",
       validation,
+      latencyMs: result.latencyMs,
+      usage: result.usage,
     };
   }
 }
@@ -413,6 +461,10 @@ export class DeterministicFallbackProvider implements LLMProvider {
     return true;
   }
 
+  getModelName(): string {
+    return "fallback";
+  }
+
   async generate(input: PostGenerationInput): Promise<GeneratedPost> {
     const text = buildFallbackDraftText(input);
     return {
@@ -421,12 +473,45 @@ export class DeterministicFallbackProvider implements LLMProvider {
       provider: "fallback",
       validation: validatePost(input.network, text),
       isFallback: true,
+      latencyMs: 0,
     };
   }
 }
 
+function buildSuccessAttempt(provider: LLMProvider, result: GeneratedPost, elapsed: number): LLMAttemptRecord {
+  return {
+    provider: (provider.id as "groq" | "openai" | "fallback") ?? "fallback",
+    model: result.model,
+    status: "success",
+    latencyMs: result.latencyMs ?? elapsed,
+    promptTokens: result.usage?.promptTokens,
+    completionTokens: result.usage?.completionTokens,
+    totalTokens: result.usage?.totalTokens,
+  };
+}
+
+function buildErrorAttempt(provider: LLMProvider, errorCode: PostGenerationError["code"], latencyMs: number): LLMAttemptRecord {
+  const modelName = "getModelName" in provider && typeof (provider as { getModelName: () => string }).getModelName === "function"
+    ? (provider as { getModelName: () => string }).getModelName()
+    : provider.id;
+  return {
+    provider: (provider.id as "groq" | "openai" | "fallback") ?? "fallback",
+    model: modelName,
+    status: "error",
+    errorCode,
+    latencyMs,
+  };
+}
+
+function resolveErrorCode(error: unknown): PostGenerationError["code"] {
+  return error instanceof PostGenerationError ? error.code : "provider_error";
+}
+
 export class LLMFallbackChain {
-  constructor(private readonly providers: LLMProvider[]) {}
+  constructor(
+    private readonly providers: LLMProvider[],
+    private readonly onAttempt?: LLMAttemptHandler,
+  ) {}
 
   async generate(
     input: PostGenerationInput,
@@ -438,21 +523,18 @@ export class LLMFallbackChain {
       if (!provider.isConfigured()) {
         continue;
       }
+      const startTime = Date.now();
       try {
         const result = await provider.generate(input, fetchImpl);
+        await this.onAttempt?.(buildSuccessAttempt(provider, result, Date.now() - startTime));
         if (provider.id === "fallback") {
-          return {
-            ...result,
-            generationError: lastErrorCode,
-          };
+          return { ...result, generationError: lastErrorCode };
         }
         return result;
       } catch (error) {
-        if (error instanceof PostGenerationError) {
-          lastErrorCode = error.code;
-        } else {
-          lastErrorCode = "provider_error";
-        }
+        lastErrorCode = resolveErrorCode(error);
+        await this.onAttempt?.(buildErrorAttempt(provider, lastErrorCode, Date.now() - startTime));
+
         const remaining = this.providers.slice(i + 1).find((p) => p.isConfigured());
         logger.warn(
           `LLM provider '${provider.name}' failed during post generation; falling back to '${remaining?.name ?? "none"}'.`,
@@ -465,8 +547,15 @@ export class LLMFallbackChain {
         );
       }
     }
+    const fallbackStart = Date.now();
     const fallback = new DeterministicFallbackProvider();
     const result = await fallback.generate(input);
+    await this.onAttempt?.({
+      provider: "fallback",
+      model: "fallback",
+      status: "success",
+      latencyMs: Date.now() - fallbackStart,
+    });
     return {
       ...result,
       generationError: lastErrorCode,
@@ -474,12 +563,15 @@ export class LLMFallbackChain {
   }
 }
 
-export function createDefaultLLMChain(overrides?: {
-  groqApiKey?: string;
-  groqModel?: string;
-  openAiApiKey?: string;
-  openAiModel?: string;
-}): LLMFallbackChain {
+export function createDefaultLLMChain(
+  overrides?: {
+    groqApiKey?: string;
+    groqModel?: string;
+    openAiApiKey?: string;
+    openAiModel?: string;
+  },
+  onAttempt?: LLMAttemptHandler,
+): LLMFallbackChain {
   const groq = new OpenAICompatibleProvider(
     "groq",
     "Groq",
@@ -496,5 +588,5 @@ export function createDefaultLLMChain(overrides?: {
   );
   const deterministic = new DeterministicFallbackProvider();
 
-  return new LLMFallbackChain([groq, openAi, deterministic]);
+  return new LLMFallbackChain([groq, openAi, deterministic], onAttempt);
 }
