@@ -17,6 +17,7 @@ import {
   generateReviewPosts,
   loadWorkspace,
   reconcileScheduledPost,
+  regeneratePostAction,
   retryFailedPost,
   saveBufferChannel,
   updateAccountVoice,
@@ -243,10 +244,11 @@ export function useWorkspace() {
 
   async function updatePost(post: Post, next: Partial<Post>) {
     const content = next.text ?? post.text;
+    const schedule = (next.date && next.time) ? { date: next.date, time: next.time } : undefined;
     let changes = next;
     if (persistent) {
       if (next.status === "approved") {
-        const outcome = await approvePost(post.id, content);
+        const outcome = await approvePost(post.id, content, schedule);
         if (outcome.kind === "error") throw new Error(outcome.message);
         if (outcome.kind === "not_claimed") {
           await refreshWorkspaceAfterSync();
@@ -278,8 +280,8 @@ export function useWorkspace() {
                 ? `La publicación se aprobó, pero Buffer la rechazó: ${message ?? "comprueba la configuración"}`
                 : "La publicación está en proceso de envío.",
         );
-      } else if (next.text !== undefined) {
-        const result = await updatePostContent(post.id, content);
+      } else if (next.text !== undefined || next.date !== undefined || next.time !== undefined) {
+        const result = await updatePostContent(post.id, content, schedule);
         if (!result.success) throw new Error(result.error);
       }
     }
@@ -546,6 +548,36 @@ export function useWorkspace() {
     }
   }
 
+  async function regeneratePostAi(post: Post) {
+    if (!persistent) {
+      setFeedback("En la demo la regeneración con IA no está disponible.");
+      return;
+    }
+    const result = await regeneratePostAction(post.id);
+    if (!result.success) {
+      setFeedback(result.error);
+      throw new Error(result.error);
+    }
+    const updated = {
+      text: result.data.text,
+      generationOrigin: result.data.generationOrigin,
+      generationErrorCode: result.data.generationErrorCode,
+      lastError: result.data.lastError,
+    };
+    setPosts((all) => all.map((item) => (item.id === post.id ? { ...item, ...updated } : item)));
+    setEditing(result.data.text);
+    if (selected && selected.id === post.id) {
+      setSelected({ ...selected, ...updated });
+    }
+    const providerName =
+      result.data.generationOrigin === "openai"
+        ? "OpenAI"
+        : result.data.generationOrigin === "groq"
+          ? "Groq"
+          : "plantilla de respaldo";
+    setFeedback(`Texto regenerado con ${providerName}.`);
+  }
+
   async function savePostChanges(post: Post, next: Partial<Post>) {
     try {
       await updatePost(post, next);
@@ -684,6 +716,7 @@ export function useWorkspace() {
     confirmReconciledPost,
     confirmPostAbsent,
     savePostChanges,
+    regeneratePostAi,
     removeEvent,
   };
 }

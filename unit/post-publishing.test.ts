@@ -272,6 +272,46 @@ test("Substack posts use addToQueue mode and include the extracted cover image",
   ]);
 });
 
+test("Substack posts with customScheduled: true schedule at specified dueAt instead of addToQueue", async () => {
+  let receivedInput: Record<string, unknown> | undefined;
+  const futureDate = new Date(Date.now() + 86400000).toISOString();
+  const outcome = await schedulePostWithBuffer(
+    post.id,
+    {
+      claim: async () => ({ ...post, due_at: futureDate }),
+      accountName: async () => "Personal",
+      bufferChannelId: async () => "buffer-channel-substack",
+      postContext: async () => ({
+        eventUrl: "https://etsideusnondaretur.substack.com/p/la-eternidad",
+        imageUrl: "https://substackcdn.com/image/cover.jpg",
+        customScheduled: true,
+      }),
+      markScheduled: async () => {},
+      markFailure: async () => {},
+    },
+    () =>
+      new BufferClient({
+        apiKey: "mock-key",
+        fetchImpl: async (_url, init) => {
+          const parsed = JSON.parse(String(init?.body)) as { variables: { input: Record<string, unknown> } };
+          receivedInput = parsed.variables.input;
+          return bufferResponse({
+            data: {
+              createPost: {
+                __typename: "PostActionSuccess",
+                post: { id: "substack-custom-1", text: post.content, dueAt: futureDate },
+              },
+            },
+          });
+        },
+      }),
+  );
+
+  assert.deepEqual(outcome, { kind: "scheduled", bufferPostId: "substack-custom-1" });
+  assert.equal(receivedInput?.mode, "customScheduled");
+  assert.equal(receivedInput?.dueAt, futureDate);
+});
+
 test("Luma and external events without a pre-stored cover image extract OpenGraph thumbnail before scheduling in Buffer", async () => {
   process.env.BUFFER_API_KEY_PERSONAL = "mock-buffer-key";
   let bufferInput: Record<string, unknown> | undefined;

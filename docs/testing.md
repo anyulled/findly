@@ -12,6 +12,7 @@ The current E2E coverage checks:
 - Approving a draft, recording it as a style example, and retaining that approval after a page reload.
 - Expanding a day with seven publications, opening and approving each account/channel with the keyboard, and opening a simulated uncertain publication that was initially hidden. This checks access to the existing reconciliation UI in demo mode; it does not exercise Buffer.
 - Pasting an event URL, receiving mocked extracted details from the route, reviewing the populated fields, and saving the event.
+- Opening the publication detail modal to interactively adjust scheduled date/time and triggering the «✨ Reintentar con IA» action.
 - Distinguishing an active Buffer send from an uncertain result: absence cannot be confirmed while the send is active.
 
 ## Unit tests and coverage

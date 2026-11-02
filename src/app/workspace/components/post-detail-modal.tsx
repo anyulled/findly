@@ -1,15 +1,16 @@
+import { useState } from "react";
 import styles from "../../page.module.css";
 import type { EventItem, Post, Status } from "../workspace-types";
 import { dateAt } from "../workspace-calendar-dates";
 
 const generationErrors: Record<string, string> = {
-  not_configured: "Falta configurar GROQ_API_KEY o GROQ_MODEL en el servidor.",
-  provider_auth: "Groq rechazó la autorización. Comprueba la clave y los permisos.",
-  rate_limited: "Groq alcanzó su límite de solicitudes. Inténtalo de nuevo más tarde.",
-  provider_error: "No se pudo completar la solicitud a Groq. Revisa el servicio y el modelo configurado.",
-  empty_response: "Groq devolvió una respuesta vacía.",
-  over_limit: "El texto de Groq superó el límite de caracteres de esta red.",
-  output_truncated: "Groq detuvo la generación antes de completar el texto.",
+  not_configured: "Falta configurar la clave de API o modelo de IA en el servidor.",
+  provider_auth: "El proveedor de IA rechazó la autorización. Comprueba la clave y los permisos.",
+  rate_limited: "El proveedor de IA alcanzó su límite de solicitudes. Inténtalo de nuevo más tarde.",
+  provider_error: "No se pudo completar la solicitud al proveedor de IA. Revisa el servicio y el modelo.",
+  empty_response: "El modelo de IA devolvió una respuesta vacía.",
+  over_limit: "El texto generado superó el límite de caracteres de esta red.",
+  output_truncated: "La generación con IA se detuvo antes de completar el texto (límite de tokens alcanzado).",
 };
 
 interface PostDetailModalProps {
@@ -31,6 +32,7 @@ interface PostDetailModalProps {
   onRetryPost: (post: Post) => void;
   onConfirmReconciledPost: (post: Post) => void;
   onConfirmPostAbsent: (post: Post) => void;
+  onRegenerateAi?: (post: Post) => Promise<void>;
 }
 
 export function PostDetailModal({
@@ -52,8 +54,13 @@ export function PostDetailModal({
   onRetryPost,
   onConfirmReconciledPost,
   onConfirmPostAbsent,
+  onRegenerateAi,
 }: PostDetailModalProps) {
   const isEditable = (["review", "approved", "failed"] as Status[]).includes(selected.status);
+  const [editingDate, setEditingDate] = useState(selected.date);
+  const [editingTime, setEditingTime] = useState(selected.time);
+  const [regeneratingAi, setRegeneratingAi] = useState(false);
+  const [aiError, setAiError] = useState("");
 
   return (
     <div
@@ -71,15 +78,36 @@ export function PostDetailModal({
           {currentEvent?.title ||
             (selected.text ? selected.text.split("\n")[0].trim() : "Publicación")}
         </h2>
-        <div className={styles.detailDate}>
-          ◷ &nbsp;
-          {dateAt(selected.date).toLocaleDateString("es-ES", {
-            weekday: "long",
-            day: "numeric",
-            month: "long",
-          })}{" "}
-          · {selected.time} · Europe/Madrid
-        </div>
+        {isEditable ? (
+          <div className={styles.schedulePicker}>
+            <span className={styles.scheduleTz}>◷ Programar para:</span>
+            <input
+              type="date"
+              aria-label="Fecha programada"
+              className={styles.scheduleInput}
+              value={editingDate}
+              onChange={(e) => setEditingDate(e.target.value)}
+            />
+            <input
+              type="time"
+              aria-label="Hora programada"
+              className={styles.scheduleInput}
+              value={editingTime}
+              onChange={(e) => setEditingTime(e.target.value)}
+            />
+            <span className={styles.scheduleTz}>Europe/Madrid</span>
+          </div>
+        ) : (
+          <div className={styles.detailDate}>
+            ◷ &nbsp;
+            {dateAt(selected.date).toLocaleDateString("es-ES", {
+              weekday: "long",
+              day: "numeric",
+              month: "long",
+            })}{" "}
+            · {selected.time} · Europe/Madrid
+          </div>
+        )}
         <div className={styles.channelChip}>
           {selected.network} <span>·</span> {selected.account}
         </div>
@@ -96,7 +124,18 @@ export function PostDetailModal({
           {postValidation?.message} <span>Validación local por red.</span>
         </div>
         <div role="status" className={selected.generationOrigin === "fallback" ? styles.deliveryError : styles.autoNote}>
-          {selected.generationOrigin === "fallback" ? <>No se pudo generar con Groq; se creó un borrador básico para revisión. {generationErrors[selected.generationErrorCode ?? ""] ?? "No se conoce el motivo."}</> : selected.generationOrigin === "groq" ? "Texto generado inicialmente con Groq. Puede haber sido editado posteriormente." : "Origen de generación desconocido para esta publicación."}
+          {selected.generationOrigin === "fallback" ? (
+            <>
+              No se pudo generar con IA; se creó un borrador básico para revisión.{" "}
+              {generationErrors[selected.generationErrorCode ?? ""] ?? "No se conoce el motivo."}
+            </>
+          ) : selected.generationOrigin === "openai" ? (
+            "Texto generado inicialmente con OpenAI. Puede haber sido editado posteriormente."
+          ) : selected.generationOrigin === "groq" ? (
+            "Texto generado inicialmente con Groq. Puede haber sido editado posteriormente."
+          ) : (
+            "Origen de generación desconocido para esta publicación."
+          )}
         </div>
         {selected.lastError && <p className={styles.deliveryError}>{selected.lastError}</p>}
         {["needs_reconciliation", "scheduling"].includes(selected.status) && (
@@ -162,17 +201,38 @@ export function PostDetailModal({
             <button
               className={styles.secondaryButton}
               onClick={() => {
-                onSavePostChanges(selected, { text: editing });
+                onSavePostChanges(selected, { text: editing, date: editingDate, time: editingTime });
               }}
             >
               Guardar cambios
+            </button>
+          )}
+          {isEditable && onRegenerateAi && (
+            <button
+              type="button"
+              className={styles.secondaryButton}
+              disabled={regeneratingAi || deletingDraft}
+              onClick={async () => {
+                setRegeneratingAi(true);
+                setAiError("");
+                try {
+                  await onRegenerateAi(selected);
+                } catch (err) {
+                  setAiError(err instanceof Error ? err.message : "Error al regenerar con IA.");
+                } finally {
+                  setRegeneratingAi(false);
+                }
+              }}
+              aria-label="Reintentar generación con IA"
+            >
+              {regeneratingAi ? "Generando con IA…" : "✨ Reintentar con IA"}
             </button>
           )}
           {selected.status === "review" && (
             <button
               className={styles.approveButton}
               onClick={() => {
-                onSavePostChanges(selected, { text: editing, status: "approved" });
+                onSavePostChanges(selected, { text: editing, date: editingDate, time: editingTime, status: "approved" });
               }}
               disabled={!postValidation?.valid}
             >
@@ -190,6 +250,7 @@ export function PostDetailModal({
             </button>
           )}
         </div>
+        {aiError && <p role="alert" className={styles.deliveryError}>{aiError}</p>}
         {draftDeleteError && <p role="alert" className={styles.deliveryError}>{draftDeleteError}</p>}
         <p className={styles.autoNote}>
           {selected.status === "scheduled"

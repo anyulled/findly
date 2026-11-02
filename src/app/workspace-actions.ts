@@ -22,7 +22,9 @@ import { logger } from "@/lib/logger";
 import { fetchLumaFeed, extractSourceEvents, filterUpcomingEvents, type PersistableEvent } from "@/lib/luma-sync";
 import { parseSubstackFeed, sortSubstackPostsReverseChronological } from "@/lib/substack";
 import { dispatchApprovedPostsWithSupabase } from "@/lib/approved-dispatch";
-import type { LumaDraftRepository, ImportedLumaEvent } from "@/lib/luma-drafts";
+import { toAttemptLogRow, type LumaDraftRepository, type ImportedLumaEvent, type LLMLogRow } from "@/lib/luma-drafts";
+import { regeneratePostContent } from "@/lib/post-regeneration";
+import type { LLMAttemptHandler } from "@/lib/llm-provider";
 
 export type { UserProfile } from "@/lib/user-profile";
 export type { SourceInput, SourceType } from "@/lib/source-validation";
@@ -598,24 +600,49 @@ export async function discardDraft(postId: string): Promise<ActionOutcome> {
   }, { defaultErrorMessage: "No se pudo eliminar el borrador." });
 }
 
-export async function updatePostContent(postId: string, content: string): Promise<ActionOutcome> {
+export async function updatePostContent(
+  postId: string,
+  content: string,
+  schedule?: { date?: string; time?: string },
+): Promise<ActionOutcome> {
   return runVoidAction("updatePostContent", async () => {
-    const { supabase } = await authorizedClient();
+    const { supabase, ownerId } = await authorizedClient();
     if (!content.trim()) throw new UserFacingError("El texto de la publicación no puede estar vacío.");
-    const current = await supabase.from("posts").select("network").eq("id", postId).single();
+    const current = await supabase.from("posts").select("network").eq("id", postId).eq("owner_id", ownerId).single();
     if (current.error || !NETWORKS.includes(current.data.network as SocialNetwork)) {
       throw new UserFacingError("No se pudo comprobar la red de la publicación.");
     }
     const validation = validatePost(current.data.network as SocialNetwork, content);
     if (!validation.valid) throw new UserFacingError(validation.message);
-    const { error } = await supabase.rpc("update_post_content", { p_post_id: postId, p_content: content });
-    if (error) throw new UserFacingError("No se pudo guardar la publicación. Comprueba que has aplicado las migraciones.");
+
+    let dueAt: string | null = null;
+    if (schedule?.date && schedule?.time) {
+      dueAt = madridDateTimeToIso(schedule.date, schedule.time);
+    }
+
+    const rpcResult = dueAt
+      ? await supabase.rpc("update_post_details", { p_post_id: postId, p_content: content, p_due_at: dueAt })
+      : await supabase.rpc("update_post_details", { p_post_id: postId, p_content: content });
+
+    if (rpcResult.error) {
+      const fallback = await supabase.rpc("update_post_content", { p_post_id: postId, p_content: content });
+      if (fallback.error) {
+        throw new UserFacingError("No se pudo guardar la publicación. Comprueba que has aplicado las migraciones.");
+      }
+      if (dueAt) {
+        await supabase.from("posts").update({ due_at: dueAt, custom_scheduled: true }).eq("id", postId).eq("owner_id", ownerId);
+      }
+    }
   }, { defaultErrorMessage: "No se pudo guardar la publicación." });
 }
 
 export type ApprovePostResult = PostPublishingOutcome | { kind: "error"; message: string };
 
-export async function approvePost(postId: string, content: string): Promise<ApprovePostResult> {
+export async function approvePost(
+  postId: string,
+  content: string,
+  schedule?: { date?: string; time?: string },
+): Promise<ApprovePostResult> {
   try {
     const { supabase, ownerId } = await authorizedClient();
     const validationNetwork = await supabase.from("posts").select("network").eq("id", postId).single();
@@ -624,6 +651,10 @@ export async function approvePost(postId: string, content: string): Promise<Appr
     }
     const validation = validatePost(validationNetwork.data.network as SocialNetwork, content);
     if (!validation.valid) return { kind: "error", message: validation.message };
+    if (schedule?.date && schedule?.time) {
+      const dueAt = madridDateTimeToIso(schedule.date, schedule.time);
+      await supabase.from("posts").update({ due_at: dueAt, custom_scheduled: true }).eq("id", postId).eq("owner_id", ownerId);
+    }
     const outcome = await approveAndSchedulePost(postId, content, supabase, ownerId);
     invalidateBufferSyncCache();
     return outcome;
@@ -631,6 +662,126 @@ export async function approvePost(postId: string, content: string): Promise<Appr
     logger.error("Failed to approve post", { postId }, caught);
     return { kind: "error", message: caught instanceof Error ? caught.message : "No se pudo aprobar la publicación." };
   }
+}
+
+export type RegeneratePostData = {
+  text: string;
+  generationOrigin: "groq" | "openai" | "fallback";
+  generationErrorCode: string | null;
+  lastError: string | null;
+};
+
+export async function regeneratePostAction(postId: string): Promise<ActionResult<RegeneratePostData>> {
+  return runAction("regeneratePostAction", async () => {
+    const { supabase, ownerId } = await authorizedClient();
+    if (!/^[0-9a-f-]{36}$/i.test(postId)) throw new UserFacingError("Solicitud de publicación no válida.");
+
+    const { data: post, error: postErr } = await supabase
+      .from("posts")
+      .select("id, event_id, account_id, network, lead_days, language, status")
+      .eq("id", postId)
+      .eq("owner_id", ownerId)
+      .single();
+
+    if (postErr || !post) throw new UserFacingError("No se encontró la publicación.");
+    if (post.status !== "review" && post.status !== "failed") {
+      throw new UserFacingError("Solo se pueden regenerar publicaciones en revisión o fallidas.");
+    }
+
+    const { data: event, error: eventErr } = await supabase
+      .from("events")
+      .select("id, title, starts_at, location, description, event_url")
+      .eq("id", post.event_id)
+      .eq("owner_id", ownerId)
+      .single();
+    if (eventErr || !event) throw new UserFacingError("No se encontró el evento asociado.");
+
+    const { data: account, error: accErr } = await supabase
+      .from("accounts")
+      .select("id, name, voice_prompt, account_type")
+      .eq("id", post.account_id)
+      .eq("owner_id", ownerId)
+      .single();
+    if (accErr || !account) throw new UserFacingError("No se encontró la cuenta asociada.");
+
+    const { data: examples } = await supabase
+      .from("style_examples")
+      .select("content, language, network, account_id")
+      .eq("owner_id", ownerId)
+      .eq("account_id", post.account_id)
+      .eq("network", post.network)
+      .eq("language", post.language)
+      .limit(3);
+
+    const attemptLogs: LLMLogRow[] = [];
+    const trackingHandler: LLMAttemptHandler = (attempt) => {
+      attemptLogs.push(toAttemptLogRow(ownerId, event.id, attempt));
+    };
+
+    const result = await regeneratePostContent(
+      {
+        post: {
+          id: post.id,
+          network: post.network as SocialNetwork,
+          language: post.language as PostLanguage,
+          leadDays: post.lead_days as 14 | 7 | 1,
+        },
+        event: {
+          title: event.title,
+          startsAt: event.starts_at,
+          location: event.location,
+          description: event.description,
+          eventUrl: event.event_url,
+        },
+        account: {
+          id: account.id,
+          name: account.name,
+          voicePrompt: account.voice_prompt,
+          accountType: account.account_type,
+        },
+        approvedExamples: (examples ?? []).map((ex) => ({
+          text: ex.content,
+          accountId: ex.account_id,
+          network: ex.network as SocialNetwork,
+          language: ex.language as PostLanguage,
+        })),
+      },
+      generateSocialPostOrFallback,
+      trackingHandler,
+    );
+
+    if (attemptLogs.length > 0) {
+      try {
+        await supabase.from("llm_generation_logs").insert(attemptLogs);
+      } catch (err) {
+        logger.warn("Unable to persist LLM generation logs during post regeneration", { postId }, err);
+      }
+    }
+
+    const { error: updateErr } = await supabase
+      .from("posts")
+      .update({
+        content: result.text,
+        generation_origin: result.generationOrigin,
+        generation_error_code: result.generationErrorCode,
+        last_error: result.lastError,
+        status: "review",
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", postId)
+      .eq("owner_id", ownerId);
+
+    if (updateErr) {
+      throw new UserFacingError("No se pudo actualizar la publicación en la base de datos.");
+    }
+
+    return {
+      text: result.text,
+      generationOrigin: result.generationOrigin,
+      generationErrorCode: result.generationErrorCode,
+      lastError: result.lastError,
+    };
+  }, { defaultErrorMessage: "No se pudo regenerar el texto con IA." });
 }
 
 export async function retryFailedPost(postId: string): Promise<ApprovePostResult> {
