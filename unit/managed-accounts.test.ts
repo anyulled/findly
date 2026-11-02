@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
+import { resolve } from "node:path";
 import test from "node:test";
 import { bufferCredentialForAccount } from "../src/lib/buffer-account-credentials";
 import { MANAGED_ACCOUNTS, managedAccount } from "../src/lib/managed-accounts";
@@ -9,6 +11,13 @@ test("the three managed profiles recognize their old persisted account names", (
   assert.equal(managedAccount("BarcelonaJS")?.key, "barcelona_jug");
   assert.equal(managedAccount("DevBcn")?.key, "software_crafters_barcelona");
   assert.equal(managedAccount(" unknown "), undefined);
+});
+
+test("every managed account points to an existing logo asset in public/", () => {
+  for (const account of MANAGED_ACCOUNTS) {
+    const assetPath = resolve(process.cwd(), "public", account.logo.replace(/^\//u, ""));
+    assert.equal(existsSync(assetPath), true, `Asset does not exist: ${assetPath}`);
+  }
 });
 
 test("Buffer credentials are selected by canonical profile name and trimmed", () => {

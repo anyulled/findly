@@ -49,7 +49,7 @@ export const defaultAccounts: Account[] = [
     kind: "Cuenta personal",
     initials: "P",
     color: "violet",
-    logo: "/account-logos/personal.svg",
+    logo: "/account-logos/personal.jpg",
     bufferApiKeyEnv: "BUFFER_API_KEY_PERSONAL",
     bufferApiKeyConfigured: false,
     prompt: "Cercano, curioso y directo. Primera persona. Evita sonar promocional.",
