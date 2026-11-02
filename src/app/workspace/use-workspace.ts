@@ -83,6 +83,15 @@ export function useWorkspace() {
   const [draftDeleteError, setDraftDeleteError] = useState("");
   const [reconciliationId, setReconciliationId] = useState("");
   const [absenceConfirmed, setAbsenceConfirmed] = useState(false);
+
+  const openPost = useCallback((post: Post) => {
+    setSelected(post);
+    setEditing(post.text);
+    setReconciliationId("");
+    setAbsenceConfirmed(false);
+    setDraftDeleteError("");
+  }, []);
+
   const [showAdd, setShowAdd] = useState(false);
   const [newEvent, setNewEvent] = useState({
     title: "",
@@ -293,7 +302,7 @@ export function useWorkspace() {
         const classified = classifyPublishOutcome(outcome);
         notify(classified.message, classified.type, {
           label: "Ver detalle",
-          onClick: () => setSelected({ ...post, ...changes }),
+          onClick: () => openPost({ ...post, ...changes }),
         });
       } else if (next.text !== undefined || next.date !== undefined || next.time !== undefined) {
         const result = await updatePostContent(post.id, content, schedule);
@@ -310,7 +319,7 @@ export function useWorkspace() {
       );
       notify("Publicación aprobada y guardada como ejemplo de estilo.", "success", {
         label: "Ver detalle",
-        onClick: () => setSelected({ ...post, ...changes }),
+        onClick: () => openPost({ ...post, ...changes }),
       });
     }
     setPosts((all) => all.map((item) => (item.id === post.id ? { ...item, ...changes } : item)));
@@ -545,7 +554,7 @@ export function useWorkspace() {
       const classified = classifyPublishOutcome(outcome);
       notify(classified.message, classified.type, {
         label: "Ver detalle",
-        onClick: () => setSelected({ ...post, ...changes }),
+        onClick: () => openPost({ ...post, ...changes }),
       });
     } catch (error) {
       notify(sanitizeClientErrorMessage(error, "No se pudo reintentar la publicación."), "error");
@@ -565,7 +574,7 @@ export function useWorkspace() {
       setReconciliationId("");
       notify("Post encontrado en Buffer y marcado como programado.", "success", {
         label: "Ver detalle",
-        onClick: () => setSelected({ ...post, ...changes }),
+        onClick: () => openPost({ ...post, ...changes }),
       });
     } catch (error) {
       notify(sanitizeClientErrorMessage(error, "No se pudo guardar la conciliación."), "error");
@@ -585,7 +594,7 @@ export function useWorkspace() {
       setAbsenceConfirmed(false);
       notify("La ausencia quedó confirmada. Puedes corregir el post y reintentar el envío.", "success", {
         label: "Ver detalle",
-        onClick: () => setSelected({ ...post, ...changes }),
+        onClick: () => openPost({ ...post, ...changes }),
       });
     } catch (error) {
       notify(sanitizeClientErrorMessage(error, "No se pudo guardar la conciliación."), "error");
@@ -622,7 +631,7 @@ export function useWorkspace() {
           : "plantilla de respaldo";
     notify(`Texto regenerado con ${providerName}.`, "success", {
       label: "Ver detalle",
-      onClick: () => setSelected({ ...post, ...updated }),
+      onClick: () => openPost({ ...post, ...updated }),
     });
   }
 
@@ -726,6 +735,7 @@ export function useWorkspace() {
     setDraftDeleteError,
     removeDraft,
     setSelected,
+    openPost,
     editing,
     setEditing,
     reconciliationId,
