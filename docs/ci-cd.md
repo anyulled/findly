@@ -14,8 +14,8 @@ Work on any issue, feature, or bug fix is complete only when:
 - Code is committed with Conventional Commits and pushed to a pull request.
 - The pull request is linked to a GitHub issue (`Closes #<issue>`).
 - Branch conflicts are resolved, if any (rebased onto latest `origin/main`).
-- CodeRabbit comments are resolved, if any.
-- The pull request is auto-merged.
+- CodeRabbit comments are resolved, if any (with resolvable review threads marked resolved).
+- Auto-merge is enabled (rebase merge) after reviews and status checks pass, and the pull request is auto-merged into main.
 
 ## Continuous deployment
 
