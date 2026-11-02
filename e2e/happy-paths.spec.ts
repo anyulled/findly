@@ -111,7 +111,7 @@ test("expands a crowded day and opens every account's publication, including an 
   ];
   for (const [account, network] of channels) {
     const post = reminderDay.getByRole("button", { name: `Seven channel event · ${account} · ${network} · Pendiente de revisión` });
-    await expect(post).toContainText(`${account} · ${network} · Pendiente de revisión`);
+    await expect(post).toContainText(`${account} · ${network}`);
     await post.focus();
     await page.keyboard.press("Enter");
     await expect(periodHeading).toHaveText(period!);

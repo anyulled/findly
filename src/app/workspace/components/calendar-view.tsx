@@ -166,7 +166,7 @@ export function CalendarView({
                           <span className={styles.pillText}>{title}</span>
                           {expanded && (
                             <span className={styles.postMeta}>
-                              {post.account} · {post.network} · {statusLabels[post.status]}
+                              {post.account} · {post.network}
                             </span>
                           )}
                         </span>
