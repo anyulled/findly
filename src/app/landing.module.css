@@ -16,5 +16,7 @@
   .heroVisual{background:#1c182b;border-color:#352e4d;box-shadow:0 22px 70px rgba(0,0,0,0.5)}
   .communityCards{background:#1a1728;border-color:#332d4b}
   .communityCards>div{background:#232034;color:#f2f2f7}
+  .communityCards small{color:#b5b5c3}
+  .step h3{color:#232031}
   .footer{border-color:#272436}
 }
