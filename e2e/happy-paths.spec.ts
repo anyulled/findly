@@ -178,7 +178,8 @@ test("stores a Luma iCal source linked to multiple accounts", async ({ page }) =
 
   const source = page.getByRole("article").filter({ hasText: "BarcelonaJS Luma" });
   await expect(source).toContainText("Luma · iCal");
-  await expect(source).toContainText("Personal, Barcelona JUG");
+  await expect(source).toContainText("Personal");
+  await expect(source).toContainText("Barcelona JUG");
   await expect(page.getByText("La demo guarda las fuentes en este navegador, pero no consulta feeds. Conecta Supabase para importar eventos.")).toBeVisible();
   await expect(page.getByRole("button", { name: "Sincronizar ahora" })).toBeDisabled();
 
