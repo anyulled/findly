@@ -17,8 +17,8 @@ Any work stream, task, feature, or bug fix performed by agents is considered com
 3. **Code is committed and pushed to a pull request**: Changes are committed using Conventional Commits format, pushed to the remote branch/worktree, and a pull request is created.
 4. **The pull request is linked to a GitHub issue**: The pull request description explicitly references and links the associated GitHub issue (e.g., `Closes #<issue>` or `Fixes #<issue>`).
 5. **Branch conflicts are resolved, if any**: The branch is rebased onto the latest `origin/main` without dropping concurrent changes, and all CI checks pass after synchronization.
-6. **CodeRabbit comments are resolved, if any**: All comments, suggestions, and review feedback from CodeRabbit (and human reviewers) are reviewed, addressed, and marked resolved.
-7. **The pull request is auto-merged**: Auto-merge (rebase merge) is enabled and the pull request has successfully auto-merged into `main` after all required status checks pass.
+6. **CodeRabbit comments are resolved, if any**: All comments, suggestions, and review feedback from CodeRabbit (and human reviewers) are reviewed and addressed, and resolvable review threads are marked resolved.
+7. **The pull request is auto-merged**: Auto-merge (rebase merge) is enabled after CodeRabbit review completes and any feedback is resolved in addition to all required status checks passing, and the pull request has successfully auto-merged into `main`.
 
 ## Project workflow
 

@@ -22,7 +22,8 @@
 - [ ] The pull request is linked to a GitHub issue
 - [ ] Branch conflicts are resolved, if any
 - [ ] CodeRabbit comments are resolved, if any
-- [ ] The pull request is auto-merged
+- [ ] Auto-merge is enabled (rebase merge) once review feedback is addressed
+- [ ] The pull request is auto-merged into main
 
 ## Mandatory final stage: Documentation and Sync
 
