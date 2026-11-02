@@ -24,6 +24,7 @@
   --primary-hover: #5f4dc9;
   --primary-subtle: #f2f0ff;
   --primary-foreground: #ffffff;
+  --focus-outline: rgba(115, 97, 220, 0.35);
 
   /* Semantic status colors */
   --success: #16a34a;
@@ -74,10 +75,11 @@
     --border-default: #2d2e3d;
     --border-strong: #3f4052;
 
-    --primary: #8b79eb;
-    --primary-hover: #9d8df2;
+    --primary: #6351c7;
+    --primary-hover: #7361dc;
     --primary-subtle: #25223d;
     --primary-foreground: #ffffff;
+    --focus-outline: #a79af5;
 
     --success: #22c55e;
     --success-subtle: #122b1e;
@@ -130,6 +132,6 @@ input, textarea, select {
 }
 
 button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible {
-  outline: 3px solid rgba(115, 97, 220, 0.35);
+  outline: 3px solid var(--focus-outline, rgba(115, 97, 220, 0.35));
   outline-offset: 2px;
 }
