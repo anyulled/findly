@@ -8,8 +8,21 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 <!-- END:nextjs-agent-rules -->
 
+## Definition of Done (DoD)
+
+Any work stream, task, feature, or bug fix performed by agents is considered complete **only** when all of the following criteria are satisfied:
+
+1. **The implementation is done**: The code meets all requirements, follows SOLID/KISS principles, keeps Server Actions exception-safe with typed return results, and never swallows errors silently.
+2. **We have tests supporting the development**: Automated tests supporting the feature or fix are included and passing. For business logic in `src/lib/*.ts`, line coverage must stay at or above 80%, CRAP score <= 10, and code duplication clones must be 0 (<= 1%). UI and route flows are covered by Playwright E2E tests where applicable.
+3. **Code is committed and pushed to a pull request**: Changes are committed using Conventional Commits format, pushed to the remote branch/worktree, and a pull request is created.
+4. **The pull request is linked to a GitHub issue**: The pull request description explicitly references and links the associated GitHub issue (e.g., `Closes #<issue>` or `Fixes #<issue>`).
+5. **Branch conflicts are resolved, if any**: The branch is rebased onto the latest `origin/main` without dropping concurrent changes, and all CI checks pass after synchronization.
+6. **CodeRabbit comments are resolved, if any**: All comments, suggestions, and review feedback from CodeRabbit (and human reviewers) are reviewed, addressed, and marked resolved.
+7. **The pull request is auto-merged**: Auto-merge (rebase merge) is enabled and the pull request has successfully auto-merged into `main` after all required status checks pass.
+
 ## Project workflow
 
+- Do not declare any task or workstream complete until every criterion in the Definition of Done (DoD) is satisfied.
 - Follow the RSI cycle for each workstream in order: Research current repository state and requirements; write a concise plan in the pull request description or a relevant `docs/` note; implement and verify; then complete the mandatory final Documentation and Sync stage.
 - Keep per-file line coverage at or above 80% for every business-logic module in `src/lib/*.ts`. Add or update unit tests with each implementation change; `npm run test:coverage` must pass before requesting merge. The CI `Coverage (80%)` check enforces this threshold.
 - Put testable business rules in `src/lib/*.ts`; cover route and UI integration through focused unit tests where practical and the required Playwright E2E paths. See `docs/testing.md` for coverage scope and commands.

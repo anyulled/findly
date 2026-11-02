@@ -6,6 +6,17 @@
 
 The public repository is configured to allow rebase merges only. The `main` branch requires the `Coverage (80%)` and `E2E (Playwright)` checks, and auto-merge is enabled in repository settings. Select rebase when enabling auto-merge on a pull request.
 
+## Definition of Done
+
+Work on any issue, feature, or bug fix is complete only when:
+- The implementation is done.
+- Automated tests supporting the development pass (per-file business logic coverage >= 80%, CRAP <= 10, 0 clones, and Playwright E2E where appropriate).
+- Code is committed with Conventional Commits and pushed to a pull request.
+- The pull request is linked to a GitHub issue (`Closes #<issue>`).
+- Branch conflicts are resolved, if any (rebased onto latest `origin/main`).
+- CodeRabbit comments are resolved, if any.
+- The pull request is auto-merged.
+
 ## Continuous deployment
 
 Use the hosting provider's Git integration to deploy from `main` and create preview deployments for pull requests. This keeps deploy credentials out of GitHub Actions and avoids paid runner/deployment automation. Connect the repository in the provider dashboard, select the repository root, and configure any production environment variables there. Do not commit `.env` files or credentials.
