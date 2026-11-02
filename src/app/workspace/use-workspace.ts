@@ -40,6 +40,7 @@ import {
   starterPosts,
 } from "./workspace-calendar-dates";
 import { sanitizeClientErrorMessage } from "@/lib/client-error";
+import { confirmAsync } from "@/lib/confirm-dialog";
 
 function toPublishingStatus(kind: string): Status {
   return kind === "scheduled"
@@ -557,9 +558,10 @@ export function useWorkspace() {
 
   async function removeDraft(post: Post) {
     if (deletingDraft || (post.status !== "review" && post.status !== "failed")) return;
-    if (!window.confirm(post.status === "failed"
+    const confirmed = await confirmAsync(post.status === "failed"
       ? "¿Eliminar esta publicación fallida? No se volverá a generar al completar los recordatorios."
-      : "¿Eliminar este borrador? No se volverá a generar al completar los recordatorios.")) return;
+      : "¿Eliminar este borrador? No se volverá a generar al completar los recordatorios.");
+    if (!confirmed) return;
     setDeletingDraft(true);
     setDraftDeleteError("");
     try {
@@ -589,7 +591,8 @@ export function useWorkspace() {
     if (deletingEventId) return;
     const event = events.find((e) => e.id === eventId);
     const eventTitle = event?.title ? ` "${event.title}"` : "";
-    if (!window.confirm(`¿Eliminar el evento${eventTitle}? Se eliminarán también todas sus publicaciones asociadas.`)) {
+    const confirmed = await confirmAsync(`¿Eliminar el evento${eventTitle}? Se eliminarán también todas sus publicaciones asociadas.`);
+    if (!confirmed) {
       return;
     }
     setDeletingEventId(eventId);

@@ -2,6 +2,7 @@
 
 import { useState, type FormEvent } from "react";
 import styles from "./page.module.css";
+import { confirmAsync } from "@/lib/confirm-dialog";
 import { deleteSource, retireSource, saveSource, setSourceEnabled, type AccountView, type SourceInput, type SourceType, type SourceView } from "./workspace-actions";
 
 type Props = {
@@ -84,7 +85,8 @@ export function SourceSettings({ accounts, sources, persistent, onSourcesChange,
     const question = mode === "retire"
       ? `¿Retirar la fuente${sourceTitle}? Se conservarán sus eventos y publicaciones, pero ya no se sincronizará.`
       : `¿Eliminar la fuente${sourceTitle}? Ya no se sincronizarán sus eventos.`;
-    if (!window.confirm(question)) {
+    const confirmed = await confirmAsync(question);
+    if (!confirmed) {
       return;
     }
     setDeletingSourceId(source.id);
