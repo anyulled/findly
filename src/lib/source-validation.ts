@@ -1,3 +1,5 @@
+import { NETWORKS, type SocialNetwork } from "./social-validation";
+
 export type SourceType = "luma_ical" | "meetup" | "substack";
 
 export type SourceInput = {
@@ -6,6 +8,7 @@ export type SourceInput = {
   url: string;
   enabled?: boolean;
   accountIds: string[];
+  accountNetworks?: Record<string, SocialNetwork[]>;
 };
 
 const VALID_SOURCE_TYPES = new Set<SourceType>(["luma_ical", "meetup", "substack"]);
@@ -39,6 +42,25 @@ function validateSourceAccounts(accountIds: string[]): string[] {
   return unique;
 }
 
+function validateAccountNetworks(
+  accountNetworks: Record<string, SocialNetwork[]> | undefined,
+  validAccountIds: string[],
+): Record<string, SocialNetwork[]> | undefined {
+  if (!accountNetworks) return undefined;
+  if (typeof accountNetworks !== "object" || Array.isArray(accountNetworks)) {
+    throw new Error("La configuración de canales no es válida.");
+  }
+  const result: Record<string, SocialNetwork[]> = {};
+  const validSet = new Set(validAccountIds);
+  for (const [accId, nets] of Object.entries(accountNetworks)) {
+    if (!validSet.has(accId)) continue;
+    if (!Array.isArray(nets)) throw new Error("La configuración de canales no es válida.");
+    const validNets = nets.filter((n): n is SocialNetwork => NETWORKS.includes(n as SocialNetwork));
+    result[accId] = [...new Set(validNets)];
+  }
+  return result;
+}
+
 export function validateSource(input: SourceInput): SourceInput {
   validateSourceStructure(input);
   const name = input.name.trim();
@@ -46,5 +68,6 @@ export function validateSource(input: SourceInput): SourceInput {
   if (!VALID_SOURCE_TYPES.has(input.type)) throw new Error("El tipo de fuente no es válido.");
   const url = parseSourceUrl(input.url, input.type);
   const accountIds = validateSourceAccounts(input.accountIds);
-  return { ...input, name, url, accountIds };
+  const accountNetworks = validateAccountNetworks(input.accountNetworks, accountIds);
+  return { ...input, name, url, accountIds, ...(accountNetworks ? { accountNetworks } : {}) };
 }

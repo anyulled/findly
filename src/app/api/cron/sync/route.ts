@@ -1,4 +1,5 @@
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
+import { formatMadridDateTime } from "@/lib/madrid-time";
 import { fetchLumaFeed, syncLumaSources, type DraftGenerator, type SyncRepository } from "@/lib/luma-sync";
 import { isAuthorizedCronRequest } from "@/lib/cron-auth";
 import { generateSocialPostOrFallback } from "@/lib/groq";
@@ -85,7 +86,8 @@ export async function POST(request: Request): Promise<Response> {
     // is unavailable. Failed and uncertain posts are never selected here.
     const approvedRecovery = await dispatchApprovedPostsWithSupabase(supabase, ownerId, null, undefined, { budget: deliveryBudget });
     const generateDrafts: DraftGenerator = (_source, event) => generateLumaEventDrafts(event, draftRepository, generateSocialPostOrFallback);
-    const result = await syncLumaSources(repository, fetchLumaFeed, generateDrafts);
+    const todayInMadrid = formatMadridDateTime(new Date().toISOString()).date;
+    const result = await syncLumaSources(repository, fetchLumaFeed, generateDrafts, { minStartDate: todayInMadrid });
     return Response.json({ ...result, approvedRecovery, automaticDelivery }, { status: hasDispatchFailures(approvedRecovery, automaticDelivery) ? 503 : 200 });
   } catch (error) {
     logger.error("Unhandled error during cron sync execution", { ownerId }, error);

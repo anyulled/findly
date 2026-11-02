@@ -113,3 +113,45 @@ test("validateSource rejects non-UUID account IDs such as acc-personal", () => {
     /Asocia la fuente al menos con una cuenta válida/
   );
 });
+
+test("validateSource handles valid and invalid accountNetworks configuration", () => {
+  const valid = validateSource({
+    name: "Valid Source",
+    type: "luma_ical",
+    url: "https://example.com/cal.ics",
+    accountIds: [validAccountId, validAccountId2],
+    accountNetworks: {
+      [validAccountId]: ["X", "Bluesky"],
+      [validAccountId2]: ["LinkedIn"],
+      "non-existent-acc": ["X"],
+    },
+  });
+  assert.deepEqual(valid.accountNetworks, {
+    [validAccountId]: ["X", "Bluesky"],
+    [validAccountId2]: ["LinkedIn"],
+  });
+
+  assert.throws(
+    () =>
+      validateSource({
+        name: "Source",
+        type: "luma_ical",
+        url: "https://example.com/cal.ics",
+        accountIds: [validAccountId],
+        accountNetworks: "not-an-object" as unknown as Record<string, ("LinkedIn" | "X" | "Bluesky")[]>,
+      }),
+    /La configuración de canales no es válida/
+  );
+
+  assert.throws(
+    () =>
+      validateSource({
+        name: "Source",
+        type: "luma_ical",
+        url: "https://example.com/cal.ics",
+        accountIds: [validAccountId],
+        accountNetworks: { [validAccountId]: "not-an-array" as unknown as ("LinkedIn" | "X" | "Bluesky")[] },
+      }),
+    /La configuración de canales no es válida/
+  );
+});

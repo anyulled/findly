@@ -63,15 +63,15 @@ export function createSupabaseDraftRepository(
     },
 
     async listLinkedAccounts(_ownerId: string, sourceId?: string | null, selectedAccountIds?: string[] | null): Promise<GenerationAccount[]> {
-      let sourceLinks: { sourceId: string; accountId: string }[] = [];
+      let sourceLinks: { sourceId: string; accountId: string; networks?: string[] | null }[] = [];
       if (sourceId && selectedAccountIds == null) {
         const { data: links, error: linkError } = await client
-          .from<{ account_id: string }[]>("source_accounts")
-          .select("account_id")
+          .from<{ account_id: string; networks?: string[] | null }[]>("source_accounts")
+          .select("account_id,networks")
           .eq("owner_id", ownerId)
           .eq("source_id", sourceId);
         if (linkError) throw new Error("Unable to read source account links");
-        sourceLinks = (links ?? []).map((link) => ({ sourceId, accountId: link.account_id }));
+        sourceLinks = (links ?? []).map((link) => ({ sourceId, accountId: link.account_id, networks: link.networks }));
       }
 
       const { data, error } = await client

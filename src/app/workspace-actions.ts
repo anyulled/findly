@@ -19,6 +19,10 @@ import { isSubstackUrl, packLocationAndImage, unpackLocationAndImage } from "@/l
 import { fetchOpenGraphImage } from "@/lib/opengraph";
 import { runAction, runVoidAction, UserFacingError, type ActionResult, type ActionVoidResult } from "@/lib/action-result";
 import { logger } from "@/lib/logger";
+import { fetchLumaFeed, extractSourceEvents, filterUpcomingEvents, type PersistableEvent } from "@/lib/luma-sync";
+import { parseSubstackFeed, sortSubstackPostsReverseChronological } from "@/lib/substack";
+import { dispatchApprovedPostsWithSupabase } from "@/lib/approved-dispatch";
+import type { LumaDraftRepository, ImportedLumaEvent } from "@/lib/luma-drafts";
 
 export type { UserProfile } from "@/lib/user-profile";
 export type { SourceInput, SourceType } from "@/lib/source-validation";
@@ -108,6 +112,7 @@ export type SourceView = {
   url: string;
   enabled: boolean;
   accountIds: string[];
+  accountNetworks?: Record<string, SocialNetwork[]>;
   /** Imported events still linked to this source; a non-zero count blocks physical deletion. */
   eventCount?: number;
 };
@@ -250,7 +255,7 @@ export async function loadWorkspace(): Promise<WorkspaceSnapshot> {
       supabase.from("posts").select("id,event_id,account_id,network,lead_days,due_at,content,status,language,last_error,buffer_post_id,generation_origin,generation_error_code").order("due_at"),
       supabase.from("app_settings").select("value").eq("key", "publishing_mode").maybeSingle(),
       supabase.from("sources").select("id,name,source_type,feed_url,enabled").is("archived_at", null).order("created_at"),
-      supabase.from("source_accounts").select("source_id,account_id"),
+      supabase.from("source_accounts").select("source_id,account_id,networks"),
       supabase.from("account_buffer_channels").select("account_id,network,buffer_channel_id"),
       supabase.from("style_examples").select("account_id"),
     ]);
@@ -292,10 +297,16 @@ export async function loadWorkspace(): Promise<WorkspaceSnapshot> {
     });
     const settings = settingsResult.data?.value as { mode?: string } | null;
     const accountIdsBySource = new Map<string, string[]>();
-    for (const link of sourceAccountsResult.data ?? []) {
+    const accountNetworksBySource = new Map<string, Record<string, SocialNetwork[]>>();
+    for (const link of (sourceAccountsResult.data ?? []) as { source_id: string; account_id: string; networks?: SocialNetwork[] | null }[]) {
       const accountIds = accountIdsBySource.get(link.source_id) ?? [];
       accountIds.push(link.account_id);
       accountIdsBySource.set(link.source_id, accountIds);
+      if (link.networks && link.networks.length > 0) {
+        const nets = accountNetworksBySource.get(link.source_id) ?? {};
+        nets[link.account_id] = link.networks;
+        accountNetworksBySource.set(link.source_id, nets);
+      }
     }
     // Count per source with head queries: the calendar list above is capped by the API row limit and would undercount.
     const eventCountsBySource = new Map<string, number>();
@@ -312,7 +323,16 @@ export async function loadWorkspace(): Promise<WorkspaceSnapshot> {
       const resolvedType: SourceType = isSubstackUrl(row.feed_url) || row.source_type === "substack"
         ? "substack"
         : row.source_type;
-      return [{ id: row.id, name: row.name, type: resolvedType, url: row.feed_url ?? "", enabled: row.enabled, accountIds: accountIdsBySource.get(row.id) ?? [], eventCount: eventCountsBySource.get(row.id) ?? 0 }];
+      return [{
+        id: row.id,
+        name: row.name,
+        type: resolvedType,
+        url: row.feed_url ?? "",
+        enabled: row.enabled,
+        accountIds: accountIdsBySource.get(row.id) ?? [],
+        accountNetworks: accountNetworksBySource.get(row.id) ?? {},
+        eventCount: eventCountsBySource.get(row.id) ?? 0,
+      }];
     });
 
     const existingBufferPostIds = new Set(
@@ -374,11 +394,12 @@ export async function saveSource(input: SourceInput, sourceId?: string): Promise
       p_feed_url: source.url,
       p_enabled: source.enabled,
       p_account_ids: source.accountIds,
+      p_account_networks: source.accountNetworks ?? null,
     }).single();
     if (error) {
       throw new UserFacingError(error.message || "No se pudo guardar la fuente en Supabase.");
     }
-    const data = resultData as { id: string; name: string; source_type: SourceType; feed_url: string; enabled: boolean; account_ids: string[] } | null;
+    const data = resultData as { id: string; name: string; source_type: SourceType; feed_url: string; enabled: boolean; account_ids: string[]; account_networks?: Record<string, SocialNetwork[]> } | null;
     if (!data) {
       throw new UserFacingError("No se pudieron obtener los datos de la fuente guardada.");
     }
@@ -392,6 +413,7 @@ export async function saveSource(input: SourceInput, sourceId?: string): Promise
       url: data.feed_url,
       enabled: data.enabled,
       accountIds: data.account_ids ?? [],
+      accountNetworks: data.account_networks ?? source.accountNetworks ?? {},
     };
   }, { defaultErrorMessage: "Error inesperado al guardar la fuente." });
 
@@ -809,4 +831,264 @@ export async function loadWorkspaceStats(): Promise<ActionResult<WorkspaceStats>
       recentLogs: logs,
     };
   });
+}
+
+export type UpcomingSourceEvent = {
+  sourceId: string;
+  sourceName: string;
+  sourceType: SourceType;
+  externalId: string;
+  title: string;
+  startsAt: string;
+  date: string;
+  time: string;
+  location: string;
+  url: string | null;
+  description: string;
+  alreadyImported: boolean;
+};
+
+export type PreviewUpcomingResult =
+  | { success: true; events: UpcomingSourceEvent[] }
+  | { success: false; error: string };
+
+export async function previewUpcomingSourceEvents(): Promise<PreviewUpcomingResult> {
+  const result = await runAction("previewUpcomingSourceEvents", async () => {
+    const { supabase, ownerId } = await authorizedClient();
+    const { data: sources, error } = await supabase
+      .from("sources")
+      .select("id,owner_id,name,source_type,feed_url")
+      .eq("owner_id", ownerId)
+      .eq("enabled", true)
+      .is("archived_at", null);
+    if (error) throw new UserFacingError("No se pudieron consultar las fuentes activas.");
+    if (!sources || sources.length === 0) return [];
+
+    const todayInMadrid = formatMadridDateTime(new Date().toISOString()).date;
+    const allUpcoming: UpcomingSourceEvent[] = [];
+
+    for (const source of sources) {
+      if (!source.feed_url) continue;
+      try {
+        const raw = await fetchLumaFeed(source.feed_url);
+        const { rows } = extractSourceEvents(
+          { id: source.id, ownerId: source.owner_id, name: source.name, feedUrl: source.feed_url },
+          raw,
+        );
+        const upcoming = filterUpcomingEvents(rows, todayInMadrid);
+        if (upcoming.length === 0) continue;
+
+        const { data: existingEvents } = await supabase
+          .from("events")
+          .select("external_id")
+          .eq("owner_id", ownerId)
+          .eq("source_id", source.id)
+          .in("external_id", upcoming.map((e) => e.external_id));
+
+        const existingSet = new Set((existingEvents ?? []).map((e) => e.external_id));
+        const resolvedType: SourceType = isSubstackUrl(source.feed_url) || source.source_type === "substack"
+          ? "substack"
+          : (source.source_type as SourceType);
+
+        for (const ev of upcoming) {
+          const dt = formatMadridDateTime(ev.starts_at);
+          const unpacked = unpackLocationAndImage(ev.location);
+          allUpcoming.push({
+            sourceId: source.id,
+            sourceName: source.name,
+            sourceType: resolvedType,
+            externalId: ev.external_id,
+            title: ev.title,
+            startsAt: ev.starts_at,
+            date: dt.date,
+            time: dt.time,
+            location: unpacked.place,
+            url: ev.event_url,
+            description: ev.description,
+            alreadyImported: existingSet.has(ev.external_id),
+          });
+        }
+      } catch (feedError) {
+        logger.warn("Failed to fetch feed during upcoming events preview", { sourceId: source.id }, feedError);
+      }
+    }
+
+    return allUpcoming.sort((a, b) => a.startsAt.localeCompare(b.startsAt));
+  }, { defaultErrorMessage: "No se pudieron obtener los eventos futuros de las fuentes." });
+
+  if (result.success) return { success: true, events: result.data };
+  return { success: false, error: result.error };
+}
+
+type SupabaseAuthorizedClient = Awaited<ReturnType<typeof authorizedClient>>["supabase"];
+
+function createAutomaticDraftRepository(supabase: SupabaseAuthorizedClient, ownerId: string): LumaDraftRepository {
+  const base = createSupabaseDraftRepository(supabase, ownerId);
+  return {
+    ...base,
+    async scheduleAutomaticPosts(oId, evId, accIds) {
+      if (accIds.length === 0) return;
+      await dispatchApprovedPostsWithSupabase(supabase, oId, evId);
+    },
+  };
+}
+
+async function upsertSingleEvent(supabase: SupabaseAuthorizedClient, persistable: PersistableEvent): Promise<ImportedLumaEvent | null> {
+  const cols = "id,owner_id,source_id,external_id,title,starts_at,location,description,event_url,detected_language";
+  const { data, error } = await supabase
+    .from("events")
+    .upsert([persistable], { onConflict: "owner_id,source_id,external_id" })
+    .select(cols)
+    .single();
+  if (error || !data) return null;
+  return data as ImportedLumaEvent;
+}
+
+export async function syncSelectedUpcomingEvents(events: UpcomingSourceEvent[]): Promise<ActionResult<{ scheduled: number }>> {
+  return runAction("syncSelectedUpcomingEvents", async () => {
+    if (!Array.isArray(events) || events.length === 0) {
+      throw new UserFacingError("Selecciona al menos un evento para programar.");
+    }
+    const { supabase, ownerId } = await authorizedClient();
+
+    let totalScheduled = 0;
+    const draftRepository = createAutomaticDraftRepository(supabase, ownerId);
+
+    for (const ev of events) {
+      const persistable: PersistableEvent = {
+        owner_id: ownerId,
+        source_id: ev.sourceId,
+        external_id: ev.externalId,
+        title: ev.title,
+        starts_at: ev.startsAt,
+        timezone: "Europe/Madrid",
+        location: ev.location,
+        description: ev.description,
+        event_url: ev.url,
+        detected_language: detectTitleLanguage(ev.title),
+      };
+
+      const upserted = await upsertSingleEvent(supabase, persistable);
+      if (!upserted) {
+        logger.warn("Failed to upsert event during selective sync", { eventId: ev.externalId });
+        continue;
+      }
+
+      try {
+        await generateLumaEventDrafts(upserted, draftRepository, generateSocialPostOrFallback);
+        totalScheduled += 1;
+      } catch (genError) {
+        logger.error("Failed to generate drafts for selective sync event", { eventId: upserted.id }, genError);
+      }
+    }
+
+    return { scheduled: totalScheduled };
+  }, { defaultErrorMessage: "No se pudieron programar los eventos seleccionados." });
+}
+
+export type SubstackPostItemView = {
+  uid: string;
+  title: string;
+  description: string;
+  url: string;
+  publishedAt: string;
+  formattedDate: string;
+  coverImage: string | null;
+  alreadyImported: boolean;
+};
+
+export type FetchSubstackResult =
+  | { success: true; posts: SubstackPostItemView[] }
+  | { success: false; error: string };
+
+export async function fetchSubstackPostsForSource(sourceId: string): Promise<FetchSubstackResult> {
+  const result = await runAction("fetchSubstackPostsForSource", async () => {
+    const { supabase, ownerId } = await authorizedClient();
+    const { data: source, error } = await supabase
+      .from("sources")
+      .select("id,feed_url,name,source_type")
+      .eq("id", sourceId)
+      .eq("owner_id", ownerId)
+      .single();
+    if (error || !source || !source.feed_url) {
+      throw new UserFacingError("Fuente de Substack no encontrada.");
+    }
+
+    const raw = await fetchLumaFeed(source.feed_url);
+    const parsed = parseSubstackFeed(raw, source.feed_url);
+    const sorted = sortSubstackPostsReverseChronological(parsed);
+
+    const { data: existingEvents } = await supabase
+      .from("events")
+      .select("external_id")
+      .eq("owner_id", ownerId)
+      .eq("source_id", sourceId)
+      .in("external_id", sorted.map((p) => p.uid));
+
+    const existingSet = new Set((existingEvents ?? []).map((e) => e.external_id));
+
+    return sorted.map((item): SubstackPostItemView => {
+      const dt = formatMadridDateTime(item.publishedAt);
+      return {
+        uid: item.uid,
+        title: item.title,
+        description: item.description,
+        url: item.url,
+        publishedAt: item.publishedAt,
+        formattedDate: `${dt.date} ${dt.time}`,
+        coverImage: item.coverImage,
+        alreadyImported: existingSet.has(item.uid),
+      };
+    });
+  }, { defaultErrorMessage: "No se pudieron obtener las publicaciones de Substack." });
+
+  if (result.success) return { success: true, posts: result.data };
+  return { success: false, error: result.error };
+}
+
+export async function generateDraftsForSubstackArticle(sourceId: string, postUid: string): Promise<ActionResult<{ draftsCreated: number }>> {
+  return runAction("generateDraftsForSubstackArticle", async () => {
+    const { supabase, ownerId } = await authorizedClient();
+    const { data: source, error } = await supabase
+      .from("sources")
+      .select("id,feed_url,name")
+      .eq("id", sourceId)
+      .eq("owner_id", ownerId)
+      .single();
+    if (error || !source || !source.feed_url) {
+      throw new UserFacingError("Fuente no encontrada.");
+    }
+
+    const raw = await fetchLumaFeed(source.feed_url);
+    const posts = parseSubstackFeed(raw, source.feed_url);
+    const post = posts.find((p) => p.uid === postUid);
+    if (!post) throw new UserFacingError("No se encontró la publicación en el feed de Substack.");
+
+    const persistable: PersistableEvent = {
+      owner_id: ownerId,
+      source_id: sourceId,
+      external_id: post.uid,
+      title: post.title,
+      starts_at: post.publishedAt,
+      timezone: "Europe/Madrid",
+      location: packLocationAndImage("", post.coverImage),
+      description: post.description,
+      event_url: post.url,
+      detected_language: detectTitleLanguage(post.title),
+    };
+
+    const upserted = await upsertSingleEvent(supabase, persistable);
+    if (!upserted) {
+      throw new UserFacingError("No se pudo guardar la publicación.");
+    }
+
+    const draftRepository = createAutomaticDraftRepository(supabase, ownerId);
+    const draftsCreated = await generateLumaEventDrafts(
+      upserted,
+      draftRepository,
+      generateSocialPostOrFallback,
+    );
+
+    return { draftsCreated };
+  }, { defaultErrorMessage: "No se pudieron generar los borradores para la publicación." });
 }

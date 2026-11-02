@@ -94,6 +94,59 @@ describe("draft-repository", () => {
     assert.deepEqual(linked[0].networks, ["LinkedIn", "X"]);
   });
 
+  it("listLinkedAccounts filters account networks according to source_accounts link", async () => {
+    const supabase: SupabaseClientLike = {
+      from<T>(table: string): SupabaseTableBuilder<T> {
+        if (table === "source_accounts") {
+          return mockTable<T>({
+            select() {
+              return {
+                eq() {
+                  return {
+                    eq() {
+                      return { data: [{ account_id: "acc-1", networks: ["X"] }], error: null };
+                    },
+                  };
+                },
+              };
+            },
+          });
+        }
+        if (table === "accounts") {
+          return mockTable<T>({
+            select() {
+              return {
+                eq() {
+                  return {
+                    eq() {
+                      return {
+                        async order() {
+                          return {
+                            data: [
+                              { id: "acc-1", name: "Personal", voice_prompt: "prompt", networks: ["LinkedIn", "X", "Bluesky"] },
+                            ],
+                            error: null,
+                          };
+                        },
+                      };
+                    },
+                  };
+                },
+              };
+            },
+          });
+        }
+        throw new Error(`Unexpected table ${table}`);
+      },
+    };
+
+    const repo = createSupabaseDraftRepository(supabase, "owner-1");
+    const linked = await repo.listLinkedAccounts("owner-1", "src-1");
+    assert.equal(linked.length, 1);
+    assert.equal(linked[0].id, "acc-1");
+    assert.deepEqual(linked[0].networks, ["X"]);
+  });
+
   it("uses persisted account selection for manual event generation and retries", async () => {
     const supabase: SupabaseClientLike = {
       from<T>(table: string): SupabaseTableBuilder<T> {

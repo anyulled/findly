@@ -62,3 +62,16 @@ test("manual event selection is retained when checking and regenerating reminder
   assert.deepEqual(new Set(drafts.map((draft) => draft.accountId)), new Set(["personal"]));
   assert.equal(drafts.length, 6);
 });
+
+test("selectEventAccounts filters networks to those configured for the source link", () => {
+  const customLinks = [
+    { sourceId: "custom-source", accountId: "personal", networks: ["X"] },
+    { sourceId: "custom-source", accountId: "jug", networks: [] },
+  ];
+  const eligible = selectEventAccounts(accounts, "custom-source", customLinks);
+  const personal = eligible.find((a) => a.id === "personal");
+  const jug = eligible.find((a) => a.id === "jug");
+
+  assert.deepEqual(personal?.networks, ["X"]);
+  assert.deepEqual(jug?.networks, ["LinkedIn", "X"]);
+});

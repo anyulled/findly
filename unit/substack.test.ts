@@ -8,6 +8,7 @@ import {
   parseSubstackPostsJson,
   parseSubstackRssFeed,
   parseSubstackFeed,
+  sortSubstackPostsReverseChronological,
 } from "../src/lib/substack";
 
 describe("substack utilities", () => {
@@ -136,5 +137,15 @@ describe("substack utilities", () => {
     assert.equal(items[3]?.coverImage, "https://substackcdn.com/image/channel-default.png");
 
     assert.equal(parseSubstackFeed(xml, "https://etsideusnondaretur.substack.com/feed").length, 4);
+  });
+
+  it("sorts Substack posts reverse chronologically", () => {
+    const posts = [
+      { uid: "1", title: "Older", description: "", url: "", publishedAt: "2026-01-01T00:00:00.000Z", coverImage: null },
+      { uid: "2", title: "Newer", description: "", url: "", publishedAt: "2026-03-01T00:00:00.000Z", coverImage: null },
+      { uid: "3", title: "Middle", description: "", url: "", publishedAt: "2026-02-01T00:00:00.000Z", coverImage: null },
+    ];
+    const sorted = sortSubstackPostsReverseChronological(posts);
+    assert.deepEqual(sorted.map((p) => p.uid), ["2", "3", "1"]);
   });
 });
