@@ -201,7 +201,12 @@
   .eventInfo h3, .accountTop b, .settingsTitle h3, .statsHeader h2, .kpiMainValue, .ratioBarTitle {
     color: var(--text-primary);
   }
-  .eventInfo p, .settingsTitle p, .statsHeader p, .sourceNotice, .sourceHelp {
+  .eventInfo p, .settingsTitle p, .statsHeader p {
+    color: var(--text-secondary);
+  }
+  .sourceNotice, .sourceHelp {
+    background: var(--bg-surface-subtle);
+    border: 1px solid var(--border-default);
     color: var(--text-secondary);
   }
   .eventDate {
