@@ -295,8 +295,8 @@ test("shows safe generation diagnostics on the affected draft", async ({ page })
   await page.reload();
   await page.getByRole("button", { name: "Calendario" }).click();
   await page.getByRole("button", { name: /Diagnostic event.*Personal.*LinkedIn/ }).click();
-  await expect(page.getByText(/No se pudo generar con Groq; se creó un borrador básico/)).toBeVisible();
-  await expect(page.getByText(/Groq alcanzó su límite de solicitudes/)).toBeVisible();
+  await expect(page.getByText(/No se pudo generar con IA; se creó un borrador básico/)).toBeVisible();
+  await expect(page.getByText(/El proveedor de IA alcanzó su límite de solicitudes/)).toBeVisible();
 });
 
 test("cancelling deletion confirmation leaves the item unchanged", async ({ page }) => {

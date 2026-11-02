@@ -630,7 +630,10 @@ export async function updatePostContent(
         throw new UserFacingError("No se pudo guardar la publicación. Comprueba que has aplicado las migraciones.");
       }
       if (dueAt) {
-        await supabase.from("posts").update({ due_at: dueAt, custom_scheduled: true }).eq("id", postId).eq("owner_id", ownerId);
+        const updateDue = await supabase.from("posts").update({ due_at: dueAt, custom_scheduled: true }).eq("id", postId).eq("owner_id", ownerId);
+        if (updateDue.error) {
+          throw new UserFacingError("No se pudo guardar la fecha de publicación.");
+        }
       }
     }
   }, { defaultErrorMessage: "No se pudo guardar la publicación." });
@@ -653,7 +656,10 @@ export async function approvePost(
     if (!validation.valid) return { kind: "error", message: validation.message };
     if (schedule?.date && schedule?.time) {
       const dueAt = madridDateTimeToIso(schedule.date, schedule.time);
-      await supabase.from("posts").update({ due_at: dueAt, custom_scheduled: true }).eq("id", postId).eq("owner_id", ownerId);
+      const scheduleUpdate = await supabase.from("posts").update({ due_at: dueAt, custom_scheduled: true }).eq("id", postId).eq("owner_id", ownerId);
+      if (scheduleUpdate.error) {
+        return { kind: "error", message: "No se pudo guardar la fecha de publicación." };
+      }
     }
     const outcome = await approveAndSchedulePost(postId, content, supabase, ownerId);
     invalidateBufferSyncCache();
@@ -758,7 +764,7 @@ export async function regeneratePostAction(postId: string): Promise<ActionResult
       }
     }
 
-    const { error: updateErr } = await supabase
+    const { data: updatedRows, error: updateErr } = await supabase
       .from("posts")
       .update({
         content: result.text,
@@ -769,9 +775,11 @@ export async function regeneratePostAction(postId: string): Promise<ActionResult
         updated_at: new Date().toISOString(),
       })
       .eq("id", postId)
-      .eq("owner_id", ownerId);
+      .eq("owner_id", ownerId)
+      .in("status", ["review", "failed"])
+      .select("id");
 
-    if (updateErr) {
+    if (updateErr || !updatedRows?.length) {
       throw new UserFacingError("No se pudo actualizar la publicación en la base de datos.");
     }
 

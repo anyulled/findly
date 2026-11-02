@@ -62,6 +62,13 @@ export function PostDetailModal({
   const [regeneratingAi, setRegeneratingAi] = useState(false);
   const [aiError, setAiError] = useState("");
 
+  const isScheduleChanged = Boolean(
+    editingDate &&
+    editingTime &&
+    (editingDate !== selected.date || editingTime !== selected.time)
+  );
+  const schedulePayload = isScheduleChanged ? { date: editingDate, time: editingTime } : {};
+
   return (
     <div
       className={styles.overlay}
@@ -201,7 +208,7 @@ export function PostDetailModal({
             <button
               className={styles.secondaryButton}
               onClick={() => {
-                onSavePostChanges(selected, { text: editing, date: editingDate, time: editingTime });
+                onSavePostChanges(selected, { text: editing, ...schedulePayload });
               }}
             >
               Guardar cambios
@@ -232,7 +239,7 @@ export function PostDetailModal({
             <button
               className={styles.approveButton}
               onClick={() => {
-                onSavePostChanges(selected, { text: editing, date: editingDate, time: editingTime, status: "approved" });
+                onSavePostChanges(selected, { text: editing, status: "approved", ...schedulePayload });
               }}
               disabled={!postValidation?.valid}
             >
