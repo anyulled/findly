@@ -169,6 +169,7 @@ test("extracts event details from a pasted URL and lets the owner review the res
 
 test("stores a Luma iCal source linked to multiple accounts", async ({ page }) => {
   await page.getByRole("button", { name: "Ajustes" }).click();
+  await page.getByRole("button", { name: "Fuentes de eventos y publicaciones" }).click();
   await page.getByLabel("Nombre de la fuente").fill("BarcelonaJS Luma");
   await page.getByLabel("URL de suscripción iCal").fill("https://calendar.example.com/barcelonajs.ics");
   await page.getByRole("checkbox", { name: "Personal" }).check();
@@ -184,6 +185,7 @@ test("stores a Luma iCal source linked to multiple accounts", async ({ page }) =
   await source.getByRole("checkbox", { name: "Activa" }).uncheck();
   await page.reload();
   await page.getByRole("button", { name: "Ajustes" }).click();
+  await page.getByRole("button", { name: "Fuentes de eventos y publicaciones" }).click();
   const restored = page.getByRole("article").filter({ hasText: "BarcelonaJS Luma" });
   await expect(restored.getByRole("checkbox", { name: "Activa" })).not.toBeChecked();
   page.once("dialog", (dialog) => {
@@ -327,6 +329,7 @@ test("retires a source with imported events instead of deleting it", async ({ pa
   })), today);
   await page.reload();
   await page.getByRole("button", { name: "Ajustes" }).click();
+  await page.getByRole("button", { name: "Fuentes de eventos y publicaciones" }).click();
   const imported = page.getByRole("article").filter({ hasText: "Fuente importada" });
   const empty = page.getByRole("article").filter({ hasText: "Fuente vacía" });
   await expect(imported.getByRole("button", { name: "Eliminar" })).toHaveCount(0);
