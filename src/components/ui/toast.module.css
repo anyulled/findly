@@ -204,3 +204,63 @@
   opacity: 1;
   background: rgba(0, 0, 0, 0.05);
 }
+
+@media (prefers-color-scheme: dark) {
+  .root {
+    background: var(--bg-surface, #171821);
+    border-color: var(--border-default, #2d2e3d);
+    color: var(--text-primary, #f2f2f7);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  }
+  .root[data-type="success"] {
+    background: #0d2818;
+    border-color: #166534;
+    color: #86efac;
+  }
+  .root[data-type="success"] .icon {
+    color: #4ade80;
+  }
+  .root[data-type="success"] .actionButton,
+  .root[data-type="success"] .actionLink {
+    background: #14532d;
+    color: #bbf7d0;
+    border-color: #166534;
+  }
+  .root[data-type="warning"] {
+    background: #2a1f0a;
+    border-color: #854d0e;
+    color: #fde68a;
+  }
+  .root[data-type="warning"] .icon {
+    color: #facc15;
+  }
+  .root[data-type="warning"] .actionButton,
+  .root[data-type="warning"] .actionLink {
+    background: #713f12;
+    color: #fef3c7;
+    border-color: #854d0e;
+  }
+  .root[data-type="error"] {
+    background: #2c0f11;
+    border-color: #991b1b;
+    color: #fecaca;
+  }
+  .root[data-type="error"] .icon {
+    color: #f87171;
+  }
+  .root[data-type="error"] .actionButton,
+  .root[data-type="error"] .actionLink {
+    background: #7f1d1d;
+    color: #fee2e2;
+    border-color: #991b1b;
+  }
+  .root[data-type="info"] {
+    background: #0f1c30;
+    border-color: #1e3a8a;
+    color: #bfdbfe;
+  }
+  .closeButton:hover {
+    background: rgba(255, 255, 255, 0.1);
+  }
+}
+

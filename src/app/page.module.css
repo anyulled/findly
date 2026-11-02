@@ -1,5 +1,5 @@
-.shell{--ink:#202229;--muted:#83848f;--line:#ececf0;--purple:#7561df;--purple-dark:#614dcc;--lavender:#f1efff;--bg:#fff;display:flex;min-height:100vh;color:var(--ink);background:#fff;font-family:Arial,Helvetica,sans-serif;font-size:15px}
-.sidebar{width:260px;flex:none;border-right:1px solid var(--line);padding:26px 16px 16px;display:flex;flex-direction:column;min-height:100vh;background:#fff}
+.shell{display:flex;min-height:100vh;color:var(--text-primary);background:var(--bg-canvas);font-family:Arial,Helvetica,sans-serif;font-size:15px}
+.sidebar{width:260px;flex:none;border-right:1px solid var(--border-default);padding:26px 16px 16px;display:flex;flex-direction:column;min-height:100vh;background:var(--bg-surface)}
 .brand{display:flex;align-items:center;gap:10px;font-weight:750;font-size:22px;letter-spacing:-1px;padding:0 11px 32px}.brandMark{display:grid;place-items:center;background:#7866df;color:#fff;width:29px;height:29px;border-radius:9px;font-size:22px;font-weight:700}.brandDot{color:#7d6ae3}
 .workspace{display:flex;align-items:center;gap:10px;padding:10px;border:1px solid var(--line);border-radius:10px;margin-bottom:28px}.workspaceIcon{display:grid;place-items:center;width:30px;height:30px;border-radius:8px;background:#f0edff;color:#715de0;font-size:16px}.workspace b,.profile b{display:block;font-size:14px}.workspace small,.profile small{display:block;color:var(--muted);font-size:14px;margin-top:3px}.chevron{margin-left:auto;color:#a0a0a8}
 .navLabel,.eyebrow{font-size:14px;font-weight:700;letter-spacing:1.1px;color:#9998a3}.navLabel{padding:0 11px;margin:0 0 10px}
@@ -108,3 +108,162 @@
 .reviewEmptyState h2{font-size:20px;font-weight:650;color:#2b2a33;margin:0 0 8px}
 .reviewEmptyState p{font-size:15px;color:#7b7a87;max-width:480px;margin:0 auto 24px;line-height:1.5}
 .reviewEmptyActions{display:flex;align-items:center;justify-content:center;gap:12px}
+
+@media (prefers-color-scheme: dark) {
+  .sidebar, .topbar {
+    background: var(--bg-surface);
+    border-color: var(--border-default);
+  }
+  .workspace {
+    background: var(--bg-surface-subtle);
+    border-color: var(--border-default);
+  }
+  .workspace b, .profile b {
+    color: var(--text-primary);
+  }
+  .navItem {
+    color: var(--text-secondary);
+  }
+  .navItem:hover {
+    background: var(--bg-surface-subtle);
+    color: var(--text-primary);
+  }
+  .navActive {
+    background: var(--primary-subtle);
+    color: var(--primary);
+  }
+  .navCount {
+    background: var(--bg-surface-subtle);
+    border-color: var(--border-default);
+    color: var(--primary);
+  }
+  .planCard {
+    background: var(--bg-surface-subtle);
+    border-color: var(--border-default);
+  }
+  .planCard p {
+    color: var(--text-secondary);
+  }
+  .profile {
+    border-color: var(--border-default);
+  }
+  .breadcrumb b, .pageHeading h1 {
+    color: var(--text-primary);
+  }
+  .pageHeading p {
+    color: var(--text-secondary);
+  }
+  .calendar {
+    background: var(--bg-surface);
+    border-color: var(--border-default);
+  }
+  .weekdays {
+    background: var(--bg-surface-subtle);
+    border-color: var(--border-default);
+  }
+  .weekdays>div {
+    border-color: var(--border-default);
+    color: var(--text-muted);
+  }
+  .day {
+    border-color: var(--border-default);
+    background: var(--bg-surface);
+  }
+  .offMonth {
+    background: var(--bg-surface-subtle);
+  }
+  .dayHeader {
+    color: var(--text-secondary);
+  }
+  .period>button {
+    background: var(--bg-surface);
+    border-color: var(--border-default);
+    color: var(--text-primary);
+  }
+  .period h2 {
+    color: var(--text-primary);
+  }
+  .viewToggle {
+    background: var(--bg-surface-subtle);
+    border-color: var(--border-default);
+  }
+  .viewToggle button {
+    color: var(--text-muted);
+  }
+  .viewToggle .viewSelected {
+    background: var(--bg-surface);
+    color: var(--text-primary);
+  }
+  .eventCard, .accountCard, .settingsCard, .kpiCard, .ratioBarContainer, .sourceCard {
+    background: var(--bg-surface);
+    border-color: var(--border-default);
+  }
+  .eventInfo h3, .accountTop b, .settingsTitle h3, .statsHeader h2, .kpiMainValue, .ratioBarTitle {
+    color: var(--text-primary);
+  }
+  .eventInfo p, .settingsTitle p, .statsHeader p, .sourceNotice, .sourceHelp {
+    color: var(--text-secondary);
+  }
+  .eventDate {
+    background: var(--primary-subtle);
+    color: var(--primary);
+  }
+  .sourceTag {
+    background: var(--bg-surface-subtle);
+    color: var(--text-secondary);
+  }
+  .sourceForm select, .bufferChannels input, .scheduleInput, .accountCard textarea, .postEditor textarea, .formLabel textarea, .formLabel input {
+    background: var(--bg-input);
+    color: var(--text-primary);
+    border-color: var(--border-default);
+  }
+  .bufferChannels {
+    background: var(--bg-surface-subtle);
+    border-color: var(--border-default);
+  }
+  .secondaryButton {
+    background: var(--bg-surface);
+    border-color: var(--border-default);
+    color: var(--text-primary);
+  }
+  .secondaryButton:hover {
+    background: var(--bg-surface-subtle);
+  }
+  .modeChoices button {
+    background: var(--bg-surface);
+    border-color: var(--border-default);
+    color: var(--text-primary);
+  }
+  .modeChoices .modeChosen {
+    background: var(--primary-subtle);
+    border-color: var(--primary);
+  }
+  .notice {
+    background: var(--primary-subtle);
+    border-color: var(--border-default);
+  }
+  .reviewPostCard, .reviewPostContent {
+    background: var(--bg-surface);
+    border-color: var(--border-default);
+    color: var(--text-primary);
+  }
+  .reviewPostAccountName {
+    color: var(--text-primary);
+  }
+  .reviewNetworkBadge {
+    background: var(--bg-surface-subtle);
+    border-color: var(--border-default);
+    color: var(--text-secondary);
+  }
+  .reviewEmptyState {
+    background: var(--bg-surface);
+    border-color: var(--border-default);
+  }
+  .reviewEmptyState h2 {
+    color: var(--text-primary);
+  }
+  .reviewEmptyState p {
+    color: var(--text-secondary);
+  }
+}
+

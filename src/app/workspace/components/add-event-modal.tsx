@@ -1,6 +1,15 @@
 import type { Dispatch, SetStateAction } from "react";
 import styles from "../../page.module.css";
 import type { Account } from "../workspace-types";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
 
 interface AddEventFormState {
   title: string;
@@ -46,22 +55,16 @@ export function AddEventModal({
   onAddEvent,
 }: AddEventModalProps) {
   return (
-    <div
-      className={styles.overlay}
-      onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
-      <section className={styles.modal}>
-        <button className={styles.close} onClick={onClose}>
-          ×
-        </button>
-        <div className={styles.eyebrow}>NUEVO EVENTO</div>
-        <h2>Añade un evento</h2>
-        <p className={styles.modalDesc}>
-          Pega la URL pública de cualquier evento para extraer los datos automáticamente.
-          Podrás revisarlos y corregirlos antes de guardar.
-        </p>
+    <Dialog open={true} onOpenChange={(open) => { if (!open) onClose(); }}>
+      <DialogContent showClose={true}>
+        <DialogHeader>
+          <div className={styles.eyebrow}>NUEVO EVENTO</div>
+          <DialogTitle>Añade un evento</DialogTitle>
+          <DialogDescription className={styles.modalDesc}>
+            Pega la URL pública de cualquier evento para extraer los datos automáticamente.
+            Podrás revisarlos y corregirlos antes de guardar.
+          </DialogDescription>
+        </DialogHeader>
         <label className={styles.formLabel}>
           ENLACE DEL EVENTO
           <input
@@ -75,13 +78,14 @@ export function AddEventModal({
             placeholder="https://ejemplo.com/evento"
           />
         </label>
-        <button
-          className={styles.secondaryButton}
+        <Button
+          variant="secondary"
           onClick={onExtract}
           disabled={!sourceUrl.trim() || extractingEvent}
+          style={{ width: "100%", marginTop: "6px" }}
         >
           {extractingEvent ? "Extrayendo…" : "Extraer datos del evento"}
-        </button>
+        </Button>
         {extractionMessage && (
           <p className={styles.extractionMessage} role="status">
             {extractionMessage}
@@ -142,15 +146,30 @@ export function AddEventModal({
           {accounts.flatMap((account) => {
             if (!account.id || account.enabled === false) return [];
             const accountId = account.id;
-            return [<label key={accountId}><input type="checkbox" checked={selectedAccountIds.includes(accountId)} onChange={() => setSelectedAccountIds((current) => current.includes(accountId) ? current.filter((id) => id !== accountId) : [...current, accountId])}/>{account.name}</label>];
+            return [
+              <label key={accountId}>
+                <input
+                  type="checkbox"
+                  checked={selectedAccountIds.includes(accountId)}
+                  onChange={() =>
+                    setSelectedAccountIds((current) =>
+                      current.includes(accountId)
+                        ? current.filter((id) => id !== accountId)
+                        : [...current, accountId]
+                    )
+                  }
+                />
+                {account.name}
+              </label>,
+            ];
           })}
         </fieldset>
-        <div className={styles.modalActions}>
-          <button className={styles.secondaryButton} onClick={onClose}>
+        <DialogFooter className={styles.modalActions}>
+          <Button variant="secondary" onClick={onClose}>
             Cancelar
-          </button>
-          <button
-            className={styles.approveButton}
+          </Button>
+          <Button
+            variant="default"
             onClick={onAddEvent}
             disabled={
               extractingEvent ||
@@ -160,9 +179,9 @@ export function AddEventModal({
             }
           >
             Crear evento
-          </button>
-        </div>
-      </section>
-    </div>
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

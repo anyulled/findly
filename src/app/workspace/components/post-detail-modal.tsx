@@ -2,6 +2,13 @@ import { useState } from "react";
 import styles from "../../page.module.css";
 import type { EventItem, Post, Status } from "../workspace-types";
 import { dateAt } from "../workspace-calendar-dates";
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
+import { Button } from "@/components/ui/button";
 
 const generationErrors: Record<string, string> = {
   not_configured: "Falta configurar la clave de API o modelo de IA en el servidor.",
@@ -70,21 +77,15 @@ export function PostDetailModal({
   const schedulePayload = isScheduleChanged ? { date: editingDate, time: editingTime } : {};
 
   return (
-    <div
-      className={styles.overlay}
-      onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
-      <section className={styles.detailPanel}>
-        <button className={styles.close} onClick={onClose}>
-          ×
-        </button>
-        <div className={styles.eyebrow}>DETALLE DE PUBLICACIÓN</div>
-        <h2>
-          {currentEvent?.title ||
-            (selected.text ? selected.text.split("\n")[0].trim() : "Publicación")}
-        </h2>
+    <Sheet open={true} modal={false} onOpenChange={(open) => { if (!open) onClose(); }}>
+      <SheetContent showClose={true}>
+        <SheetHeader>
+          <div className={styles.eyebrow}>DETALLE DE PUBLICACIÓN</div>
+          <SheetTitle>
+            {currentEvent?.title ||
+              (selected.text ? selected.text.split("\n")[0].trim() : "Publicación")}
+          </SheetTitle>
+        </SheetHeader>
         {isEditable ? (
           <div className={styles.schedulePicker}>
             <span className={styles.scheduleTz}>◷ Programar para:</span>
@@ -160,15 +161,15 @@ export function PostDetailModal({
                 onChange={(event) => setReconciliationId(event.target.value)}
               />
             </label>
-            <button
-              className={styles.secondaryButton}
+            <Button
+              variant="secondary"
               disabled={!reconciliationId.trim()}
               onClick={() => {
                 onConfirmReconciledPost(selected);
               }}
             >
               Confirmar que está programada
-            </button>
+            </Button>
             {selected.status === "needs_reconciliation" && (
               <>
                 <label className={styles.absenceConfirm}>
@@ -179,45 +180,43 @@ export function PostDetailModal({
                   />{" "}
                   He revisado el canal y no aparece ningún post coincidente.
                 </label>
-                <button
-                  className={styles.secondaryButton}
+                <Button
+                  variant="secondary"
                   disabled={!absenceConfirmed}
                   onClick={() => {
                     onConfirmPostAbsent(selected);
                   }}
                 >
                   Confirmar ausencia y permitir reintento
-                </button>
+                </Button>
               </>
             )}
           </div>
         )}
         <div className={styles.detailActions}>
           {(selected.status === "review" || selected.status === "failed") && (
-            <button
-              type="button"
-              className={styles.secondaryButton}
+            <Button
+              variant="secondary"
               disabled={deletingDraft}
               onClick={() => onRemoveDraft(selected)}
               aria-label={selected.status === "failed" ? "Eliminar publicación" : "Eliminar borrador"}
             >
               {deletingDraft ? "Eliminando…" : selected.status === "failed" ? "Eliminar publicación" : "Eliminar borrador"}
-            </button>
+            </Button>
           )}
           {isEditable && (
-            <button
-              className={styles.secondaryButton}
+            <Button
+              variant="secondary"
               onClick={() => {
                 onSavePostChanges(selected, { text: editing, ...schedulePayload });
               }}
             >
               Guardar cambios
-            </button>
+            </Button>
           )}
           {isEditable && onRegenerateAi && (
-            <button
-              type="button"
-              className={styles.secondaryButton}
+            <Button
+              variant="secondary"
               disabled={regeneratingAi || deletingDraft}
               onClick={async () => {
                 setRegeneratingAi(true);
@@ -233,28 +232,28 @@ export function PostDetailModal({
               aria-label="Reintentar generación con IA"
             >
               {regeneratingAi ? "Generando con IA…" : "✨ Reintentar con IA"}
-            </button>
+            </Button>
           )}
           {selected.status === "review" && (
-            <button
-              className={styles.approveButton}
+            <Button
+              variant="default"
               onClick={() => {
                 onSavePostChanges(selected, { text: editing, status: "approved", ...schedulePayload });
               }}
               disabled={!postValidation?.valid}
             >
               {persistent ? "✓ Aprobar, programar y guardar ejemplo" : "✓ Aprobar y guardar ejemplo"}
-            </button>
+            </Button>
           )}
           {selected.status === "failed" && (
-            <button
-              className={styles.approveButton}
+            <Button
+              variant="default"
               onClick={() => {
                 onRetryPost(selected);
               }}
             >
               Reintentar envío
-            </button>
+            </Button>
           )}
         </div>
         {aiError && <p role="alert" className={styles.deliveryError}>{aiError}</p>}
@@ -276,7 +275,7 @@ export function PostDetailModal({
                       ? "La red confirmó la publicación."
                       : "Edita y guarda el texto antes de aprobarlo."}
         </p>
-      </section>
-    </div>
+      </SheetContent>
+    </Sheet>
   );
 }

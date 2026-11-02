@@ -1,5 +1,6 @@
 import styles from "../../page.module.css";
 import { BrandIcon } from "../../brand-icon";
+import { Button } from "@/components/ui/button";
 import type { UserProfile } from "../../workspace-actions";
 
 interface WorkspaceSidebarProps {
@@ -39,8 +40,9 @@ export function WorkspaceSidebar({
       <p className={styles.navLabel}>ESPACIO DE TRABAJO</p>
       <nav>
         {SIDEBAR_ITEMS.map((item, i) => (
-          <button
+          <Button
             key={item}
+            variant="ghost"
             onClick={() => setTab(item)}
             className={tab === item ? styles.navActive : styles.navItem}
           >
@@ -50,7 +52,7 @@ export function WorkspaceSidebar({
             {item === "Revisiones" && reviewCount > 0 && (
               <span className={styles.navCount}>{reviewCount}</span>
             )}
-          </button>
+          </Button>
         ))}
       </nav>
       <div className={styles.sidebarBottom}>
@@ -58,9 +60,9 @@ export function WorkspaceSidebar({
           <div className={styles.planIcon}>✦</div>
           <b>Tu contenido, en orden</b>
           <p>Todo lo que necesitas para que cada evento llegue a más gente.</p>
-          <button onClick={() => setTab("Ajustes")}>
+          <Button variant="link" onClick={() => setTab("Ajustes")}>
             Configurar espacio <span>→</span>
-          </button>
+          </Button>
         </div>
         <div className={styles.profile}>
           <div className={styles.avatar}>

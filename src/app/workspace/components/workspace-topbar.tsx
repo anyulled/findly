@@ -1,4 +1,5 @@
 import styles from "../../page.module.css";
+import { Button } from "@/components/ui/button";
 
 interface WorkspaceTopbarProps {
   tab: string;
@@ -19,12 +20,12 @@ export function WorkspaceTopbar({ tab, syncingWorkspace, openAddForm }: Workspac
           </span>
         )}
         <span className={styles.tz}>◷ &nbsp;Europe/Madrid</span>
-        <button className={styles.helpBtn}>
+        <Button variant="ghost" size="sm" className={styles.helpBtn}>
           ? <span>Ayuda</span>
-        </button>
-        <button className={styles.addButton} onClick={openAddForm}>
+        </Button>
+        <Button variant="default" onClick={openAddForm}>
           <span>＋</span> Añadir evento
-        </button>
+        </Button>
       </div>
     </header>
   );

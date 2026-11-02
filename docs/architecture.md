@@ -57,6 +57,15 @@ An idempotency key should be based on event identity, Buffer account/channel and
 
 All event and publication times use `Europe/Madrid` and 13:00 for scheduled reminders. The two-week default is the current Monday-based week plus the next week. Week and natural-month views use the same data and status source. Entries should show the event, account, channel, scheduled time and current state. A Buffer schedule acceptance is distinct from a post being sent successfully.
 
+## UI Architecture, Primitives and Dark Mode
+
+Findly standardizes its design system components on shadcn/ui patterns backed by Base UI (`@base-ui/react`), providing robust accessibility, keyboard navigation, focus management, and zero layout shift:
+- **Buttons (`Button`)**: Standardized with semantic variants (`default`, `secondary`, `destructive`, `ghost`, `outline`, `link`) and sizes (`default`, `sm`, `lg`, `icon`).
+- **Modal Dialog (`Dialog`)**: Accessible overlay dialog replacing manual fixed containers for adding events, managing ARIA live regions and escape key bindings.
+- **Side Panel (`Sheet`)**: Drawer component anchored to the right edge with smooth transitions and backdrop for viewing and editing publication details, avoiding focus-trapping conflicts with background notifications.
+- **Tabs (`Tabs`)**: WAI-ARIA compliant tab navigation for switching between workspace views (Calendar, Reviews, Accounts, Settings).
+- **Dark Mode**: Automatic system preference matching implemented cleanly via `@media (prefers-color-scheme: dark)` and CSS custom properties (`--bg-canvas`, `--bg-surface`, `--text-primary`, `--border-default`, etc.), avoiding client JavaScript re-renders and preventing flash of unstyled content (FOUC).
+
 ## UI Feedback and Notifications
 
 User feedback and alert messages are delivered via an accessible Toast notification system built on Base UI (`@base-ui/react/toast`) adhering to shadcn/ui patterns:
