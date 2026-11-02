@@ -1,4 +1,4 @@
-import type { LumaDraftRepository, LumaDraftRow } from "./luma-drafts";
+import type { LumaDraftRepository, LumaDraftRow, LLMLogRow } from "./luma-drafts";
 import type { GenerationAccount, ExistingReminder } from "./groq-workflow";
 import type { ApprovedStyleExample } from "./groq";
 import { NETWORKS, type SocialNetwork } from "./social-validation";
@@ -6,6 +6,7 @@ import type { PostLanguage } from "./language";
 import { selectEventAccounts } from "./event-targets";
 import { managedAccount } from "./managed-accounts";
 import { dispatchApprovedPostsWithSupabase, type DispatchBudget } from "./approved-dispatch";
+import { logger } from "./logger";
 
 export interface SupabaseDraftRepositoryOptions {
   deliveryBudget?: DispatchBudget;
@@ -134,6 +135,15 @@ export function createSupabaseDraftRepository(
         .select("id");
       if (error) throw new Error("Unable to persist generated drafts");
       return data?.length ?? 0;
+    },
+
+    async insertLLMLogs(rows: LLMLogRow[]): Promise<void> {
+      if (rows.length === 0) return;
+      try {
+        await client.from("llm_generation_logs").insert(rows);
+      } catch (err) {
+        logger.warn("Unable to persist LLM generation logs", {}, err);
+      }
     },
 
     async scheduleAutomaticPosts(_ownerId: string, eventId: string, accountIds: string[]): Promise<void> {

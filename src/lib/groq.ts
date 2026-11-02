@@ -3,12 +3,16 @@ import {
   createDefaultLLMChain,
   type PostGenerationInput,
   type GeneratedPost,
+  type LLMAttemptHandler,
 } from "./llm-provider";
 
 export {
   type ApprovedStyleExample,
   type PostGenerationInput,
   type GeneratedPost,
+  type LLMAttemptRecord,
+  type LLMAttemptHandler,
+  type TokenUsage,
   PostGenerationError,
   buildFallbackDraftText,
   buildMessages,
@@ -22,6 +26,7 @@ export type GroqGenerationConfig = {
   openAiApiKey?: string;
   openAiModel?: string;
   fetchImpl?: typeof fetch;
+  onAttempt?: LLMAttemptHandler;
 };
 
 /** Generate and deterministically validate one platform-specific post using Groq. */
@@ -47,11 +52,14 @@ export async function generateSocialPostOrFallback(
   input: PostGenerationInput,
   config: GroqGenerationConfig = {},
 ): Promise<GeneratedPost> {
-  const chain = createDefaultLLMChain({
-    groqApiKey: config.apiKey,
-    groqModel: config.model,
-    openAiApiKey: config.openAiApiKey,
-    openAiModel: config.openAiModel,
-  });
+  const chain = createDefaultLLMChain(
+    {
+      groqApiKey: config.apiKey,
+      groqModel: config.model,
+      openAiApiKey: config.openAiApiKey,
+      openAiModel: config.openAiModel,
+    },
+    config.onAttempt,
+  );
   return chain.generate(input, config.fetchImpl ?? fetch);
 }

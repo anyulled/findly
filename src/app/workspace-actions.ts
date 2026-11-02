@@ -17,7 +17,7 @@ import { invalidateBufferSyncCache, syncBufferScheduledPosts } from "@/lib/buffe
 import { isOwnerEmailAuthorized } from "@/lib/sync-request-auth";
 import { isSubstackUrl, packLocationAndImage, unpackLocationAndImage } from "@/lib/substack";
 import { fetchOpenGraphImage } from "@/lib/opengraph";
-import { runAction, runVoidAction, UserFacingError, type ActionVoidResult } from "@/lib/action-result";
+import { runAction, runVoidAction, UserFacingError, type ActionResult, type ActionVoidResult } from "@/lib/action-result";
 import { logger } from "@/lib/logger";
 
 export type { UserProfile } from "@/lib/user-profile";
@@ -66,10 +66,39 @@ export type PostView = {
   status: "review" | "approved" | "scheduling" | "scheduled" | "published" | "failed" | "needs_reconciliation" | "discarded";
   lastError?: string | null;
   bufferPostId?: string | null;
-  generationOrigin?: "groq" | "fallback" | null;
+  generationOrigin?: "groq" | "openai" | "fallback" | null;
   generationErrorCode?: string | null;
   leadDays?: 14 | 7 | 1;
   language?: PostLanguage;
+};
+
+export type LLMLogView = {
+  id: string;
+  provider: "groq" | "openai" | "fallback";
+  model: string;
+  status: "success" | "error";
+  errorCode?: string | null;
+  latencyMs?: number | null;
+  promptTokens?: number | null;
+  completionTokens?: number | null;
+  totalTokens?: number | null;
+  createdAt: string;
+};
+
+export type WorkspaceStats = {
+  postsSummary: {
+    total: number;
+    groq: number;
+    openai: number;
+    fallback: number;
+  };
+  callsSummary: {
+    total: number;
+    groq: { total: number; success: number; error: number; avgLatencyMs: number; totalTokens: number };
+    openai: { total: number; success: number; error: number; avgLatencyMs: number; totalTokens: number };
+    fallback: { total: number };
+  };
+  recentLogs: LLMLogView[];
 };
 
 export type SourceView = {
@@ -141,7 +170,7 @@ function mapPostRowToView(
     language: string;
     last_error?: string | null;
     buffer_post_id?: string | null;
-    generation_origin?: "groq" | "fallback" | null;
+    generation_origin?: "groq" | "openai" | "fallback" | null;
     generation_error_code?: string | null;
   },
   accountNames: Map<string, string>,
@@ -639,4 +668,130 @@ export async function updatePublishingMode(mode: "review" | "automatic"): Promis
     }, { onConflict: "owner_id,key" });
     if (error) throw new UserFacingError("No se pudo guardar el modo de publicación.");
   }, { defaultErrorMessage: "No se pudo guardar el modo de publicación." });
+}
+
+export async function loadWorkspaceStats(): Promise<ActionResult<WorkspaceStats>> {
+  return runAction("loadWorkspaceStats", async () => {
+    const { supabase, ownerId } = await authorizedClient();
+
+    const postsResult = await supabase
+      .from("posts")
+      .select("generation_origin")
+      .eq("owner_id", ownerId);
+
+    if (postsResult.error) {
+      throw new Error("No se pudieron cargar los datos de publicaciones.");
+    }
+
+    const postsSummary = {
+      total: postsResult.data?.length ?? 0,
+      groq: 0,
+      openai: 0,
+      fallback: 0,
+    };
+
+    for (const post of postsResult.data ?? []) {
+      if (post.generation_origin === "groq") postsSummary.groq++;
+      else if (post.generation_origin === "openai") postsSummary.openai++;
+      else if (post.generation_origin === "fallback") postsSummary.fallback++;
+    }
+
+    const logsResult = await supabase
+      .from("llm_generation_logs")
+      .select("id,provider,model,status,error_code,latency_ms,prompt_tokens,completion_tokens,total_tokens,created_at")
+      .eq("owner_id", ownerId)
+      .order("created_at", { ascending: false })
+      .limit(200);
+
+    const logs: LLMLogView[] = (logsResult.data ?? []).map((row: {
+      id: string;
+      provider: string;
+      model: string;
+      status: string;
+      error_code: string | null;
+      latency_ms: number | null;
+      prompt_tokens: number | null;
+      completion_tokens: number | null;
+      total_tokens: number | null;
+      created_at: string;
+    }) => ({
+      id: row.id,
+      provider: row.provider as "groq" | "openai" | "fallback",
+      model: row.model,
+      status: row.status as "success" | "error",
+      errorCode: row.error_code,
+      latencyMs: row.latency_ms,
+      promptTokens: row.prompt_tokens,
+      completionTokens: row.completion_tokens,
+      totalTokens: row.total_tokens,
+      createdAt: row.created_at,
+    }));
+
+    let groqSuccess = 0;
+    let groqError = 0;
+    let groqLatencySum = 0;
+    let groqLatencyCount = 0;
+    let groqTokens = 0;
+
+    let openAiSuccess = 0;
+    let openAiError = 0;
+    let openAiLatencySum = 0;
+    let openAiLatencyCount = 0;
+    let openAiTokens = 0;
+
+    let fallbackCalls = 0;
+
+    for (const log of logs) {
+      if (log.provider === "groq") {
+        if (log.status === "success") groqSuccess++;
+        else groqError++;
+        if (typeof log.latencyMs === "number") {
+          groqLatencySum += log.latencyMs;
+          groqLatencyCount++;
+        }
+        if (typeof log.totalTokens === "number") {
+          groqTokens += log.totalTokens;
+        }
+      } else if (log.provider === "openai") {
+        if (log.status === "success") openAiSuccess++;
+        else openAiError++;
+        if (typeof log.latencyMs === "number") {
+          openAiLatencySum += log.latencyMs;
+          openAiLatencyCount++;
+        }
+        if (typeof log.totalTokens === "number") {
+          openAiTokens += log.totalTokens;
+        }
+      } else {
+        fallbackCalls++;
+      }
+    }
+
+    const callsSummary = {
+      total: logs.length,
+      groq: {
+        total: groqSuccess + groqError,
+        success: groqSuccess,
+        error: groqError,
+        avgLatencyMs: groqLatencyCount > 0 ? Math.round(groqLatencySum / groqLatencyCount) : 0,
+        totalTokens: groqTokens,
+      },
+      openai: {
+        total: openAiSuccess + openAiError,
+        success: openAiSuccess,
+        error: openAiError,
+        avgLatencyMs: openAiLatencyCount > 0 ? Math.round(openAiLatencySum / openAiLatencyCount) : 0,
+        totalTokens: openAiTokens,
+      },
+      fallback: {
+        total: fallbackCalls,
+      },
+    };
+
+    return {
+      postsSummary,
+      callsSummary,
+      recentLogs: logs,
+    };
+  });
 }

@@ -42,7 +42,7 @@ export type GeneratedReviewDraft = {
   leadDays: 14 | 7 | 1;
   language: PostLanguage;
   isFallback?: boolean;
-  generationOrigin?: "groq" | "fallback";
+  generationOrigin?: "groq" | "openai" | "fallback";
   generationError?: GeneratedPost["generationError"];
 };
 
@@ -170,7 +170,11 @@ export async function generateEventDrafts({
       status: "review" as const,
       leadDays,
       language,
-      ...("model" in generated && generated.model ? { generationOrigin: generated.model === "fallback" ? "fallback" as const : "groq" as const } : {}),
+      ...("provider" in generated && generated.provider
+        ? { generationOrigin: generated.provider }
+        : "model" in generated && generated.model
+          ? { generationOrigin: generated.model === "fallback" ? "fallback" as const : "groq" as const }
+          : {}),
       ...("model" in generated && generated.model === "fallback" ? { isFallback: true } : {}),
       ...("generationError" in generated && generated.generationError ? { generationError: generated.generationError } : {}),
     };

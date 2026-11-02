@@ -7,6 +7,7 @@ import { detectTitleLanguage } from "@/lib/language";
 import { sourceForEventUrl } from "@/lib/event-source";
 import { isSubstackUrl } from "@/lib/substack";
 import { selectEventAccounts } from "@/lib/event-targets";
+import { countReviewPosts } from "@/lib/reviews";
 import {
   approvePost,
   confirmPostMissingFromBuffer,
@@ -225,8 +226,9 @@ export function useWorkspace() {
     range === "Mes"
       ? anchor.toLocaleDateString("es-ES", { month: "long", year: "numeric" })
       : `${first.toLocaleDateString("es-ES", { day: "numeric", month: "short" })} – ${last.toLocaleDateString("es-ES", { day: "numeric", month: "short", year: "numeric" })}`;
-  const reviewCount = posts.filter((p) => p.status === "review" || p.status === "failed").length;
-  const pendingReviewCount = posts.filter((p) => p.status === "review").length;
+  const reviewCounts = useMemo(() => countReviewPosts(posts), [posts]);
+  const reviewCount = reviewCounts.total;
+  const pendingReviewCount = reviewCounts.review;
 
   function navigate(direction: number) {
     if (range === "Mes") {
@@ -563,7 +565,11 @@ export function useWorkspace() {
     try {
       if (persistent) {
         const result = await discardDraft(post.id);
-        if (!result.success) { setDraftDeleteError(result.error); return; }
+        if (!result.success) {
+          setDraftDeleteError(result.error);
+          setFeedback(result.error);
+          return;
+        }
         // Keep the identity to prevent this reminder from being generated again.
         setPosts((all) => all.map((item) => item.id === post.id ? { ...item, status: "discarded", text: "", lastError: null } : item));
       } else {
@@ -573,6 +579,7 @@ export function useWorkspace() {
       setFeedback(post.status === "failed" ? "Publicación eliminada." : "Borrador eliminado.");
     } catch {
       setDraftDeleteError("No se pudo eliminar el borrador.");
+      setFeedback("No se pudo eliminar el borrador.");
     } finally {
       setDeletingDraft(false);
     }

@@ -10,6 +10,7 @@ import { ReviewList } from "./components/review-list";
 import { EventList } from "./components/event-list";
 import { AccountSettings } from "./components/account-settings";
 import { SettingsView } from "./components/settings-view";
+import { StatsView } from "./components/stats-view";
 import { PostDetailModal } from "./components/post-detail-modal";
 import { AddEventModal } from "./components/add-event-modal";
 import { WorkspaceErrorBoundary } from "./components/workspace-error-boundary";
@@ -158,6 +159,12 @@ function Dashboard() {
                   void ws.changeBufferChannel(account, network, channelId);
                 }}
               />
+            </WorkspaceErrorBoundary>
+          )}
+
+          {ws.tab === "Estadísticas" && (
+            <WorkspaceErrorBoundary fallbackTitle="Error al cargar las estadísticas">
+              <StatsView posts={ws.posts} />
             </WorkspaceErrorBoundary>
           )}
 
