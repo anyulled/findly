@@ -26,6 +26,7 @@ export interface PostToSchedule {
 export interface PostContext {
   eventUrl?: string | null;
   imageUrl?: string | null;
+  customScheduled?: boolean;
 }
 
 export interface PostPublishingRepository {
@@ -61,9 +62,9 @@ type SupabasePublisherClient = {
     };
   };
   from(table: "posts"): {
-    select(columns: "event_id"): {
+    select(columns: "event_id" | "event_id,custom_scheduled"): {
       eq(column: string, value: string): {
-        eq(column: string, value: string): { maybeSingle(): PromiseLike<DatabaseResult<{ event_id: string | null }>> };
+        eq(column: string, value: string): { maybeSingle(): PromiseLike<DatabaseResult<{ event_id: string | null; custom_scheduled?: boolean }>> };
       };
     };
   };
@@ -134,7 +135,7 @@ export class SupabasePostPublishingRepository implements PostPublishingRepositor
   async postContext(postId: string): Promise<PostContext | null> {
     const postQuery = (this.supabase as Partial<SupabasePublisherClient>).from?.("posts");
     if (!postQuery) return null;
-    const { data: postRow } = await postQuery.select("event_id")
+    const { data: postRow } = await postQuery.select("event_id,custom_scheduled")
       .eq("owner_id", this.ownerId).eq("id", postId).maybeSingle();
     if (!postRow?.event_id) return null;
     const eventQuery = (this.supabase as Partial<SupabasePublisherClient>).from?.("events");
@@ -147,6 +148,7 @@ export class SupabasePostPublishingRepository implements PostPublishingRepositor
     return {
       eventUrl: eventRow.event_url,
       imageUrl: resolvedImage ?? null,
+      customScheduled: Boolean(postRow && "custom_scheduled" in postRow && postRow.custom_scheduled),
     };
   }
 
@@ -177,7 +179,7 @@ function buildSchedulePayload(
   channelId: string,
   context: PostContext | null,
 ): { ok: true; input: ScheduleBufferPostInput } | { ok: false; message: string } {
-  const useQueueSlot = isSubstackUrl(context?.eventUrl);
+  const useQueueSlot = isSubstackUrl(context?.eventUrl) && !context?.customScheduled;
   const dueAt = new Date(post.due_at);
   if (!useQueueSlot) {
     if (!Number.isFinite(dueAt.getTime())) {

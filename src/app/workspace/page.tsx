@@ -215,6 +215,7 @@ function Dashboard() {
           onConfirmPostAbsent={(post) => {
             void ws.confirmPostAbsent(post);
           }}
+          onRegenerateAi={(post) => ws.regeneratePostAi(post)}
         />
       )}
 

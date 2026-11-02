@@ -406,3 +406,45 @@ test("navigates to Revisiones tab, filters posts, approves single and batch, and
   await expect(page.getByRole("heading", { name: "¡Todo al día!" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Ver Calendario" })).toBeVisible();
 });
+
+test("allows changing publication date and retrying AI generation in detail modal", async ({ page }) => {
+  const date = new Date();
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Madrid",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+  const values = Object.fromEntries(parts.map(({ type, value }) => [type, value]));
+  const eventDate = new Date(Date.UTC(Number(values.year), Number(values.month) - 1, Number(values.day) + 8));
+  const dateValue = eventDate.toISOString().slice(0, 10);
+
+  await page.getByRole("button", { name: "Añadir evento" }).first().click();
+  await page.getByLabel("TÍTULO").fill("Reschedule Modal Event");
+  await page.getByLabel("FECHA").fill(dateValue);
+  await page.getByLabel("HORA").fill("18:00");
+  await page.getByRole("button", { name: "Crear evento" }).click();
+
+  await page.getByRole("button", { name: "Calendario" }).click();
+  const eventPost = page.getByRole("button", { name: /Reschedule Modal Event/ }).first();
+  await eventPost.click();
+
+  const dateInput = page.getByLabel("Fecha programada");
+  const timeInput = page.getByLabel("Hora programada");
+  await expect(dateInput).toBeVisible();
+  await expect(timeInput).toBeVisible();
+
+  const retryAiBtn = page.getByRole("button", { name: "Reintentar generación con IA" });
+  await expect(retryAiBtn).toBeVisible();
+  await retryAiBtn.click();
+  await expect(page.getByText("En la demo la regeneración con IA no está disponible.")).toBeVisible();
+
+  // Test changing schedule date
+  const newDate = new Date(Date.UTC(Number(values.year), Number(values.month) - 1, Number(values.day) + 2)).toISOString().slice(0, 10);
+  await dateInput.fill(newDate);
+  await timeInput.fill("15:30");
+  await page.getByRole("button", { name: "Guardar cambios" }).click();
+
+  // Modal closes and changes are saved
+  await expect(page.getByText("DETALLE DE PUBLICACIÓN")).not.toBeVisible();
+});
