@@ -10,8 +10,8 @@ interface WorkspaceSidebarProps {
   profile: UserProfile;
 }
 
-const SIDEBAR_ITEMS = ["Calendario", "Eventos", "Cuentas", "Ajustes"] as const;
-const SIDEBAR_ICONS = ["▦", "◷", "♙", "⚙"] as const;
+const SIDEBAR_ITEMS = ["Calendario", "Eventos", "Cuentas", "Estadísticas", "Ajustes"] as const;
+const SIDEBAR_ICONS = ["▦", "◷", "♙", "📊", "⚙"] as const;
 
 export function WorkspaceSidebar({
   tab,

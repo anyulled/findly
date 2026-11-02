@@ -17,7 +17,7 @@ import { invalidateBufferSyncCache, syncBufferScheduledPosts } from "@/lib/buffe
 import { isOwnerEmailAuthorized } from "@/lib/sync-request-auth";
 import { isSubstackUrl, packLocationAndImage, unpackLocationAndImage } from "@/lib/substack";
 import { fetchOpenGraphImage } from "@/lib/opengraph";
-import { runAction, runVoidAction, UserFacingError, type ActionVoidResult } from "@/lib/action-result";
+import { runAction, runVoidAction, UserFacingError, type ActionResult, type ActionVoidResult } from "@/lib/action-result";
 import { logger } from "@/lib/logger";
 
 export type { UserProfile } from "@/lib/user-profile";
@@ -66,10 +66,39 @@ export type PostView = {
   status: "review" | "approved" | "scheduling" | "scheduled" | "published" | "failed" | "needs_reconciliation" | "discarded";
   lastError?: string | null;
   bufferPostId?: string | null;
-  generationOrigin?: "groq" | "fallback" | null;
+  generationOrigin?: "groq" | "openai" | "fallback" | null;
   generationErrorCode?: string | null;
   leadDays?: 14 | 7 | 1;
   language?: PostLanguage;
+};
+
+export type LLMLogView = {
+  id: string;
+  provider: "groq" | "openai" | "fallback";
+  model: string;
+  status: "success" | "error";
+  errorCode?: string | null;
+  latencyMs?: number | null;
+  promptTokens?: number | null;
+  completionTokens?: number | null;
+  totalTokens?: number | null;
+  createdAt: string;
+};
+
+export type WorkspaceStats = {
+  postsSummary: {
+    total: number;
+    groq: number;
+    openai: number;
+    fallback: number;
+  };
+  callsSummary: {
+    total: number;
+    groq: { total: number; success: number; error: number; avgLatencyMs: number; totalTokens: number };
+    openai: { total: number; success: number; error: number; avgLatencyMs: number; totalTokens: number };
+    fallback: { total: number };
+  };
+  recentLogs: LLMLogView[];
 };
 
 export type SourceView = {
@@ -143,7 +172,7 @@ function mapPostRowToView(
     language: string;
     last_error?: string | null;
     buffer_post_id?: string | null;
-    generation_origin?: "groq" | "fallback" | null;
+    generation_origin?: "groq" | "openai" | "fallback" | null;
     generation_error_code?: string | null;
   },
   accountNames: Map<string, string>,
@@ -665,4 +694,119 @@ export async function updatePublishingMode(mode: "review" | "automatic"): Promis
     }, { onConflict: "owner_id,key" });
     if (error) throw new UserFacingError("No se pudo guardar el modo de publicación.");
   }, { defaultErrorMessage: "No se pudo guardar el modo de publicación." });
+}
+
+function aggregatePostSummary(posts: Array<{ generation_origin?: string | null }>) {
+  const summary = { total: posts.length, groq: 0, openai: 0, fallback: 0 };
+  for (const post of posts) {
+    if (post.generation_origin === "groq") summary.groq++;
+    else if (post.generation_origin === "openai") summary.openai++;
+    else if (post.generation_origin === "fallback") summary.fallback++;
+  }
+  return summary;
+}
+
+type ProviderStatsAccumulator = {
+  success: number;
+  error: number;
+  latencySum: number;
+  latencyCount: number;
+  tokens: number;
+};
+
+function recordLogMetrics(acc: ProviderStatsAccumulator, log: LLMLogView) {
+  if (log.status === "success") acc.success++;
+  else acc.error++;
+  if (typeof log.latencyMs === "number") {
+    acc.latencySum += log.latencyMs;
+    acc.latencyCount++;
+  }
+  if (typeof log.totalTokens === "number") {
+    acc.tokens += log.totalTokens;
+  }
+}
+
+function summarizeProvider(acc: ProviderStatsAccumulator) {
+  return {
+    total: acc.success + acc.error,
+    success: acc.success,
+    error: acc.error,
+    avgLatencyMs: acc.latencyCount > 0 ? Math.round(acc.latencySum / acc.latencyCount) : 0,
+    totalTokens: acc.tokens,
+  };
+}
+
+function aggregateCallsSummary(logs: LLMLogView[]) {
+  const groq: ProviderStatsAccumulator = { success: 0, error: 0, latencySum: 0, latencyCount: 0, tokens: 0 };
+  const openai: ProviderStatsAccumulator = { success: 0, error: 0, latencySum: 0, latencyCount: 0, tokens: 0 };
+  let fallbackCalls = 0;
+
+  for (const log of logs) {
+    if (log.provider === "groq") recordLogMetrics(groq, log);
+    else if (log.provider === "openai") recordLogMetrics(openai, log);
+    else fallbackCalls++;
+  }
+
+  return {
+    total: logs.length,
+    groq: summarizeProvider(groq),
+    openai: summarizeProvider(openai),
+    fallback: { total: fallbackCalls },
+  };
+}
+
+function mapLogRows(rows: Array<{
+  id: string;
+  provider: string;
+  model: string;
+  status: string;
+  error_code: string | null;
+  latency_ms: number | null;
+  prompt_tokens: number | null;
+  completion_tokens: number | null;
+  total_tokens: number | null;
+  created_at: string;
+}>): LLMLogView[] {
+  return rows.map((row) => ({
+    id: row.id,
+    provider: row.provider as "groq" | "openai" | "fallback",
+    model: row.model,
+    status: row.status as "success" | "error",
+    errorCode: row.error_code,
+    latencyMs: row.latency_ms,
+    promptTokens: row.prompt_tokens,
+    completionTokens: row.completion_tokens,
+    totalTokens: row.total_tokens,
+    createdAt: row.created_at,
+  }));
+}
+
+export async function loadWorkspaceStats(): Promise<ActionResult<WorkspaceStats>> {
+  return runAction("loadWorkspaceStats", async () => {
+    const { supabase, ownerId } = await authorizedClient();
+
+    const postsResult = await supabase
+      .from("posts")
+      .select("generation_origin")
+      .eq("owner_id", ownerId);
+
+    if (postsResult.error) {
+      throw new Error("No se pudieron cargar los datos de publicaciones.");
+    }
+
+    const logsResult = await supabase
+      .from("llm_generation_logs")
+      .select("id,provider,model,status,error_code,latency_ms,prompt_tokens,completion_tokens,total_tokens,created_at")
+      .eq("owner_id", ownerId)
+      .order("created_at", { ascending: false })
+      .limit(200);
+
+    const logs = mapLogRows(logsResult.data ?? []);
+
+    return {
+      postsSummary: aggregatePostSummary(postsResult.data ?? []),
+      callsSummary: aggregateCallsSummary(logs),
+      recentLogs: logs,
+    };
+  });
 }

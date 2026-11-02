@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { generateLumaEventDrafts, type ImportedLumaEvent, type LumaDraftRepository, type LumaDraftRow } from "../src/lib/luma-drafts";
+import { generateLumaEventDrafts, createTrackingGenerator, toAttemptLogRow, type ImportedLumaEvent, type LumaDraftRepository, type LumaDraftRow } from "../src/lib/luma-drafts";
 import type { GenerationAccount } from "../src/lib/groq-workflow";
 import type { ApprovedStyleExample, PostGenerationInput } from "../src/lib/groq";
 import { selectEventAccounts } from "../src/lib/event-targets";
@@ -230,4 +230,113 @@ test("sets last_error on draft rows when fallback generator is used", async () =
     inserted.every((row) => row.last_error === "Generado con plantilla de respaldo (la generación con IA no estuvo disponible o no superó la validación)."),
     true,
   );
+});
+
+test("persists openai provenance and records LLM attempt logs when insertLLMLogs is available", async () => {
+  const inserted: LumaDraftRow[] = [];
+  const logs: Record<string, unknown>[] = [];
+  const repository: LumaDraftRepository = {
+    async getPublishingMode() { return "review"; },
+    async listLinkedAccounts() { return [{ id: "a", name: "Community", voice: "", networks: ["LinkedIn"] }]; },
+    async listExistingReminders() { return []; },
+    async listApprovedExamples() { return []; },
+    async insertDrafts(rows) { inserted.push(...rows); return rows.length; },
+    async insertLLMLogs(rows) { logs.push(...rows); },
+  };
+  await generateLumaEventDrafts(
+    event,
+    repository,
+    async () => ({
+      text: "OpenAI generated text",
+      model: "gpt-6-luna",
+      provider: "openai" as const,
+      validation: { valid: true, count: 21, limit: 3000, message: "ok" },
+    }),
+    new Date("2029-12-01T00:00:00.000Z"),
+  );
+  assert.equal(inserted.length, 3);
+  assert.ok(inserted.every((row) => row.generation_origin === "openai"));
+  assert.ok(logs.length >= 3);
+  assert.ok(logs.every((log) => log.provider === "openai" && log.status === "success"));
+});
+
+test("createTrackingGenerator handles direct results and fallback provenance", async () => {
+  const logs: Record<string, unknown>[] = [];
+  const dummyInput = {} as unknown as PostGenerationInput;
+  const tracking1 = createTrackingGenerator(async () => ({ text: "only text" }), "u-1", "e-1", logs as never);
+  await tracking1(dummyInput);
+  assert.equal(logs.length, 0);
+
+  const tracking2 = createTrackingGenerator(
+    async () => ({ text: "model text", model: "fallback", generationError: "rate_limited" as const, latencyMs: 50 }),
+    "u-1",
+    "e-1",
+    logs as never,
+  );
+  await tracking2(dummyInput);
+  assert.equal(logs.length, 1);
+  assert.equal(logs[0]?.provider, "fallback");
+  assert.equal(logs[0]?.error_code, "rate_limited");
+  assert.equal(logs[0]?.latency_ms, 50);
+
+  const tracking3 = createTrackingGenerator(
+    async () => ({ text: "groq text", model: "llama-3", latencyMs: 120 }),
+    "u-1",
+    "e-1",
+    logs as never,
+  );
+  await tracking3(dummyInput);
+  assert.equal(logs.length, 2);
+  assert.equal(logs[1]?.provider, "groq");
+  assert.equal(logs[1]?.latency_ms, 120);
+});
+
+test("toAttemptLogRow serializes full attempt record correctly", () => {
+  const row = toAttemptLogRow("user-abc", "event-xyz", {
+    provider: "groq",
+    model: "llama-3.3-70b",
+    status: "success",
+    errorCode: undefined,
+    latencyMs: 140,
+    promptTokens: 250,
+    completionTokens: 80,
+    totalTokens: 330,
+  });
+  assert.deepEqual(row, {
+    owner_id: "user-abc",
+    event_id: "event-xyz",
+    provider: "groq",
+    model: "llama-3.3-70b",
+    status: "success",
+    error_code: null,
+    latency_ms: 140,
+    prompt_tokens: 250,
+    completion_tokens: 80,
+    total_tokens: 330,
+  });
+});
+
+test("generateLumaEventDrafts resolves slots for substack events", async () => {
+  const substackEvent: ImportedLumaEvent = {
+    ...event,
+    id: "sub-event-1",
+    event_url: "https://mynewsletter.substack.com/p/first-post",
+  };
+  const inserted: LumaDraftRow[] = [];
+  const repository: LumaDraftRepository = {
+    async listLinkedAccounts() {
+      return [{ id: "acc-personal", name: "Personal", voice: "p", networks: ["LinkedIn"] }];
+    },
+    async listExistingReminders() { return []; },
+    async listApprovedExamples() { return []; },
+    async insertDrafts(rows) { inserted.push(...rows); return rows.length; },
+  };
+  const count = await generateLumaEventDrafts(
+    substackEvent,
+    repository,
+    async () => ({ text: "Substack post" }),
+    new Date("2029-12-01T00:00:00.000Z"),
+  );
+  assert.equal(count, 1);
+  assert.equal(inserted.length, 1);
 });

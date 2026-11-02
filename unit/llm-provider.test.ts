@@ -101,10 +101,42 @@ describe("OpenAICompatibleProvider", () => {
     assert.equal(result.provider, "openai");
     assert.equal(result.model, "gpt-6-luna");
     assert.equal(result.validation.valid, true);
+    assert.equal(typeof result.latencyMs, "number");
     assert.equal(capturedUrl, "https://api.openai.com/v1/chat/completions");
     assert.equal(capturedAuth, "Bearer sk-mock-key");
     assert.equal(capturedBody.max_completion_tokens, 1500);
     assert.equal(capturedBody.temperature, undefined);
+  });
+
+  it("extracts token usage metrics from api response payload", async () => {
+    const fetchImpl: typeof fetch = async () =>
+      new Response(
+        JSON.stringify({
+          choices: [{ message: { content: "Post with usage" } }],
+          usage: {
+            prompt_tokens: 120,
+            completion_tokens: 35,
+            total_tokens: 155,
+          },
+        }),
+        { status: 200 },
+      );
+
+    const provider = new OpenAICompatibleProvider(
+      "groq",
+      "Groq",
+      "https://api.groq.com/openai/v1/chat/completions",
+      () => "gsk-key",
+      () => "llama-3.3-70b-versatile",
+    );
+
+    const result = await provider.generate(mockInput, fetchImpl);
+    assert.equal(result.text, "Post with usage");
+    assert.deepEqual(result.usage, {
+      promptTokens: 120,
+      completionTokens: 35,
+      totalTokens: 155,
+    });
   });
 
   it("handles empty and unreadable responses safely", async () => {
@@ -222,6 +254,51 @@ describe("LLMFallbackChain", () => {
     assert.equal(result.text, "OpenAI fallback post");
     assert.equal(result.provider, "openai");
     assert.equal(result.model, "gpt-6-luna");
+  });
+
+  it("notifies onAttempt for failed attempts and subsequent fallback success", async () => {
+    const attempts: Array<{ provider: string; status: string; errorCode?: string }> = [];
+    const primary: LLMProvider = {
+      id: "groq",
+      name: "Groq",
+      isConfigured: () => true,
+      generate: async () => {
+        throw new PostGenerationError("Groq rate limited", "rate_limited");
+      },
+    };
+    const secondary: LLMProvider = {
+      id: "openai",
+      name: "OpenAI",
+      isConfigured: () => true,
+      generate: async () => ({
+        text: "OpenAI post",
+        model: "gpt-6-luna",
+        provider: "openai",
+        validation: validatePost("Bluesky", "OpenAI post"),
+      }),
+    };
+
+    const chain = new LLMFallbackChain([primary, secondary], (attempt) => {
+      attempts.push({
+        provider: attempt.provider,
+        status: attempt.status,
+        errorCode: attempt.errorCode,
+      });
+    });
+
+    const result = await chain.generate(mockInput);
+    assert.equal(result.provider, "openai");
+    assert.equal(attempts.length, 2);
+    assert.deepEqual(attempts[0], {
+      provider: "groq",
+      status: "error",
+      errorCode: "rate_limited",
+    });
+    assert.deepEqual(attempts[1], {
+      provider: "openai",
+      status: "success",
+      errorCode: undefined,
+    });
   });
 
   it("falls back to deterministic generator when both Groq and OpenAI fail", async () => {
