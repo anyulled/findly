@@ -333,3 +333,31 @@ test("syncLumaSources imports Meetup RSS sources and generates drafts", async ()
   assert.equal(inserted[0]?.external_id, "event_317230196@meetup.com");
   assert.equal(inserted[0]?.starts_at, "2026-11-19T17:30:00.000Z");
 });
+
+test("syncLumaSources filters out past or same-day events when minStartDate is provided", async () => {
+  const inserted: PersistableEvent[] = [];
+  const repository: SyncRepository = {
+    async listEnabledLumaSources() {
+      return [{ id: "source-1", ownerId: "owner-1", name: "Luma", feedUrl: "https://example.test/cal.ics" }];
+    },
+    async upsertEvents(events) {
+      inserted.push(...events);
+      return { inserted: events.map((e) => ({ ...e, id: `id-${e.external_id}` })), available: [] };
+    },
+  };
+
+  // fixture has events in 2026-03 and 2026-04
+  // Passing minStartDate = 2026-03-26 should filter out earlier events
+  const result = await syncLumaSources(
+    repository,
+    async () => fixture,
+    async () => 1,
+    { minStartDate: "2026-03-26" },
+  );
+
+  assert.equal(result.feedsSucceeded, 1);
+  // Events with date <= 2026-03-26 are filtered out
+  for (const ev of inserted) {
+    assert.ok(ev.starts_at > "2026-03-26");
+  }
+});

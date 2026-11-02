@@ -147,3 +147,7 @@ export function parseSubstackFeed(content: string, feedUrl: string): SubstackPos
   }
   return parseSubstackRssFeed(trimmed, feedUrl);
 }
+
+export function sortSubstackPostsReverseChronological(posts: readonly SubstackPostItem[]): SubstackPostItem[] {
+  return [...posts].sort((a, b) => b.publishedAt.localeCompare(a.publishedAt));
+}

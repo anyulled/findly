@@ -1,4 +1,5 @@
 import { detectTitleLanguage } from "./language";
+import { formatMadridDateTime } from "./madrid-time";
 import { parseLumaIcal, type LumaCalendarEvent } from "./luma-ical";
 import type { ImportedLumaEvent } from "./luma-drafts";
 import { isSubstackUrl, normalizeSubstackPostsApiUrl, packLocationAndImage, parseSubstackFeed } from "./substack";
@@ -89,12 +90,25 @@ async function generateDraftsForPersistedEvents(
   }
 }
 
+export type SyncOptions = {
+  minStartDate?: string;
+};
+
+export function filterUpcomingEvents(rows: readonly PersistableEvent[], todayMadridDate: string): PersistableEvent[] {
+  return rows.filter((row) => formatMadridDateTime(row.starts_at).date > todayMadridDate);
+}
+
+export function extractSourceEvents(source: LumaSource, rawContent: string): { rows: PersistableEvent[]; skippedEvents: number } {
+  return parseSourceRows(source, rawContent);
+}
+
 async function syncSingleSource(
   source: LumaSource,
   fetchFeed: FeedFetcher,
   repository: SyncRepository,
   generateDrafts: DraftGenerator | undefined,
   result: SyncResult,
+  options?: SyncOptions,
 ): Promise<void> {
   let parsed: { rows: PersistableEvent[]; skippedEvents: number };
   try {
@@ -107,7 +121,10 @@ async function syncSingleSource(
     return;
   }
   if (parsed.skippedEvents) result.issues.push({ sourceId: source.id, code: "invalid_calendar", skippedEvents: parsed.skippedEvents });
-  const rows = parsed.rows;
+  const minDate = options?.minStartDate;
+  const rows = minDate
+    ? parsed.rows.filter((row) => formatMadridDateTime(row.starts_at).date > minDate)
+    : parsed.rows;
   if (!rows.length) return;
 
   let persisted: { inserted: ImportedLumaEvent[]; available: ImportedLumaEvent[] };
@@ -127,6 +144,7 @@ export async function syncLumaSources(
   repository: SyncRepository,
   fetchFeed: FeedFetcher,
   generateDrafts?: DraftGenerator,
+  options?: SyncOptions,
 ): Promise<SyncResult> {
   const sources = await repository.listEnabledLumaSources();
   const result: SyncResult = {
@@ -134,7 +152,7 @@ export async function syncLumaSources(
     draftsCreated: 0, draftEventsSkipped: 0, draftEventsFailed: 0, issues: [],
   };
   for (const source of sources) {
-    await syncSingleSource(source, fetchFeed, repository, generateDrafts, result);
+    await syncSingleSource(source, fetchFeed, repository, generateDrafts, result, options);
   }
   return result;
 }
