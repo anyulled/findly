@@ -1,0 +1,108 @@
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  white-space: nowrap;
+  border-radius: 8px;
+  font-family: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease, opacity 150ms ease;
+  outline: none;
+  text-decoration: none;
+  border: 1px solid transparent;
+}
+
+.button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.sizeDefault {
+  height: 38px;
+  padding: 8px 14px;
+  font-size: 14px;
+}
+
+.sizeSm {
+  height: 32px;
+  padding: 6px 10px;
+  font-size: 13px;
+  border-radius: 6px;
+}
+
+.sizeLg {
+  height: 44px;
+  padding: 10px 20px;
+  font-size: 15px;
+}
+
+.sizeIcon {
+  height: 36px;
+  width: 36px;
+  padding: 0;
+}
+
+.variantDefault {
+  background: var(--primary, #7361dc);
+  color: var(--primary-foreground, #ffffff);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.variantDefault:hover:not(:disabled) {
+  background: var(--primary-hover, #5f4dc9);
+}
+
+.variantSecondary {
+  background: var(--bg-surface-subtle, #f4f3fb);
+  color: var(--text-primary, #202229);
+  border-color: var(--border-default, #ececf0);
+}
+
+.variantSecondary:hover:not(:disabled) {
+  background: var(--bg-surface-hover, #ebe8fb);
+}
+
+.variantOutline {
+  background: transparent;
+  color: var(--text-primary, #202229);
+  border-color: var(--border-default, #ececf0);
+}
+
+.variantOutline:hover:not(:disabled) {
+  background: var(--bg-surface-subtle, #f7f7fa);
+  border-color: var(--border-strong, #d5d4dd);
+}
+
+.variantGhost {
+  background: transparent;
+  color: var(--text-primary, #202229);
+  border-color: transparent;
+}
+
+.variantGhost:hover:not(:disabled) {
+  background: var(--bg-surface-subtle, #f7f7fa);
+}
+
+.variantDestructive {
+  background: var(--destructive, #dc2626);
+  color: #ffffff;
+}
+
+.variantDestructive:hover:not(:disabled) {
+  background: var(--destructive-hover, #b91c1c);
+}
+
+.variantLink {
+  background: transparent;
+  color: var(--primary, #7361dc);
+  border-color: transparent;
+  padding: 0;
+  height: auto;
+}
+
+.variantLink:hover:not(:disabled) {
+  text-decoration: underline;
+}
