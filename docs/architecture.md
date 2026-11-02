@@ -57,6 +57,14 @@ An idempotency key should be based on event identity, Buffer account/channel and
 
 All event and publication times use `Europe/Madrid` and 13:00 for scheduled reminders. The two-week default is the current Monday-based week plus the next week. Week and natural-month views use the same data and status source. Entries should show the event, account, channel, scheduled time and current state. A Buffer schedule acceptance is distinct from a post being sent successfully.
 
+## UI Feedback and Notifications
+
+User feedback and alert messages are delivered via an accessible Toast notification system built on Base UI (`@base-ui/react/toast`) adhering to shadcn/ui patterns:
+- **Placement**: Fixed in the bottom-right corner of the workspace, stacking vertically.
+- **Dismissal**: Automatically dismisses after 5 seconds with manual close support.
+- **Variants**: Color-coded indicators for success (green), warning (yellow), and error (red).
+- **Interactivity**: Supports actionable links and buttons (e.g., "Ver detalle") to navigate to relevant entities without obscuring interactive controls.
+
 ## External service boundaries
 
 | Service | Intended responsibility | Configuration / limitation |
