@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import { validatePost } from "@/lib/social-validation";
 import { detectTitleLanguage } from "@/lib/language";
@@ -42,6 +42,12 @@ import {
 } from "./workspace-calendar-dates";
 import { sanitizeClientErrorMessage } from "@/lib/client-error";
 import { confirmAsync } from "@/lib/confirm-dialog";
+import { toast } from "@/components/ui/toast";
+import {
+  classifyPublishOutcome,
+  type NotificationAction,
+  type NotificationType,
+} from "@/lib/notifications";
 
 function toPublishingStatus(kind: string): Status {
   return kind === "scheduled"
@@ -98,6 +104,19 @@ export function useWorkspace() {
   const [feedback, setFeedback] = useState("");
   const persistent = isSupabaseConfigured();
 
+  const notify = useCallback(
+    (
+      message: string,
+      type: NotificationType = "info",
+      action?: NotificationAction,
+    ) => {
+      setFeedback(message);
+      if (!message) return;
+      toast[type](message, { action });
+    },
+    [],
+  );
+
   useEffect(() => {
     if (expandedDay) firstRevealedPost.current?.focus();
   }, [expandedDay]);
@@ -116,9 +135,9 @@ export function useWorkspace() {
     setShowAdd(false);
   }
 
-  function applyWorkspaceSnapshot(snapshot: Awaited<ReturnType<typeof loadWorkspace>>) {
+  const applyWorkspaceSnapshot = useCallback((snapshot: Awaited<ReturnType<typeof loadWorkspace>>) => {
     if (snapshot.error) {
-      setFeedback(snapshot.error);
+      notify(snapshot.error, "error");
       return;
     }
     setEvents(snapshot.events);
@@ -133,7 +152,7 @@ export function useWorkspace() {
     } catch {
       /* Ignore quota errors */
     }
-  }
+  }, [notify]);
 
   function resetAddForm() {
     closeAddForm();
@@ -184,7 +203,7 @@ export function useWorkspace() {
         .catch((error: unknown) => {
           if (!active) return;
           setSyncingWorkspace(false);
-          setFeedback(sanitizeClientErrorMessage(error, "No se pudieron cargar los datos."));
+          notify(sanitizeClientErrorMessage(error, "No se pudieron cargar los datos."), "error");
           setHydrated(true);
         });
       return () => {
@@ -209,7 +228,7 @@ export function useWorkspace() {
       }
     }
     setHydrated(true);
-  }, [persistent]);
+  }, [persistent, applyWorkspaceSnapshot, notify]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
   useEffect(() => {
@@ -252,7 +271,7 @@ export function useWorkspace() {
         if (outcome.kind === "error") throw new Error(outcome.message);
         if (outcome.kind === "not_claimed") {
           await refreshWorkspaceAfterSync();
-          setFeedback("No se pudo reservar la publicación. Revisa su estado y la cuenta asociada a la fuente.");
+          notify("No se pudo reservar la publicación. Revisa su estado y la cuenta asociada a la fuente.", "warning");
           return;
         }
         const status = toPublishingStatus(outcome.kind);
@@ -271,15 +290,11 @@ export function useWorkspace() {
               : account,
           ),
         );
-        setFeedback(
-          status === "scheduled"
-            ? "Publicación aprobada y programada en Buffer."
-            : status === "needs_reconciliation"
-              ? "Buffer pudo aceptar la publicación. Comprueba su cola antes de reintentar."
-              : status === "failed"
-                ? `La publicación se aprobó, pero Buffer la rechazó: ${message ?? "comprueba la configuración"}`
-                : "La publicación está en proceso de envío.",
-        );
+        const classified = classifyPublishOutcome(outcome);
+        notify(classified.message, classified.type, {
+          label: "Ver detalle",
+          onClick: () => setSelected({ ...post, ...changes }),
+        });
       } else if (next.text !== undefined || next.date !== undefined || next.time !== undefined) {
         const result = await updatePostContent(post.id, content, schedule);
         if (!result.success) throw new Error(result.error);
@@ -293,6 +308,10 @@ export function useWorkspace() {
             : account,
         ),
       );
+      notify("Publicación aprobada y guardada como ejemplo de estilo.", "success", {
+        label: "Ver detalle",
+        onClick: () => setSelected({ ...post, ...changes }),
+      });
     }
     setPosts((all) => all.map((item) => (item.id === post.id ? { ...item, ...changes } : item)));
     if (selected) setSelected({ ...selected, ...changes });
@@ -339,20 +358,35 @@ export function useWorkspace() {
         const generated = await generateReviewPosts(event.id);
         if (!generated.success) throw new Error(generated.error);
         setPosts((all) => [...all, ...generated.posts]);
-        setFeedback(generated.warning ?? "");
+        if (generated.warning) {
+          notify(generated.warning, "warning");
+        } else {
+          notify("Evento creado con éxito.", "success", {
+            label: "Ver detalle",
+            onClick: () => setTab("Calendario"),
+          });
+        }
       } else {
         setPosts((all) => [...all, ...starterPosts([event], selectEventAccounts(accountList, null, [], event.accountIds))]);
-        setFeedback("");
+        notify("Evento creado con éxito.", "success", {
+          label: "Ver detalle",
+          onClick: () => setTab("Calendario"),
+        });
       }
     } catch (error) {
       if (savedEvent) {
         const sanitized = sanitizeClientErrorMessage(error, "");
-        setFeedback(
+        notify(
           `El evento quedó guardado, pero no se guardaron todos sus borradores. Puedes reintentarlo desde la ficha del evento.${sanitized ? ` ${sanitized}` : ""}`,
+          "warning",
+          {
+            label: "Ver detalle",
+            onClick: () => setTab("Eventos"),
+          },
         );
         resetAddForm();
       } else {
-        setFeedback(sanitizeClientErrorMessage(error, "No se pudo guardar el evento."));
+        notify(sanitizeClientErrorMessage(error, "No se pudo guardar el evento."), "error");
       }
       return;
     }
@@ -410,18 +444,22 @@ export function useWorkspace() {
       if (!persistent) return;
       const result = await generateReviewPosts(event.id);
       if (!result.success) {
-        setFeedback(result.error);
+        notify(result.error, "error");
         return;
       }
       const saved = result.posts;
       if (saved.length === 0) {
-        setFeedback("Este evento no tiene recordatorios futuros que se puedan crear.");
+        notify("Este evento no tiene recordatorios futuros que se puedan crear.", "info");
         return;
       }
       setPosts((all) => [...new Map([...all, ...saved].map((post) => [post.id, post])).values()]);
-      setFeedback(result.warning ?? "Se han sincronizado los borradores de recordatorio.");
+      if (result.warning) {
+        notify(result.warning, "warning");
+      } else {
+        notify("Se han sincronizado los borradores de recordatorio.", "success");
+      }
     } catch (error) {
-      setFeedback(sanitizeClientErrorMessage(error, "No se pudieron crear los borradores."));
+      notify(sanitizeClientErrorMessage(error, "No se pudieron crear los borradores."), "error");
     }
   }
 
@@ -437,14 +475,14 @@ export function useWorkspace() {
       if (persistent) {
         const result = await updatePublishingMode(nextMode);
         if (!result.success) {
-          setFeedback(result.error);
+          notify(result.error, "error");
           return;
         }
       }
       setMode(nextMode);
-      setFeedback("");
+      notify("", "info");
     } catch (error) {
-      setFeedback(sanitizeClientErrorMessage(error, "No se pudo guardar el modo."));
+      notify(sanitizeClientErrorMessage(error, "No se pudo guardar el modo."), "error");
     }
   }
 
@@ -453,9 +491,13 @@ export function useWorkspace() {
     if (persistent && account.id) {
       try {
         const result = await updateAccountVoice(account.id, prompt);
-        setFeedback(result.success ? "" : result.error);
+        if (!result.success) {
+          notify(result.error, "error");
+        } else {
+          notify("Voz de la cuenta actualizada.", "success");
+        }
       } catch (error) {
-        setFeedback(sanitizeClientErrorMessage(error, "No se pudo guardar el tono."));
+        notify(sanitizeClientErrorMessage(error, "No se pudo guardar el tono."), "error");
       }
     }
   }
@@ -465,12 +507,12 @@ export function useWorkspace() {
       try {
         const result = await saveBufferChannel(account.id, network, value);
         if (!result.success) {
-          setFeedback(result.error);
+          notify(result.error, "error");
           return;
         }
-        setFeedback("");
+        notify("Canal de Buffer guardado.", "success");
       } catch (error) {
-        setFeedback(sanitizeClientErrorMessage(error, "No se pudo guardar el canal de Buffer."));
+        notify(sanitizeClientErrorMessage(error, "No se pudo guardar el canal de Buffer."), "error");
       }
     }
     setAccountList((all) =>
@@ -486,13 +528,13 @@ export function useWorkspace() {
     try {
       const outcome = await retryFailedPost(post.id);
       if (outcome.kind === "error") {
-        setFeedback(outcome.message);
+        notify(outcome.message, "error");
         return;
       }
       if (outcome.kind === "not_claimed") {
         await refreshWorkspaceAfterSync();
         setSelected(null);
-        setFeedback("No se pudo reservar la publicación. Revisa su estado y la cuenta asociada a la fuente.");
+        notify("No se pudo reservar la publicación. Revisa su estado y la cuenta asociada a la fuente.", "warning");
         return;
       }
       const status = toPublishingStatus(outcome.kind);
@@ -500,17 +542,13 @@ export function useWorkspace() {
       const changes: Partial<Post> = { status, lastError: message };
       setPosts((all) => all.map((item) => (item.id === post.id ? { ...item, ...changes } : item)));
       if (selected?.id === post.id) setSelected({ ...selected, ...changes });
-      setFeedback(
-        status === "scheduled"
-          ? "Publicación programada en Buffer."
-          : status === "needs_reconciliation"
-            ? "Comprueba la cola de Buffer antes de reintentar."
-            : status === "failed"
-              ? `Buffer rechazó la publicación: ${message ?? "comprueba la configuración"}`
-              : "La publicación está en proceso de envío.",
-      );
+      const classified = classifyPublishOutcome(outcome);
+      notify(classified.message, classified.type, {
+        label: "Ver detalle",
+        onClick: () => setSelected({ ...post, ...changes }),
+      });
     } catch (error) {
-      setFeedback(sanitizeClientErrorMessage(error, "No se pudo reintentar la publicación."));
+      notify(sanitizeClientErrorMessage(error, "No se pudo reintentar la publicación."), "error");
     }
   }
 
@@ -518,16 +556,19 @@ export function useWorkspace() {
     try {
       const result = await reconcileScheduledPost(post.id, reconciliationId);
       if (!result.success) {
-        setFeedback(result.error);
+        notify(result.error, "error");
         return;
       }
       const changes: Partial<Post> = { status: "scheduled", bufferPostId: reconciliationId.trim(), lastError: null };
       setPosts((all) => all.map((item) => (item.id === post.id ? { ...item, ...changes } : item)));
       setSelected({ ...post, ...changes });
       setReconciliationId("");
-      setFeedback("Post encontrado en Buffer y marcado como programado.");
+      notify("Post encontrado en Buffer y marcado como programado.", "success", {
+        label: "Ver detalle",
+        onClick: () => setSelected({ ...post, ...changes }),
+      });
     } catch (error) {
-      setFeedback(sanitizeClientErrorMessage(error, "No se pudo guardar la conciliación."));
+      notify(sanitizeClientErrorMessage(error, "No se pudo guardar la conciliación."), "error");
     }
   }
 
@@ -535,27 +576,30 @@ export function useWorkspace() {
     try {
       const result = await confirmPostMissingFromBuffer(post.id);
       if (!result.success) {
-        setFeedback(result.error);
+        notify(result.error, "error");
         return;
       }
       const changes: Partial<Post> = { status: "failed", lastError: "Has confirmado que no aparece en la cola de Buffer." };
       setPosts((all) => all.map((item) => (item.id === post.id ? { ...item, ...changes } : item)));
       setSelected({ ...post, ...changes });
       setAbsenceConfirmed(false);
-      setFeedback("La ausencia quedó confirmada. Puedes corregir el post y reintentar el envío.");
+      notify("La ausencia quedó confirmada. Puedes corregir el post y reintentar el envío.", "success", {
+        label: "Ver detalle",
+        onClick: () => setSelected({ ...post, ...changes }),
+      });
     } catch (error) {
-      setFeedback(sanitizeClientErrorMessage(error, "No se pudo guardar la conciliación."));
+      notify(sanitizeClientErrorMessage(error, "No se pudo guardar la conciliación."), "error");
     }
   }
 
   async function regeneratePostAi(post: Post) {
     if (!persistent) {
-      setFeedback("En la demo la regeneración con IA no está disponible.");
+      notify("En la demo la regeneración con IA no está disponible.", "info");
       return;
     }
     const result = await regeneratePostAction(post.id);
     if (!result.success) {
-      setFeedback(result.error);
+      notify(result.error, "error");
       throw new Error(result.error);
     }
     const updated = {
@@ -576,16 +620,19 @@ export function useWorkspace() {
         : result.data.generationOrigin === "groq"
           ? "Groq"
           : "plantilla de respaldo";
-    setFeedback(`Texto regenerado con ${providerName}.`);
+    notify(`Texto regenerado con ${providerName}.`, "success", {
+      label: "Ver detalle",
+      onClick: () => setSelected({ ...post, ...updated }),
+    });
   }
 
   async function savePostChanges(post: Post, next: Partial<Post>) {
     try {
       await updatePost(post, next);
       setSelected(null);
-      if (next.status !== "approved") setFeedback("");
+      if (next.status !== "approved") notify("", "info");
     } catch (error) {
-      setFeedback(sanitizeClientErrorMessage(error, "No se pudo guardar la publicación."));
+      notify(sanitizeClientErrorMessage(error, "No se pudo guardar la publicación."), "error");
     }
   }
 
@@ -602,7 +649,7 @@ export function useWorkspace() {
         const result = await discardDraft(post.id);
         if (!result.success) {
           setDraftDeleteError(result.error);
-          setFeedback(result.error);
+          notify(result.error, "error");
           return;
         }
         // Keep the identity to prevent this reminder from being generated again.
@@ -611,10 +658,10 @@ export function useWorkspace() {
         setPosts((all) => all.filter((item) => item.id !== post.id));
       }
       setSelected(null);
-      setFeedback(post.status === "failed" ? "Publicación eliminada." : "Borrador eliminado.");
+      notify(post.status === "failed" ? "Publicación eliminada." : "Borrador eliminado.", "success");
     } catch {
       setDraftDeleteError("No se pudo eliminar el borrador.");
-      setFeedback("No se pudo eliminar el borrador.");
+      notify("No se pudo eliminar el borrador.", "error");
     } finally {
       setDeletingDraft(false);
     }
@@ -633,15 +680,15 @@ export function useWorkspace() {
       if (persistent) {
         const result = await deleteEvent(eventId);
         if (!result.success) {
-          setFeedback(result.error);
+          notify(result.error, "error");
           return;
         }
       }
       setEvents((all) => all.filter((e) => e.id !== eventId));
       setPosts((all) => all.filter((p) => p.eventId !== eventId));
-      setFeedback("Evento eliminado.");
+      notify("Evento eliminado.", "success");
     } catch (error) {
-      setFeedback(sanitizeClientErrorMessage(error, "No se pudo eliminar el evento."));
+      notify(sanitizeClientErrorMessage(error, "No se pudo eliminar el evento."), "error");
     } finally {
       setDeletingEventId(null);
     }

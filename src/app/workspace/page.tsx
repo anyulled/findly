@@ -52,20 +52,6 @@ function Dashboard() {
         />
 
         <div className={styles.content}>
-          {ws.feedback && (
-            <p
-              role="alert"
-              style={{
-                color: "#a43a32",
-                background: "#fff1f0",
-                borderRadius: 8,
-                padding: "10px 14px",
-                marginBottom: 16,
-              }}
-            >
-              {ws.feedback}
-            </p>
-          )}
 
           {ws.tab === "Calendario" && (
             <WorkspaceErrorBoundary fallbackTitle="Error al cargar el calendario">
