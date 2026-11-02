@@ -72,13 +72,7 @@ function Dashboard() {
                 reviewCount={ws.pendingReviewCount}
                 openAddForm={ws.openAddForm}
                 setTab={ws.setTab}
-                onSelectPost={(post) => {
-                  ws.setSelected(post);
-                  ws.setEditing(post.text);
-                  ws.setReconciliationId("");
-                  ws.setAbsenceConfirmed(false);
-                  ws.setDraftDeleteError("");
-                }}
+                onSelectPost={ws.openPost}
               />
             </WorkspaceErrorBoundary>
           )}
@@ -90,13 +84,7 @@ function Dashboard() {
                 events={ws.events}
                 accountList={ws.accountList}
                 persistent={ws.persistent}
-                onSelectPost={(post) => {
-                  ws.setSelected(post);
-                  ws.setEditing(post.text);
-                  ws.setReconciliationId("");
-                  ws.setAbsenceConfirmed(false);
-                  ws.setDraftDeleteError("");
-                }}
+                onSelectPost={ws.openPost}
                 onApprovePost={async (post) => {
                   await ws.savePostChanges(post, { text: post.text, status: "approved" });
                 }}

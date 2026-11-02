@@ -45,6 +45,10 @@
   will-change: transform, opacity;
 }
 
+.root[data-limited] {
+  display: none;
+}
+
 .root[data-starting-style],
 .root[data-ending-style] {
   opacity: 0;
