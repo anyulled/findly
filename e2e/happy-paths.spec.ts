@@ -402,4 +402,3 @@ test("navigates to Revisiones tab, filters posts, approves single and batch, and
   await expect(page.getByRole("heading", { name: "¡Todo al día!" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Ver Calendario" })).toBeVisible();
 });
-});
