@@ -25,7 +25,7 @@ export function DialogContent({
       <BaseDialog.Popup className={[styles.popup, className].filter(Boolean).join(" ")} {...props}>
         {children}
         {showClose && (
-          <BaseDialog.Close className={styles.closeButton} aria-label="×">
+          <BaseDialog.Close className={styles.closeButton} aria-label="Cerrar ×">
             ×
           </BaseDialog.Close>
         )}

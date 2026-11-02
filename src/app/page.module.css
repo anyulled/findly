@@ -247,6 +247,10 @@
     border-color: var(--border-default);
     color: var(--text-primary);
   }
+  .reviewPostContent:hover {
+    background: var(--bg-surface-hover);
+    border-color: var(--primary);
+  }
   .reviewPostAccountName {
     color: var(--text-primary);
   }

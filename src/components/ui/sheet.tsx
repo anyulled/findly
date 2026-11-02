@@ -23,7 +23,7 @@ export function SheetContent({
       <BaseDialog.Popup className={[styles.content, className].filter(Boolean).join(" ")} {...props}>
         {children}
         {showClose && (
-          <BaseDialog.Close className={dialogStyles.closeButton} aria-label="×">
+          <BaseDialog.Close className={dialogStyles.closeButton} aria-label="Cerrar ×">
             ×
           </BaseDialog.Close>
         )}
