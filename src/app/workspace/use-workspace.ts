@@ -560,6 +560,7 @@ export function useWorkspace() {
     }
     const updated = {
       text: result.data.text,
+      status: "review" as const,
       generationOrigin: result.data.generationOrigin,
       generationErrorCode: result.data.generationErrorCode,
       lastError: result.data.lastError,
