@@ -6,8 +6,10 @@ import type { Account, EventItem, Post } from "../workspace-types";
 import { matchesAccount } from "../workspace-types";
 import { dateAt } from "../workspace-calendar-dates";
 import {
+  canBatchApprove,
   countReviewPosts,
   filterReviewPosts,
+  getBatchApproveTargets,
   groupReviewPostsByEvent,
   type ReviewFilter,
 } from "@/lib/reviews";
@@ -87,7 +89,7 @@ export function ReviewList({
   }
 
   async function handleApproveAllForEvent(groupPosts: Post[], eventId: string) {
-    const targets = groupPosts.filter((p) => p.status === "review");
+    const targets = getBatchApproveTargets(groupPosts);
     if (targets.length === 0 || batchProcessingEventId === eventId) return;
 
     setBatchProcessingEventId(eventId);
@@ -194,8 +196,8 @@ export function ReviewList({
         <div className={styles.eventsList} id={filterListId}>
           {eventGroups.map((group) => {
             const event = group.event;
-            const reviewPostsInGroup = group.posts.filter((p) => p.status === "review");
-            const canBatch = reviewPostsInGroup.length > 0;
+            const reviewPostsInGroup = getBatchApproveTargets(group.posts);
+            const canBatch = canBatchApprove(group.posts);
             const isBatchProcessing = batchProcessingEventId === group.eventId;
 
             return (
