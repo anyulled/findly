@@ -6,8 +6,8 @@ import styles from "./tabs.module.css";
 
 export const Tabs = BaseTabs.Root;
 
-export function TabsList({ className = "", ...props }: React.ComponentProps<typeof BaseTabs.List>) {
-  return <BaseTabs.List className={[styles.list, className].filter(Boolean).join(" ")} {...props} />;
+export function TabsList({ className = "", activateOnFocus = true, ...props }: React.ComponentProps<typeof BaseTabs.List>) {
+  return <BaseTabs.List className={[styles.list, className].filter(Boolean).join(" ")} activateOnFocus={activateOnFocus} {...props} />;
 }
 
 export function TabsTrigger({ className = "", ...props }: React.ComponentProps<typeof BaseTabs.Tab>) {
