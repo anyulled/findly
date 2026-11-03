@@ -12,3 +12,9 @@
   border-radius: 6px;
   animation: pulse 1.8s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
+
+@media (prefers-reduced-motion: reduce) {
+  .skeletonBlock {
+    animation: none;
+  }
+}
