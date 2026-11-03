@@ -47,11 +47,11 @@ test("approving a post triggers a green toast with actionable link", async ({ pa
   await page.getByLabel("HORA").fill("16:00");
   await page.getByRole("button", { name: "Crear evento" }).click();
 
-  await page.getByRole("button", { name: "▦ Calendario" }).click();
+  await page.getByRole("button", { name: "Calendario" }).click();
   const eventPost = page.getByRole("button", { name: /Approval Toast Event/ }).first();
   await eventPost.click();
 
-  await page.getByRole("button", { name: "✓ Aprobar y guardar ejemplo" }).click();
+  await page.getByRole("button", { name: /Aprobar y guardar ejemplo/ }).click();
 
   const toast = page.locator('[aria-label="Notificaciones"] [data-type="success"]').first();
   await expect(toast).toBeVisible();

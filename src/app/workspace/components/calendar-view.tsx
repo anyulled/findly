@@ -3,6 +3,8 @@ import styles from "../../page.module.css";
 import type { EventItem, Post, Range } from "../workspace-types";
 import { statusLabels } from "../workspace-types";
 import { dayKey } from "../workspace-calendar-dates";
+import { ChevronLeft, ChevronRight, Plus, Sparkles, CheckCircle2, ArrowRight } from "lucide-react";
+import { NetworkIcon } from "@/components/ui/network-icon";
 
 interface CalendarViewProps {
   persistent: boolean;
@@ -55,52 +57,41 @@ export function CalendarView({
           <p>Todos tus anuncios, en un solo lugar.</p>
         </div>
         <button className={styles.mobileAdd} onClick={openAddForm}>
-          ＋ Evento
+          <Plus size={16} aria-hidden="true" style={{ marginRight: 4 }} /> Evento
         </button>
       </div>
 
-      {!persistent && (
-        <div className={styles.notice}>
-          <span className={styles.noticeIcon}>✦</span>
-          <div>
-            <b>Modo demostración</b>
-            <span>
-              Los cambios se guardan en este navegador. Configura Supabase para usar
-              persistencia compartida.
-            </span>
-          </div>
-          <button onClick={() => setTab("Ajustes")}>
-            Ver configuración <span>→</span>
-          </button>
+      <div className={styles.notice}>
+        <span className={styles.noticeIcon}>
+          {persistent ? (
+            <CheckCircle2 size={16} aria-hidden="true" />
+          ) : (
+            <Sparkles size={16} aria-hidden="true" />
+          )}
+        </span>
+        <div>
+          <b>{persistent ? "Datos guardados en Supabase" : "Modo demostración"}</b>
+          <span>
+            {persistent
+              ? "Los recordatorios se programan por Buffer al aprobarlos o al generarlos en modo automático. Los resultados inciertos requieren conciliación manual."
+              : "Los cambios se guardan en este navegador. Configura Supabase para usar persistencia compartida."}
+          </span>
         </div>
-      )}
-
-      {persistent && (
-        <div className={styles.notice}>
-          <span className={styles.noticeIcon}>✓</span>
-          <div>
-            <b>Datos guardados en Supabase</b>
-            <span>
-              Los recordatorios se programan por Buffer al aprobarlos o al generarlos en modo
-              automático. Los resultados inciertos requieren conciliación manual.
-            </span>
-          </div>
-          <button onClick={() => setTab("Ajustes")}>
-            Ver configuración <span>→</span>
-          </button>
-        </div>
-      )}
+        <button onClick={() => setTab("Ajustes")}>
+          Ver configuración <ArrowRight size={14} aria-hidden="true" style={{ marginLeft: 4 }} />
+        </button>
+      </div>
 
       <div className={styles.calendarToolbar}>
         <div className={styles.period}>
           <button onClick={() => navigate(-1)} aria-label="Periodo anterior">
-            ‹
+            <ChevronLeft size={16} aria-hidden="true" />
           </button>
           <button onClick={() => setAnchor(new Date())} className={styles.today}>
             Hoy
           </button>
           <button onClick={() => navigate(1)} aria-label="Periodo siguiente">
-            ›
+            <ChevronRight size={16} aria-hidden="true" />
           </button>
           <h2>{monthLabel}</h2>
         </div>
@@ -160,7 +151,7 @@ export function CalendarView({
                         title={title}
                       >
                         <span className={styles.networkDot}>
-                          {post.network === "LinkedIn" ? "in" : post.network === "X" ? "𝕏" : "b"}
+                          <NetworkIcon network={post.network} size={13} />
                         </span>
                         <span className={styles.postDescription}>
                           <span className={styles.pillText}>{title}</span>

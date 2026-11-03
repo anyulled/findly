@@ -15,6 +15,7 @@ import {
   TableHead,
   TableCell,
 } from "@/components/ui/table";
+import { RefreshCw, Check, X } from "lucide-react";
 import {
   loadWorkspaceStats,
   type WorkspaceStats,
@@ -260,7 +261,8 @@ export function StatsView({ posts }: StatsViewProps) {
             onClick={() => void fetchStats()}
             disabled={loading}
           >
-            {loading ? "Cargando…" : "⟳ Actualizar"}
+            <RefreshCw size={14} aria-hidden="true" style={{ marginRight: 6 }} />
+            {loading ? "Cargando…" : "Actualizar"}
           </Button>
         </div>
       </div>
@@ -432,10 +434,12 @@ export function StatsView({ posts }: StatsViewProps) {
                       <TableCell style={{ fontFamily: "monospace", fontSize: "12px" }}>{log.model}</TableCell>
                       <TableCell>
                         {log.status === "success" ? (
-                          <Badge variant="success">✓ Éxito</Badge>
+                          <Badge variant="success" style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                            <Check size={12} aria-hidden="true" /> Éxito
+                          </Badge>
                         ) : (
-                          <Badge variant="destructive" title={log.errorCode ?? "error"}>
-                            ✕ Fallo ({log.errorCode ?? "error"})
+                          <Badge variant="destructive" title={log.errorCode ?? "error"} style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                            <X size={12} aria-hidden="true" /> Fallo ({log.errorCode ?? "error"})
                           </Badge>
                         )}
                       </TableCell>

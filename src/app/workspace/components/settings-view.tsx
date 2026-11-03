@@ -3,6 +3,7 @@ import styles from "../../page.module.css";
 import { SourceSettings } from "../../source-settings";
 import type { SourceView } from "../../workspace-actions";
 import type { Account } from "../workspace-types";
+import { Clock, CheckSquare, Zap, Plug } from "lucide-react";
 
 interface SettingsViewProps {
   mode: "review" | "automatic";
@@ -85,7 +86,9 @@ export function SettingsView({
         <div className={styles.settingsLayout}>
           <section className={styles.settingsCard}>
             <div className={styles.settingsTitle}>
-              <span className={styles.settingsIcon}>◷</span>
+              <span className={styles.settingsIcon}>
+                <Clock size={16} aria-hidden="true" />
+              </span>
               <div>
                 <h3>Modo de publicación</h3>
                 <p>Elige si revisas los textos antes de que se programen.</p>
@@ -98,7 +101,9 @@ export function SettingsView({
                   onChangeMode("review");
                 }}
               >
-                <span>◉</span>
+                <span>
+                  <CheckSquare size={16} aria-hidden="true" />
+                </span>
                 <b>Revisión</b>
                 <small>
                   Al aprobar, se programa el texto y se guarda como ejemplo de estilo.
@@ -110,7 +115,9 @@ export function SettingsView({
                   onChangeMode("automatic");
                 }}
               >
-                <span>⚡</span>
+                <span>
+                  <Zap size={16} aria-hidden="true" />
+                </span>
                 <b>Automático</b>
                 <small>
                   {persistent
@@ -129,7 +136,9 @@ export function SettingsView({
           </section>
           <section className={styles.settingsCard}>
             <div className={styles.settingsTitle}>
-              <span className={styles.settingsIcon}>✦</span>
+              <span className={styles.settingsIcon}>
+                <Plug size={16} aria-hidden="true" />
+              </span>
               <div>
                 <h3>Servicios conectados</h3>
                 <p>Las credenciales se guardan en el entorno del servidor.</p>

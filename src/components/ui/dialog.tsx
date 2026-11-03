@@ -3,6 +3,7 @@
 import * as React from "react";
 import { Dialog as BaseDialog } from "@base-ui/react";
 import styles from "./dialog.module.css";
+import { X } from "lucide-react";
 
 export const Dialog = BaseDialog.Root;
 export const DialogTrigger = BaseDialog.Trigger;
@@ -25,8 +26,8 @@ export function DialogContent({
       <BaseDialog.Popup className={[styles.popup, className].filter(Boolean).join(" ")} {...props}>
         {children}
         {showClose && (
-          <BaseDialog.Close className={styles.closeButton} aria-label="Cerrar ×">
-            ×
+          <BaseDialog.Close className={styles.closeButton} aria-label="Cerrar">
+            <X size={16} aria-hidden="true" />
           </BaseDialog.Close>
         )}
       </BaseDialog.Popup>

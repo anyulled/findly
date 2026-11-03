@@ -8,6 +8,8 @@ import { dateAt } from "../workspace-calendar-dates";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { NetworkIcon } from "@/components/ui/network-icon";
+import { CheckCheck, Check, Pencil, Trash2, RefreshCw } from "lucide-react";
 import {
   canBatchApprove,
   countReviewPosts,
@@ -165,7 +167,9 @@ export function ReviewList({
 
       {counts.total === 0 ? (
         <section className={styles.reviewEmptyState} aria-label="Estado de revisiones">
-          <div className={styles.reviewEmptyIcon} aria-hidden="true">✓</div>
+          <div className={styles.reviewEmptyIcon} aria-hidden="true">
+            <Check size={28} />
+          </div>
           <h2>¡Todo al día!</h2>
           <p>
             No tienes publicaciones pendientes de revisión ni incidencias de envío en este momento.
@@ -240,9 +244,14 @@ export function ReviewList({
                         onClick={() => void handleApproveAllForEvent(group.posts, group.eventId)}
                         aria-label={`Aprobar todas las publicaciones pendientes de ${event?.title || "este evento"}`}
                       >
-                        {isBatchProcessing
-                          ? "Aprobando…"
-                          : `✓ Aprobar todas (${reviewPostsInGroup.length})`}
+                        {isBatchProcessing ? (
+                          "Aprobando…"
+                        ) : (
+                          <>
+                            <CheckCheck size={16} aria-hidden="true" />
+                            Aprobar todas ({reviewPostsInGroup.length})
+                          </>
+                        )}
                       </Button>
                     )}
                   </div>
@@ -291,7 +300,10 @@ export function ReviewList({
                             <span className={styles.reviewPostAccountName}>
                               {account?.name ?? post.account}
                             </span>
-                            <Badge variant="outline">{post.network}</Badge>
+                            <Badge variant="outline" style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+                              <NetworkIcon network={post.network} size={13} />
+                              {post.network}
+                            </Badge>
                           </div>
 
                           <div className={styles.reviewPostMeta}>
@@ -344,11 +356,12 @@ export function ReviewList({
                             disabled={isProcessing}
                             onClick={() => void handleRemoveSingle(post)}
                           >
+                            <Trash2 size={14} aria-hidden="true" />
                             {isProcessing
                               ? "Eliminando…"
                               : isFailed
-                                ? "✕ Eliminar"
-                                : "✕ Descartar"}
+                                ? "Eliminar"
+                                : "Descartar"}
                           </Button>
                           <Button
                             variant="secondary"
@@ -356,7 +369,8 @@ export function ReviewList({
                             disabled={isProcessing}
                             onClick={() => onSelectPost(post)}
                           >
-                            ✎ Editar
+                            <Pencil size={14} aria-hidden="true" />
+                            Editar
                           </Button>
                           {isReview && (
                             <Button
@@ -365,11 +379,12 @@ export function ReviewList({
                               disabled={isProcessing}
                               onClick={() => void handleApproveSingle(post)}
                             >
+                              <Check size={15} aria-hidden="true" />
                               {isProcessing
                                 ? "Aprobando…"
                                 : persistent
-                                  ? "✓ Aprobar y programar"
-                                  : "✓ Aprobar"}
+                                  ? "Aprobar y programar"
+                                  : "Aprobar"}
                             </Button>
                           )}
                           {isFailed && (
@@ -379,7 +394,8 @@ export function ReviewList({
                               disabled={isProcessing}
                               onClick={() => void handleRetrySingle(post)}
                             >
-                              {isProcessing ? "Reintentando…" : "↻ Reintentar envío"}
+                              <RefreshCw size={14} aria-hidden="true" />
+                              {isProcessing ? "Reintentando…" : "Reintentar envío"}
                             </Button>
                           )}
                         </div>

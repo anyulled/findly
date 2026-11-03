@@ -5,6 +5,7 @@ import { Dialog as BaseDialog } from "@base-ui/react";
 import { DialogOverlay } from "./dialog";
 import dialogStyles from "./dialog.module.css";
 import styles from "./sheet.module.css";
+import { X } from "lucide-react";
 
 export const Sheet = BaseDialog.Root;
 export const SheetTrigger = BaseDialog.Trigger;
@@ -23,8 +24,8 @@ export function SheetContent({
       <BaseDialog.Popup className={[styles.content, className].filter(Boolean).join(" ")} {...props}>
         {children}
         {showClose && (
-          <BaseDialog.Close className={dialogStyles.closeButton} aria-label="Cerrar ×">
-            ×
+          <BaseDialog.Close className={dialogStyles.closeButton} aria-label="Cerrar">
+            <X size={16} aria-hidden="true" />
           </BaseDialog.Close>
         )}
       </BaseDialog.Popup>

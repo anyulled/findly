@@ -4,6 +4,8 @@ import type { Account, Network, Post } from "../workspace-types";
 import { matchesAccount } from "../workspace-types";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { NetworkIcon } from "@/components/ui/network-icon";
+import { Database, Sparkles } from "lucide-react";
 
 interface AccountSettingsProps {
   accountList: Account[];
@@ -46,8 +48,9 @@ export function AccountSettings({
                 <b>{account.name}</b>
                 <small>{account.kind}</small>
               </div>
-              <Badge variant={persistent ? "success" : "secondary"}>
-                {persistent ? "● Supabase" : "● Demo"}
+              <Badge variant={persistent ? "success" : "secondary"} style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                <Database size={11} aria-hidden="true" />
+                {persistent ? "Supabase" : "Demo"}
               </Badge>
             </div>
             <div style={{ marginTop: "10px", marginBottom: "8px" }}>
@@ -59,8 +62,9 @@ export function AccountSettings({
             </div>
             <div className={styles.accountNetworks}>
               {account.networks.map((network) => (
-                <Badge variant="outline" key={network}>
-                  {network === "LinkedIn" ? "in" : network === "X" ? "𝕏" : "◉"} &nbsp;{network}
+                <Badge variant="outline" key={network} style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+                  <NetworkIcon network={network} size={13} />
+                  {network}
                 </Badge>
               ))}
             </div>
@@ -115,7 +119,7 @@ export function AccountSettings({
               />
             </label>
             <div className={styles.exampleBox}>
-              <span>✦</span>
+              <Sparkles size={16} aria-hidden="true" style={{ flexShrink: 0, marginTop: 2 }} />
               <div>
                 <b>
                   {account.styleExampleCount ??
