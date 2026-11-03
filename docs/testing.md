@@ -8,6 +8,7 @@ The current E2E coverage checks:
 
 - Public landing at `/`, the top-right **Acceder** link into `/workspace`, and responsive layout at 375, 768, 1024 and 1440 pixels.
 - Sidebar navigation column alignment verifying that the section navigation icons start within 1px of each other horizontally in the initial `/workspace` state.
+- Switching between settings tabs (Preferencias generales and Fuentes) using the accessible shadcn Tabs component.
 - Switching the calendar between its default fortnight, week, and month views.
 - Creating an event eight days ahead, which leaves the one-week and one-day reminders in range and omits the two-week reminder. The generated drafts cover all seven configured social channels.
 - Approving a draft, recording it as a style example, and retaining that approval after a page reload.
