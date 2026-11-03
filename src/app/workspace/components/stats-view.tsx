@@ -8,6 +8,14 @@ import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import {
+  Table,
+  TableHeader,
+  TableBody,
+  TableRow,
+  TableHead,
+  TableCell,
+} from "@/components/ui/table";
+import {
   loadWorkspaceStats,
   type WorkspaceStats,
   type PostView,
@@ -373,28 +381,28 @@ export function StatsView({ posts }: StatsViewProps) {
       </div>
 
       {/* Call Logs Table */}
-      <div className={styles.tableCard}>
+      <Card className={styles.tableCard}>
         <div className={styles.tableHeader}>
           <h3>Histórico de llamadas y peticiones recientes ({filteredLogs.length})</h3>
         </div>
         <div className={styles.tableWrapper}>
           {filteredLogs.length === 0 ? (
-            <div style={{ padding: "30px", textAlign: "center", color: "#8c8b96", fontSize: "14px" }}>
+            <div style={{ padding: "30px", textAlign: "center", color: "var(--text-muted, #8c8b96)", fontSize: "14px" }}>
               No hay llamadas registradas en este período. Las nuevas generaciones de eventos se registrarán automáticamente aquí.
             </div>
           ) : (
-            <table className={styles.logsTable}>
-              <thead>
-                <tr>
-                  <th>Fecha y hora</th>
-                  <th>Proveedor</th>
-                  <th>Modelo</th>
-                  <th>Estado</th>
-                  <th>Latencia</th>
-                  <th>Tokens</th>
-                </tr>
-              </thead>
-              <tbody>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Fecha y hora</TableHead>
+                  <TableHead>Proveedor</TableHead>
+                  <TableHead>Modelo</TableHead>
+                  <TableHead>Estado</TableHead>
+                  <TableHead>Latencia</TableHead>
+                  <TableHead>Tokens</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {filteredLogs.map((log) => {
                   const dateStr = new Date(log.createdAt).toLocaleString("es-ES", {
                     timeZone: "Europe/Madrid",
@@ -405,41 +413,42 @@ export function StatsView({ posts }: StatsViewProps) {
                     second: "2-digit",
                   });
                   return (
-                    <tr key={log.id}>
-                      <td>{dateStr}</td>
-                      <td>
-                        <span
-                          className={`${styles.kpiBadge} ${
+                    <TableRow key={log.id}>
+                      <TableCell>{dateStr}</TableCell>
+                      <TableCell>
+                        <Badge
+                          variant="outline"
+                          className={
                             log.provider === "groq"
                               ? styles.badgeGroq
                               : log.provider === "openai"
                                 ? styles.badgeOpenai
                                 : styles.badgeFallback
-                          }`}
+                          }
                         >
                           {log.provider === "groq" ? "Groq" : log.provider === "openai" ? "OpenAI" : "Plantilla"}
-                        </span>
-                      </td>
-                      <td style={{ fontFamily: "monospace", fontSize: "12px" }}>{log.model}</td>
-                      <td>
+                        </Badge>
+                      </TableCell>
+                      <TableCell style={{ fontFamily: "monospace", fontSize: "12px" }}>{log.model}</TableCell>
+                      <TableCell>
                         {log.status === "success" ? (
-                          <span className={styles.statusSuccess}>✓ Éxito</span>
+                          <Badge variant="success">✓ Éxito</Badge>
                         ) : (
-                          <span className={styles.statusError} title={log.errorCode ?? "error"}>
+                          <Badge variant="destructive" title={log.errorCode ?? "error"}>
                             ✕ Fallo ({log.errorCode ?? "error"})
-                          </span>
+                          </Badge>
                         )}
-                      </td>
-                      <td>{log.latencyMs != null ? `${log.latencyMs} ms` : "—"}</td>
-                      <td>{log.totalTokens != null ? log.totalTokens.toLocaleString() : "—"}</td>
-                    </tr>
+                      </TableCell>
+                      <TableCell>{log.latencyMs != null ? `${log.latencyMs} ms` : "—"}</TableCell>
+                      <TableCell>{log.totalTokens != null ? log.totalTokens.toLocaleString() : "—"}</TableCell>
+                    </TableRow>
                   );
                 })}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
           )}
         </div>
-      </div>
+      </Card>
     </div>
   );
 }
