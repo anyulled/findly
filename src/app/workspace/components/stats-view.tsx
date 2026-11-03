@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
   Table,
   TableHeader,
@@ -228,23 +228,22 @@ export function StatsView({ posts }: StatsViewProps) {
   }, [filteredLogs]);
 
   return (
-    <div className={styles.statsLayout}>
+    <Tabs
+      value={filterPeriod}
+      onValueChange={(val) => setFilterPeriod(val as "all" | "30" | "7")}
+      className={styles.statsLayout}
+    >
       <div className={styles.statsHeader}>
         <div>
           <h2>Estadísticas de IA (Groq vs OpenAI)</h2>
           <p>Supervisa el volumen de respuestas, fiabilidad, latencia y consumo de cada proveedor.</p>
         </div>
         <div className={styles.statsControls}>
-          <Tabs
-            value={filterPeriod}
-            onValueChange={(val) => setFilterPeriod(val as "all" | "30" | "7")}
-          >
-            <TabsList aria-label="Filtrar estadísticas por periodo">
-              <TabsTrigger value="all">Todo</TabsTrigger>
-              <TabsTrigger value="30">Últimos 30 días</TabsTrigger>
-              <TabsTrigger value="7">Últimos 7 días</TabsTrigger>
-            </TabsList>
-          </Tabs>
+          <TabsList aria-label="Filtrar estadísticas por periodo">
+            <TabsTrigger value="all">Todo</TabsTrigger>
+            <TabsTrigger value="30">Últimos 30 días</TabsTrigger>
+            <TabsTrigger value="7">Últimos 7 días</TabsTrigger>
+          </TabsList>
           <Button
             variant="secondary"
             size="sm"
@@ -256,6 +255,8 @@ export function StatsView({ posts }: StatsViewProps) {
           </Button>
         </div>
       </div>
+
+      <TabsContent value={filterPeriod} style={{ margin: 0, display: "grid", gap: "16px" }}>
 
       {error && (
         <div
@@ -443,6 +444,7 @@ export function StatsView({ posts }: StatsViewProps) {
           )}
         </div>
       </Card>
-    </div>
+      </TabsContent>
+    </Tabs>
   );
 }
