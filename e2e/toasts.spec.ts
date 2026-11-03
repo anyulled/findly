@@ -37,7 +37,7 @@ test("shows green success toast in bottom-right corner with actionable link when
   await actionLink.click();
 
   // Verify navigating to calendar
-  await expect(page.getByRole("button", { name: "Semana" })).toBeVisible();
+  await expect(page.getByRole("tab", { name: "Semana" })).toBeVisible();
 });
 
 test("approving a post triggers a green toast with actionable link", async ({ page }) => {

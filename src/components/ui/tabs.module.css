@@ -48,9 +48,34 @@
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
 }
 
+.trigger span[class*="filterBadge"] {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 1px 7px;
+  border-radius: 10px;
+  background: var(--bg-muted, #ebe9f6);
+  color: var(--text-secondary, #6755cf);
+  transition: all 150ms ease;
+}
+
+.trigger[data-active] span[class*="filterBadge"] {
+  background: var(--primary, #7361dc);
+  color: #ffffff;
+}
+
 @media (prefers-color-scheme: dark) {
   .trigger[data-active] {
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+  }
+
+  .trigger span[class*="filterBadge"] {
+    background: var(--bg-surface-hover, #2a2e39);
+    color: var(--text-secondary, #9da3b4);
+  }
+
+  .trigger[data-active] span[class*="filterBadge"] {
+    background: var(--primary, #7361dc);
+    color: #ffffff;
   }
 }
 

@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { NetworkIcon } from "@/components/ui/network-icon";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { CheckCheck, Check, Pencil, Trash2, RefreshCw } from "lucide-react";
 import {
   canBatchApprove,
@@ -135,35 +136,26 @@ export function ReviewList({
         </div>
       </div>
 
-      <nav aria-label="Filtros de revisiones" className={styles.reviewFilters}>
-        <button
-          type="button"
-          onClick={() => setFilter("all")}
-          className={`${styles.filterChip} ${filter === "all" ? styles.filterChipActive : ""}`}
-          aria-pressed={filter === "all"}
-        >
-          <span>Todas</span>
-          <span className={styles.filterBadge}>{counts.total}</span>
-        </button>
-        <button
-          type="button"
-          onClick={() => setFilter("review")}
-          className={`${styles.filterChip} ${filter === "review" ? styles.filterChipActive : ""}`}
-          aria-pressed={filter === "review"}
-        >
-          <span>Pendientes de revisión</span>
-          <span className={styles.filterBadge}>{counts.review}</span>
-        </button>
-        <button
-          type="button"
-          onClick={() => setFilter("failed")}
-          className={`${styles.filterChip} ${filter === "failed" ? styles.filterChipActive : ""}`}
-          aria-pressed={filter === "failed"}
-        >
-          <span>Fallidas</span>
-          <span className={styles.filterBadge}>{counts.failed}</span>
-        </button>
-      </nav>
+      <Tabs
+        value={filter}
+        onValueChange={(val) => setFilter(val as ReviewFilter)}
+        className={styles.reviewFilters}
+      >
+        <TabsList aria-label="Filtros de revisiones">
+          <TabsTrigger value="all">
+            <span>Todas</span>
+            <span className={styles.filterBadge}>{counts.total}</span>
+          </TabsTrigger>
+          <TabsTrigger value="review">
+            <span>Pendientes de revisión</span>
+            <span className={styles.filterBadge}>{counts.review}</span>
+          </TabsTrigger>
+          <TabsTrigger value="failed">
+            <span>Fallidas</span>
+            <span className={styles.filterBadge}>{counts.failed}</span>
+          </TabsTrigger>
+        </TabsList>
+      </Tabs>
 
       {counts.total === 0 ? (
         <section className={styles.reviewEmptyState} aria-label="Estado de revisiones">

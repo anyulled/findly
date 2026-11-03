@@ -9,7 +9,9 @@ The current E2E coverage checks:
 - Public landing at `/`, the top-right **Acceder** link into `/workspace`, and responsive layout at 375, 768, 1024 and 1440 pixels.
 - Sidebar navigation column alignment verifying that the section navigation icons start within 1px of each other horizontally in the initial `/workspace` state.
 - Switching between settings tabs (Preferencias generales and Fuentes) using the accessible shadcn Tabs component.
-- Switching the calendar between its default fortnight, week, and month views.
+- Switching between period tabs in AI statistics view (Todo, Últimos 30 días, Últimos 7 días) using the accessible shadcn Tabs component.
+- Switching the calendar between its default fortnight, week, and month views using the accessible shadcn Tabs component.
+- Filtering publications in the Revisiones view (Todas, Pendientes de revisión, Fallidas) using accessible Tabs with status counter badges.
 - Creating an event eight days ahead, which leaves the one-week and one-day reminders in range and omits the two-week reminder. The generated drafts cover all seven configured social channels.
 - Approving a draft, recording it as a style example, and retaining that approval after a page reload.
 - Expanding a day with seven publications, opening and approving each account/channel with the keyboard, and opening a simulated uncertain publication that was initially hidden. This checks access to the existing reconciliation UI in demo mode; it does not exercise Buffer.

@@ -42,21 +42,48 @@ test("switches between settings tabs using shadcn accessible tabs component", as
   await expect(page.getByRole("heading", { name: "Modo de publicación" })).toBeVisible();
 });
 
-test("switches between fortnight, week, and month calendar views", async ({ page }) => {
-  const fortnight = page.getByRole("button", { name: "Quincena" });
-  const week = page.getByRole("button", { name: "Semana" });
-  const month = page.getByRole("button", { name: "Mes" });
+test("switches between period tabs in AI statistics view using shadcn tabs component", async ({ page }) => {
+  await page.getByRole("button", { name: "Estadísticas" }).click();
+  await expect(page.getByRole("heading", { name: /Estadísticas de IA/ })).toBeVisible();
 
-  await expect(fortnight).toHaveAttribute("aria-pressed", "true");
+  const allTab = page.getByRole("tab", { name: "Todo" });
+  const thirtyDaysTab = page.getByRole("tab", { name: "Últimos 30 días" });
+  const sevenDaysTab = page.getByRole("tab", { name: "Últimos 7 días" });
+
+  await expect(allTab).toBeVisible();
+  await expect(thirtyDaysTab).toBeVisible();
+  await expect(sevenDaysTab).toBeVisible();
+  await expect(allTab).toHaveAttribute("aria-selected", "true");
+  await expect(thirtyDaysTab).toHaveAttribute("aria-selected", "false");
+  await expect(sevenDaysTab).toHaveAttribute("aria-selected", "false");
+
+  await thirtyDaysTab.click();
+  await expect(thirtyDaysTab).toHaveAttribute("aria-selected", "true");
+  await expect(allTab).toHaveAttribute("aria-selected", "false");
+
+  await sevenDaysTab.click();
+  await expect(sevenDaysTab).toHaveAttribute("aria-selected", "true");
+  await expect(thirtyDaysTab).toHaveAttribute("aria-selected", "false");
+
+  await allTab.click();
+  await expect(allTab).toHaveAttribute("aria-selected", "true");
+});
+
+test("switches between fortnight, week, and month calendar views", async ({ page }) => {
+  const fortnight = page.getByRole("tab", { name: "Quincena" });
+  const week = page.getByRole("tab", { name: "Semana" });
+  const month = page.getByRole("tab", { name: "Mes" });
+
+  await expect(fortnight).toHaveAttribute("aria-selected", "true");
   await expect(page.getByTestId("calendar-day")).toHaveCount(14);
 
   await week.click();
-  await expect(week).toHaveAttribute("aria-pressed", "true");
-  await expect(fortnight).toHaveAttribute("aria-pressed", "false");
+  await expect(week).toHaveAttribute("aria-selected", "true");
+  await expect(fortnight).toHaveAttribute("aria-selected", "false");
   await expect(page.getByTestId("calendar-day")).toHaveCount(7);
 
   await month.click();
-  await expect(month).toHaveAttribute("aria-pressed", "true");
+  await expect(month).toHaveAttribute("aria-selected", "true");
   await expect(page.getByTestId("calendar-day")).toHaveCount(42);
 
   const now = new Date();
@@ -135,7 +162,7 @@ test("expands a crowded day and opens every account's publication, including an 
   await expand.focus();
   await page.keyboard.press("Enter");
   await expect(reminderDay.getByRole("button", { name: `Mostrar menos publicaciones del ${reminderDate}` })).toHaveAttribute("aria-expanded", "true");
-  await expect(page.getByRole("button", { name: "Quincena" })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("tab", { name: "Quincena" })).toHaveAttribute("aria-selected", "true");
   await expect(periodHeading).toHaveText(period!);
   await expect(reminderDay.getByRole("button", { name: "Seven channel event · Barcelona JUG · LinkedIn · Pendiente de revisión" })).toBeFocused();
   await page.keyboard.press("Tab");
@@ -406,17 +433,17 @@ test("navigates to Revisiones tab, filters posts, approves single and batch, and
   await expect(page.getByRole("heading", { name: "Revisiones", level: 1 })).toBeVisible();
 
   // Test filters
-  await page.getByRole("button", { name: /Pendientes de revisión/ }).click();
+  await page.getByRole("tab", { name: /Pendientes de revisión/ }).click();
   await expect(page.getByText("Text for Alpha LinkedIn")).toBeVisible();
   await expect(page.getByText("Text for Alpha Bluesky failed")).toHaveCount(0);
 
-  await page.getByRole("button", { name: /Fallidas/ }).click();
+  await page.getByRole("tab", { name: /Fallidas/ }).click();
   await expect(page.getByText("Text for Alpha Bluesky failed")).toBeVisible();
   await expect(page.getByText("Error de Buffer: Buffer channel disconnected")).toBeVisible();
   await expect(page.getByText("Text for Alpha LinkedIn")).toHaveCount(0);
 
   // Return to all
-  await page.getByRole("button", { name: /^Todas/ }).click();
+  await page.getByRole("tab", { name: /^Todas/ }).click();
 
   // Test opening modal via Editar
   await page.getByRole("button", { name: "Editar" }).first().click();
