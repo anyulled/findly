@@ -104,6 +104,36 @@ function resolveRedirectUrl(response: Response, current: URL): URL | null {
   }
 }
 
+async function readLimitedHtml(response: Response): Promise<string | null> {
+  const limit = 512_000;
+  const declared = Number(response.headers.get("content-length"));
+  if (declared > limit) {
+    await response.body?.cancel();
+    return null;
+  }
+  if (!response.body) return null;
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let size = 0;
+  let html = "";
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > limit) {
+        await reader.cancel();
+        return null;
+      }
+      html += decoder.decode(value, { stream: true });
+    }
+    html += decoder.decode();
+  } finally {
+    reader.releaseLock();
+  }
+  return html;
+}
+
 async function fetchHtmlBodyWithRedirects(
   initialUrl: URL,
   fetchImpl: typeof fetch,
@@ -127,32 +157,8 @@ async function fetchHtmlBodyWithRedirects(
         continue;
       }
       if (!response.ok) return null;
-      const limit = 512_000;
-      const declared = Number(response.headers.get("content-length"));
-      if (declared > limit) {
-        await response.body?.cancel();
-        return null;
-      }
-      if (!response.body) return null;
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let size = 0;
-      let html = "";
-      try {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          size += value.byteLength;
-          if (size > limit) {
-            await reader.cancel();
-            return null;
-          }
-          html += decoder.decode(value, { stream: true });
-        }
-        html += decoder.decode();
-      } finally {
-        reader.releaseLock();
-      }
+      const html = await readLimitedHtml(response);
+      if (html === null) return null;
       return { html, finalUrl: current.toString() };
     } catch {
       return null;

@@ -106,3 +106,25 @@ it("stops reading an oversized OpenGraph response", async () => {
   assert.equal(reads, 3);
   assert.equal(cancelled, true);
 });
+
+
+it("rejects declared oversized response before reading", async () => {
+  let reads = 0; let cancelled = false;
+  const body = new ReadableStream<Uint8Array>({ pull(c) { reads++; c.enqueue(new Uint8Array(10)); }, cancel() { cancelled = true; } }, { highWaterMark: 0 });
+  assert.equal(await fetchOpenGraphImage("https://example.com", async () => new Response(body, { headers: { "content-length": "600000" } })), null);
+  assert.equal(reads, 0); assert.equal(cancelled, true);
+});
+
+it("rejects a body larger than its declared length", async () => {
+  let cancelled = false;
+  const body = new ReadableStream<Uint8Array>({ pull(c) { c.enqueue(new Uint8Array(200000)); }, cancel() { cancelled = true; } }, { highWaterMark: 0 });
+  assert.equal(await fetchOpenGraphImage("https://example.com", async () => new Response(body, { headers: { "content-length": "100" } })), null);
+  assert.equal(cancelled, true);
+});
+
+it("decodes UTF-8 across stream chunks", async () => {
+  const bytes = new TextEncoder().encode('<meta property="og:image" content="https://example.com/é.png">');
+  const split = bytes.indexOf(0xc3) + 1;
+  const body = new ReadableStream<Uint8Array>({ start(c) { c.enqueue(bytes.slice(0, split)); c.enqueue(bytes.slice(split)); c.close(); } });
+  assert.equal(await fetchOpenGraphImage("https://example.com", async () => new Response(body)), "https://example.com/%C3%A9.png");
+});
