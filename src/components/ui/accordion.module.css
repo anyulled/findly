@@ -1,0 +1,56 @@
+.accordionRoot {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+
+.accordionItem {
+  border-radius: 8px;
+  border: 1px solid var(--border-default, #ececf0);
+  background: var(--bg-surface, #ffffff);
+  overflow: hidden;
+  transition: border-color 140ms ease;
+}
+
+.accordionHeader {
+  margin: 0;
+  display: flex;
+}
+
+.accordionTrigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 14px 16px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary, #202229);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  outline: none;
+  text-align: left;
+}
+
+.accordionTrigger:focus-visible {
+  outline: 3px solid var(--focus-outline, rgba(115, 97, 220, 0.35));
+  outline-offset: -2px;
+}
+
+.accordionChevron {
+  transition: transform 200ms cubic-bezier(0.16, 1, 0.3, 1);
+  color: var(--text-secondary, #747581);
+}
+
+.accordionTrigger[data-expanded] .accordionChevron {
+  transform: rotate(180deg);
+}
+
+.accordionPanel {
+  padding: 0 16px 14px;
+  font-size: 14px;
+  color: var(--text-secondary, #747581);
+  line-height: 1.5;
+}

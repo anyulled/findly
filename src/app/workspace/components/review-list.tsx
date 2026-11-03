@@ -5,6 +5,9 @@ import styles from "../../page.module.css";
 import type { Account, EventItem, Post } from "../workspace-types";
 import { matchesAccount } from "../workspace-types";
 import { dateAt } from "../workspace-calendar-dates";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
 import {
   canBatchApprove,
   countReviewPosts,
@@ -168,20 +171,18 @@ export function ReviewList({
             No tienes publicaciones pendientes de revisión ni incidencias de envío en este momento.
           </p>
           <div className={styles.reviewEmptyActions}>
-            <button
-              type="button"
-              className={styles.approveButton}
+            <Button
+              variant="default"
               onClick={() => setTab("Calendario")}
             >
               Ver Calendario
-            </button>
-            <button
-              type="button"
-              className={styles.secondaryButton}
+            </Button>
+            <Button
+              variant="secondary"
               onClick={() => setTab("Eventos")}
             >
               Ver Eventos
-            </button>
+            </Button>
           </div>
         </section>
       ) : filteredPosts.length === 0 ? (
@@ -232,9 +233,9 @@ export function ReviewList({
 
                   <div className={styles.reviewGroupActions}>
                     {canBatch && (
-                      <button
-                        type="button"
-                        className={styles.approveAllButton}
+                      <Button
+                        variant="default"
+                        size="sm"
                         disabled={isBatchProcessing}
                         onClick={() => void handleApproveAllForEvent(group.posts, group.eventId)}
                         aria-label={`Aprobar todas las publicaciones pendientes de ${event?.title || "este evento"}`}
@@ -242,7 +243,7 @@ export function ReviewList({
                         {isBatchProcessing
                           ? "Aprobando…"
                           : `✓ Aprobar todas (${reviewPostsInGroup.length})`}
-                      </button>
+                      </Button>
                     )}
                   </div>
                 </header>
@@ -268,7 +269,7 @@ export function ReviewList({
                     }
 
                     return (
-                      <div key={post.id} className={styles.reviewPostCard}>
+                      <Card key={post.id} className={styles.reviewPostCard}>
                         <div className={styles.reviewPostTop}>
                           <div className={styles.reviewPostAccount}>
                             {account?.logo ? (
@@ -290,26 +291,26 @@ export function ReviewList({
                             <span className={styles.reviewPostAccountName}>
                               {account?.name ?? post.account}
                             </span>
-                            <span className={styles.reviewNetworkBadge}>{post.network}</span>
+                            <Badge variant="outline">{post.network}</Badge>
                           </div>
 
                           <div className={styles.reviewPostMeta}>
                             {scheduledLabel && <span>{scheduledLabel}</span>}
-                            <span
-                              className={`${styles.reviewStatusBadge} ${
+                            <Badge
+                              variant={
                                 isReview
-                                  ? styles.reviewStatusReview
+                                  ? "warning"
                                   : isFailed
-                                    ? styles.reviewStatusFailed
-                                    : ""
-                              }`}
+                                    ? "destructive"
+                                    : "secondary"
+                              }
                             >
                               {isReview
                                 ? "Pendiente de revisión"
                                 : isFailed
                                   ? "Envío fallido"
                                   : post.status}
-                            </span>
+                            </Badge>
                           </div>
                         </div>
 
@@ -337,9 +338,9 @@ export function ReviewList({
                         </div>
 
                         <div className={styles.reviewPostBottom}>
-                          <button
-                            type="button"
-                            className={styles.secondaryButton}
+                          <Button
+                            variant="ghost"
+                            size="sm"
                             disabled={isProcessing}
                             onClick={() => void handleRemoveSingle(post)}
                           >
@@ -348,19 +349,19 @@ export function ReviewList({
                               : isFailed
                                 ? "✕ Eliminar"
                                 : "✕ Descartar"}
-                          </button>
-                          <button
-                            type="button"
-                            className={styles.secondaryButton}
+                          </Button>
+                          <Button
+                            variant="secondary"
+                            size="sm"
                             disabled={isProcessing}
                             onClick={() => onSelectPost(post)}
                           >
                             ✎ Editar
-                          </button>
+                          </Button>
                           {isReview && (
-                            <button
-                              type="button"
-                              className={styles.approveButton}
+                            <Button
+                              variant="default"
+                              size="sm"
                               disabled={isProcessing}
                               onClick={() => void handleApproveSingle(post)}
                             >
@@ -369,20 +370,20 @@ export function ReviewList({
                                 : persistent
                                   ? "✓ Aprobar y programar"
                                   : "✓ Aprobar"}
-                            </button>
+                            </Button>
                           )}
                           {isFailed && (
-                            <button
-                              type="button"
-                              className={styles.approveButton}
+                            <Button
+                              variant="default"
+                              size="sm"
                               disabled={isProcessing}
                               onClick={() => void handleRetrySingle(post)}
                             >
                               {isProcessing ? "Reintentando…" : "↻ Reintentar envío"}
-                            </button>
+                            </Button>
                           )}
                         </div>
-                      </div>
+                      </Card>
                     );
                   })}
                 </div>

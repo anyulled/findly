@@ -1,0 +1,48 @@
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 9999px;
+  padding: 3px 9px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.25;
+  white-space: nowrap;
+  transition: background-color 150ms ease, color 150ms ease, border-color 150ms ease;
+}
+
+.variantDefault {
+  background: var(--primary);
+  color: var(--primary-foreground);
+  border: 1px solid transparent;
+}
+
+.variantSecondary {
+  background: var(--bg-surface-subtle);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-default);
+}
+
+.variantOutline {
+  background: transparent;
+  color: var(--text-primary);
+  border: 1px solid var(--border-default);
+}
+
+.variantDestructive {
+  background: var(--destructive-subtle);
+  color: var(--destructive-text);
+  border: 1px solid rgba(220, 38, 38, 0.2);
+}
+
+.variantSuccess {
+  background: var(--success-subtle);
+  color: var(--success-text);
+  border: 1px solid rgba(22, 163, 74, 0.25);
+}
+
+.variantWarning {
+  background: var(--warning-subtle);
+  color: var(--warning-text);
+  border: 1px solid rgba(217, 119, 6, 0.25);
+}

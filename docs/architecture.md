@@ -63,6 +63,15 @@ Findly standardizes its design system components on shadcn/ui patterns backed by
 - **Buttons (`Button`)**: Standardized with semantic variants (`default`, `secondary`, `destructive`, `ghost`, `outline`, `link`) and sizes (`default`, `sm`, `lg`, `icon`).
 - **Modal Dialog (`Dialog`)**: Accessible overlay dialog replacing manual fixed containers for adding events, managing ARIA live regions and escape key bindings.
 - **Side Panel (`Sheet`)**: Drawer component anchored to the right edge with smooth transitions and backdrop for viewing and editing publication details, avoiding focus-trapping conflicts with background notifications.
+- **Badge (`Badge`)**: Semantic status and category tags (`default`, `secondary`, `destructive`, `outline`, `success`, `warning`) used across review cards, network chips, account indicators, and KPI dashboards.
+- **Card (`Card`, `CardHeader`, `CardTitle`, `CardDescription`, `CardContent`, `CardFooter`)**: Structured surface component providing consistent elevated panels, border styling, and hierarchy in workspace reviews, account configurations, and metrics.
+- **Progress (`Progress`)**: Accessible percentage and progress indicator with ARIA range metadata, integrated into KPI reliability cards and generation ratio bars.
+- **Skeleton (`Skeleton`)**: Pulsing placeholder component displaying subtle loading states during AI text regeneration, event URL metadata extractions, and stats retrieval.
+- **Checkbox (`Checkbox`) & Switch (`Switch`)**: Accessible toggles and checkboxes based on Base UI primitives, with keyboard activation and focus ring visibility.
+- **Tooltip (`Tooltip`) & Popover (`Popover`)**: Contextual hover/focus assistants and floating containers for extra metadata without visual clutter.
+- **AlertDialog (`AlertDialog`)**: Dedicated confirmation dialog for irreversible actions (e.g. discarding review drafts).
+- **Select (`Select`) & Accordion (`Accordion`)**: Form select dropdowns and expandable panels for nested account and event settings.
+- **DropdownMenu (`DropdownMenu`)**: Accessible floating action menu for contextual operations.
 - **Tabs (`Tabs`) & Sidebar Navigation**: WAI-ARIA compliant tab navigation primitive (`Tabs`) available for multi-view interfaces; the workspace sidebar switches active sections using semantic `Button` elements with aria-pressed state.
 - **Dark Mode**: Automatic system preference matching implemented cleanly via `@media (prefers-color-scheme: dark)` and CSS custom properties (`--bg-canvas`, `--bg-surface`, `--text-primary`, `--border-default`, etc.), avoiding client JavaScript re-renders and preventing flash of unstyled content (FOUC).
 
