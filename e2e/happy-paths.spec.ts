@@ -5,6 +5,21 @@ test.beforeEach(async ({ page }) => {
   await expect(page.getByText("Modo demostración")).toBeVisible();
 });
 
+test("aligns sidebar navigation icons and labels in a vertical column", async ({ page }) => {
+  const navItems = page.locator("aside nav button");
+  await expect(navItems).toHaveCount(6);
+
+  const icons = page.locator("aside nav button span:first-child");
+  const firstBox = await icons.first().boundingBox();
+  expect(firstBox).not.toBeNull();
+
+  for (let i = 1; i < 6; i++) {
+    const box = await icons.nth(i).boundingBox();
+    expect(box).not.toBeNull();
+    expect(Math.abs((box?.x ?? 0) - (firstBox?.x ?? 0))).toBeLessThanOrEqual(1);
+  }
+});
+
 test("switches between fortnight, week, and month calendar views", async ({ page }) => {
   const fortnight = page.getByRole("button", { name: "Quincena" });
   const week = page.getByRole("button", { name: "Semana" });
