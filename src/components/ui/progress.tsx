@@ -10,12 +10,15 @@ export interface ProgressProps extends Omit<React.ComponentProps<typeof BaseProg
 }
 
 export function Progress({
-  value = 0,
+  value = null,
   max = 100,
   className = "",
   ...props
 }: ProgressProps) {
-  const percentage = Math.min(100, Math.max(0, (Number(value ?? 0) / max) * 100));
+  const isIndeterminate = value === null || value === undefined;
+  const percentage = isIndeterminate
+    ? undefined
+    : Math.min(100, Math.max(0, (Number(value) / max) * 100));
 
   return (
     <BaseProgress.Root
@@ -27,7 +30,7 @@ export function Progress({
       <BaseProgress.Track className={styles.progressTrack}>
         <BaseProgress.Indicator
           className={styles.progressIndicator}
-          style={{ width: `${percentage}%` }}
+          style={percentage !== undefined ? { width: `${percentage}%` } : undefined}
         />
       </BaseProgress.Track>
     </BaseProgress.Root>
