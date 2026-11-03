@@ -93,3 +93,16 @@ describe("OpenGraph & JSON-LD image extraction", () => {
     assert.equal(failed, null);
   });
 });
+
+
+it("stops reading an oversized OpenGraph response", async () => {
+  let reads = 0;
+  let cancelled = false;
+  const stream = new ReadableStream<Uint8Array>({
+    pull(controller) { reads++; controller.enqueue(new Uint8Array(200_000)); },
+    cancel() { cancelled = true; },
+  }, { highWaterMark: 0 });
+  assert.equal(await fetchOpenGraphImage("https://example.com/", async () => new Response(stream)), null);
+  assert.equal(reads, 3);
+  assert.equal(cancelled, true);
+});

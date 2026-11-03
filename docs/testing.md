@@ -56,3 +56,5 @@ CI installs Chromium and its system dependencies with `npx playwright install --
 El descarte de borradores conserva la identidad del recordatorio y borra su contenido: `supabase/tests/discard_draft.sql` comprueba aislamiento de propietario, estados protegidos, imposibilidad de aprobar o enviar y protección frente a la regeneración. El CI ejecuta `scripts/test-discard-approval-race.mjs` con dos sesiones simultáneas y prueba ambos órdenes de aprobación y descarte. El E2E cubre la eliminación y la ausencia de la acción para una publicación programada.
 
 Los tests de Groq comprueban categorías seguras de error, el origen persistido y que los textos básicos permanecen en revisión en modo automático. Playwright verifica cómo se muestra el origen desconocido y el fallo de generación con datos simulados; no llama a Groq.
+
+La extracción OpenGraph limita la lectura del cuerpo a 512.000 bytes y cancela respuestas que superan ese tamaño.
