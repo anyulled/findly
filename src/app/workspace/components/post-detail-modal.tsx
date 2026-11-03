@@ -218,6 +218,7 @@ export function PostDetailModal({
           {isEditable && (
             <Button
               variant="secondary"
+              disabled={regeneratingAi || deletingDraft}
               onClick={() => {
                 onSavePostChanges(selected, { text: editing, ...schedulePayload });
               }}
@@ -251,7 +252,7 @@ export function PostDetailModal({
               onClick={() => {
                 onSavePostChanges(selected, { text: editing, status: "approved", ...schedulePayload });
               }}
-              disabled={!postValidation?.valid}
+              disabled={regeneratingAi || deletingDraft || !postValidation?.valid}
             >
               {persistent ? "✓ Aprobar, programar y guardar ejemplo" : "✓ Aprobar y guardar ejemplo"}
             </Button>
@@ -259,6 +260,7 @@ export function PostDetailModal({
           {selected.status === "failed" && (
             <Button
               variant="default"
+              disabled={regeneratingAi || deletingDraft}
               onClick={() => {
                 onRetryPost(selected);
               }}
