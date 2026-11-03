@@ -20,6 +20,28 @@ test("aligns sidebar navigation icons and labels in a vertical column", async ({
   }
 });
 
+test("switches between settings tabs using shadcn accessible tabs component", async ({ page }) => {
+  await page.getByRole("button", { name: "Ajustes" }).click();
+  const generalTab = page.getByRole("tab", { name: "Preferencias generales" });
+  const sourcesTab = page.getByRole("tab", { name: "Fuentes de eventos y publicaciones" });
+
+  await expect(generalTab).toBeVisible();
+  await expect(sourcesTab).toBeVisible();
+  await expect(generalTab).toHaveAttribute("aria-selected", "true");
+  await expect(sourcesTab).toHaveAttribute("aria-selected", "false");
+  await expect(page.getByRole("heading", { name: "Modo de publicación" })).toBeVisible();
+
+  await sourcesTab.click();
+  await expect(generalTab).toHaveAttribute("aria-selected", "false");
+  await expect(sourcesTab).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("heading", { name: "Añadir fuente" })).toBeVisible();
+
+  await generalTab.click();
+  await expect(generalTab).toHaveAttribute("aria-selected", "true");
+  await expect(sourcesTab).toHaveAttribute("aria-selected", "false");
+  await expect(page.getByRole("heading", { name: "Modo de publicación" })).toBeVisible();
+});
+
 test("switches between fortnight, week, and month calendar views", async ({ page }) => {
   const fortnight = page.getByRole("button", { name: "Quincena" });
   const week = page.getByRole("button", { name: "Semana" });
@@ -184,7 +206,7 @@ test("extracts event details from a pasted URL and lets the owner review the res
 
 test("stores a Luma iCal source linked to multiple accounts", async ({ page }) => {
   await page.getByRole("button", { name: "Ajustes" }).click();
-  await page.getByRole("button", { name: "Fuentes de eventos y publicaciones" }).click();
+  await page.getByRole("tab", { name: "Fuentes de eventos y publicaciones" }).click();
   await page.getByLabel("Nombre de la fuente").fill("BarcelonaJS Luma");
   await page.getByLabel("URL de suscripción iCal").fill("https://calendar.example.com/barcelonajs.ics");
   await page.getByRole("checkbox", { name: "Personal" }).check();
@@ -201,7 +223,7 @@ test("stores a Luma iCal source linked to multiple accounts", async ({ page }) =
   await source.getByRole("checkbox", { name: "Activa" }).uncheck();
   await page.reload();
   await page.getByRole("button", { name: "Ajustes" }).click();
-  await page.getByRole("button", { name: "Fuentes de eventos y publicaciones" }).click();
+  await page.getByRole("tab", { name: "Fuentes de eventos y publicaciones" }).click();
   const restored = page.getByRole("article").filter({ hasText: "BarcelonaJS Luma" });
   await expect(restored.getByRole("checkbox", { name: "Activa" })).not.toBeChecked();
   page.once("dialog", (dialog) => {
@@ -345,7 +367,7 @@ test("retires a source with imported events instead of deleting it", async ({ pa
   })), today);
   await page.reload();
   await page.getByRole("button", { name: "Ajustes" }).click();
-  await page.getByRole("button", { name: "Fuentes de eventos y publicaciones" }).click();
+  await page.getByRole("tab", { name: "Fuentes de eventos y publicaciones" }).click();
   const imported = page.getByRole("article").filter({ hasText: "Fuente importada" });
   const empty = page.getByRole("article").filter({ hasText: "Fuente vacía" });
   await expect(imported.getByRole("button", { name: "Eliminar" })).toHaveCount(0);
