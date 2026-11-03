@@ -1,5 +1,6 @@
 import styles from "../../page.module.css";
 import { Button } from "@/components/ui/button";
+import { Clock, CircleHelp, Plus } from "lucide-react";
 
 interface WorkspaceTopbarProps {
   tab: string;
@@ -19,12 +20,14 @@ export function WorkspaceTopbar({ tab, syncingWorkspace, openAddForm }: Workspac
             Actualizando…
           </span>
         )}
-        <span className={styles.tz}>◷ &nbsp;Europe/Madrid</span>
+        <span className={styles.tz} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+          <Clock size={14} aria-hidden="true" /> Europe/Madrid
+        </span>
         <Button variant="ghost" size="sm" className={styles.helpBtn}>
-          ? <span>Ayuda</span>
+          <CircleHelp size={15} aria-hidden="true" /> <span>Ayuda</span>
         </Button>
         <Button variant="default" onClick={openAddForm}>
-          <span>＋</span> Añadir evento
+          <Plus size={16} aria-hidden="true" /> Añadir evento
         </Button>
       </div>
     </header>

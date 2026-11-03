@@ -194,15 +194,55 @@
     background: var(--bg-surface);
     color: var(--text-primary);
   }
-  .eventCard, .accountCard, .settingsCard, .kpiCard, .ratioBarContainer, .sourceCard {
+  .eventCard, .accountCard, .settingsCard, .kpiCard, .ratioBarContainer, .sourceCard, .tableCard {
     background: var(--bg-surface);
     border-color: var(--border-default);
   }
-  .eventInfo h3, .accountTop b, .settingsTitle h3, .statsHeader h2, .kpiMainValue, .ratioBarTitle {
+  .eventInfo h3, .accountTop b, .settingsTitle h3, .statsHeader h2, .kpiMainValue, .ratioBarTitle, .tableHeader h3, .reviewGroupTitle h3 {
     color: var(--text-primary);
   }
-  .eventInfo p, .settingsTitle p, .statsHeader p {
+  .eventInfo p, .settingsTitle p, .statsHeader p, .kpiSub, .kpiTitle, .ratioLegend, .kpiDetailItem span {
     color: var(--text-secondary);
+  }
+  .kpiDetailItem b {
+    color: var(--text-primary);
+  }
+  .kpiDetails, .tableHeader {
+    border-color: var(--border-default);
+  }
+  .ratioBar {
+    background: var(--bg-surface-subtle);
+  }
+  .badgeGroq {
+    background: rgba(249, 115, 22, 0.15);
+    color: #fb923c;
+    border: 1px solid rgba(249, 115, 22, 0.3);
+  }
+  .badgeOpenai {
+    background: rgba(16, 185, 129, 0.15);
+    color: #34d399;
+    border: 1px solid rgba(16, 185, 129, 0.3);
+  }
+  .badgeFallback {
+    background: var(--bg-surface-subtle);
+    color: var(--text-secondary);
+    border: 1px solid var(--border-default);
+  }
+  .reviewGroup {
+    background: var(--bg-surface);
+    border-color: var(--border-default);
+  }
+  .reviewGroupHeader {
+    border-color: var(--border-default);
+  }
+  .filterChip {
+    background: var(--bg-surface);
+    border-color: var(--border-default);
+    color: var(--text-secondary);
+  }
+  .filterChip:hover {
+    background: var(--bg-surface-subtle);
+    border-color: var(--border-strong);
   }
   .sourceNotice, .sourceHelp {
     background: var(--bg-surface-subtle);

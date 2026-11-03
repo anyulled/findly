@@ -4,6 +4,7 @@ import { selectEventAccounts, hasMissingReminders } from "@/lib/event-targets";
 import type { SourceView } from "../../workspace-actions";
 import type { Account, EventItem, Post } from "../workspace-types";
 import { dateAt, scheduleDates, sortEventsReverseChronological } from "../workspace-calendar-dates";
+import { Plus, ExternalLink, Trash2 } from "lucide-react";
 
 interface EventListProps {
   events: EventItem[];
@@ -39,7 +40,7 @@ export function EventList({
           <p>Gestiona los eventos y las publicaciones que generan.</p>
         </div>
         <button className={styles.addButton} onClick={openAddForm}>
-          ＋ Añadir evento
+          <Plus size={16} aria-hidden="true" style={{ marginRight: 6 }} /> Añadir evento
         </button>
       </div>
 
@@ -99,8 +100,15 @@ export function EventList({
                       }
                       target={event.url ? "_blank" : undefined}
                       rel="noreferrer"
+                      style={{ display: "inline-flex", alignItems: "center", gap: 4 }}
                     >
-                      {event.source === "Manual" ? "Añadido manualmente" : "Abrir evento ↗"}
+                      {event.source === "Manual" ? (
+                        "Añadido manualmente"
+                      ) : (
+                        <>
+                          Abrir evento <ExternalLink size={13} aria-hidden="true" />
+                        </>
+                      )}
                     </a>
                   </div>
                 </div>
@@ -113,7 +121,9 @@ export function EventList({
                       onRemoveEvent(event.id);
                     }}
                     aria-label={`Eliminar evento ${event.title}`}
+                    style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
                   >
+                    <Trash2 size={14} aria-hidden="true" />
                     {deletingEventId === event.id ? "Eliminando…" : "Eliminar"}
                   </button>
                 </div>

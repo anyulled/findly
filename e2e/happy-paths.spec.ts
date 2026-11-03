@@ -64,7 +64,7 @@ test("creates an event, prepares only timely reminders, and saves approval as a 
   await eventPost.click();
   await expect(page.getByRole("heading", { name: "Playwright Happy Path Event" }).last()).toBeVisible();
   await expect(page.getByText("Origen de generación desconocido para esta publicación.")).toBeVisible();
-  await page.getByRole("button", { name: "✓ Aprobar y guardar ejemplo" }).click();
+  await page.getByRole("button", { name: /Aprobar y guardar ejemplo/ }).click();
 
   await page.getByRole("button", { name: "Cuentas" }).click();
   await expect(page.getByText("1 ejemplos aprobados").first()).toBeVisible();
@@ -115,7 +115,7 @@ test("expands a crowded day and opens every account's publication, including an 
     await post.focus();
     await page.keyboard.press("Enter");
     await expect(periodHeading).toHaveText(period!);
-    await page.getByRole("button", { name: "✓ Aprobar y guardar ejemplo" }).click();
+    await page.getByRole("button", { name: /Aprobar y guardar ejemplo/ }).click();
     await expect(reminderDay.getByRole("button", { name: `Seven channel event · ${account} · ${network} · Aprobada` })).toBeVisible();
   }
 
@@ -382,9 +382,9 @@ test("navigates to Revisiones tab, filters posts, approves single and batch, and
   await page.getByRole("button", { name: /^Todas/ }).click();
 
   // Test opening modal via Editar
-  await page.getByRole("button", { name: "✎ Editar" }).first().click();
+  await page.getByRole("button", { name: "Editar" }).first().click();
   await expect(page.getByRole("heading", { name: "Review Event Alpha" }).last()).toBeVisible();
-  await page.getByRole("button", { name: "×" }).click();
+  await page.getByRole("button", { name: "Cerrar" }).click();
 
   // Test batch approve for the event
   const batchApproveBtn = page.getByRole("button", { name: /Aprobar todas/ });
@@ -400,7 +400,7 @@ test("navigates to Revisiones tab, filters posts, approves single and batch, and
   page.once("dialog", (dialog) => {
     void dialog.accept();
   });
-  await page.getByRole("button", { name: "✕ Eliminar" }).click();
+  await page.getByRole("button", { name: "Eliminar" }).click();
 
   // Empty state should now be displayed
   await expect(page.getByRole("heading", { name: "¡Todo al día!" })).toBeVisible();

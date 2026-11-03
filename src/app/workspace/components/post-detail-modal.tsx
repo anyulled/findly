@@ -12,6 +12,8 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Skeleton } from "@/components/ui/skeleton";
+import { NetworkIcon } from "@/components/ui/network-icon";
+import { Clock, Sparkles, Check, RefreshCw } from "lucide-react";
 
 const generationErrors: Record<string, string> = {
   not_configured: "Falta configurar la clave de API o modelo de IA en el servidor.",
@@ -91,7 +93,9 @@ export function PostDetailModal({
         </SheetHeader>
         {isEditable ? (
           <div className={styles.schedulePicker}>
-            <span className={styles.scheduleTz}>◷ Programar para:</span>
+            <span className={styles.scheduleTz} style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+              <Clock size={13} aria-hidden="true" /> Programar para:
+            </span>
             <input
               type="date"
               aria-label="Fecha programada"
@@ -109,8 +113,8 @@ export function PostDetailModal({
             <span className={styles.scheduleTz}>Europe/Madrid</span>
           </div>
         ) : (
-          <div className={styles.detailDate}>
-            ◷ &nbsp;
+          <div className={styles.detailDate} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+            <Clock size={14} aria-hidden="true" />
             {dateAt(selected.date).toLocaleDateString("es-ES", {
               weekday: "long",
               day: "numeric",
@@ -120,7 +124,8 @@ export function PostDetailModal({
           </div>
         )}
         <div style={{ margin: "10px 0" }}>
-          <Badge variant="outline">
+          <Badge variant="outline" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+            <NetworkIcon network={selected.network} size={13} />
             {selected.network} · {selected.account}
           </Badge>
         </div>
@@ -243,7 +248,14 @@ export function PostDetailModal({
               }}
               aria-label="Reintentar generación con IA"
             >
-              {regeneratingAi ? "Generando con IA…" : "✨ Reintentar con IA"}
+              {regeneratingAi ? (
+                "Generando con IA…"
+              ) : (
+                <>
+                  <Sparkles size={14} aria-hidden="true" style={{ marginRight: 6 }} />
+                  Reintentar con IA
+                </>
+              )}
             </Button>
           )}
           {selected.status === "review" && (
@@ -254,7 +266,8 @@ export function PostDetailModal({
               }}
               disabled={regeneratingAi || deletingDraft || !postValidation?.valid}
             >
-              {persistent ? "✓ Aprobar, programar y guardar ejemplo" : "✓ Aprobar y guardar ejemplo"}
+              <Check size={15} aria-hidden="true" style={{ marginRight: 6 }} />
+              {persistent ? "Aprobar, programar y guardar ejemplo" : "Aprobar y guardar ejemplo"}
             </Button>
           )}
           {selected.status === "failed" && (
@@ -265,6 +278,7 @@ export function PostDetailModal({
                 onRetryPost(selected);
               }}
             >
+              <RefreshCw size={14} aria-hidden="true" style={{ marginRight: 6 }} />
               Reintentar envío
             </Button>
           )}

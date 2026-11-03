@@ -4,6 +4,7 @@ import { useState, type FormEvent } from "react";
 import styles from "./page.module.css";
 import { confirmAsync } from "@/lib/confirm-dialog";
 import type { SocialNetwork } from "@/lib/social-validation";
+import { Rss, ExternalLink } from "lucide-react";
 import {
   deleteSource,
   fetchSubstackPostsForSource,
@@ -385,7 +386,9 @@ export function SourceSettings({ accounts, sources, persistent, onSourcesChange,
   return (
     <section className={styles.settingsCard} aria-labelledby="sources-heading">
       <div className={styles.settingsTitle}>
-        <span className={styles.settingsIcon}>↗</span>
+        <span className={styles.settingsIcon}>
+          <Rss size={16} aria-hidden="true" />
+        </span>
         <div>
           <h3 id="sources-heading">Fuentes de eventos y publicaciones</h3>
           <p>Guarda las fuentes y elige qué cuentas y canales recibirán sus publicaciones.</p>
@@ -420,14 +423,14 @@ export function SourceSettings({ accounts, sources, persistent, onSourcesChange,
                     <button
                       type="button"
                       className={styles.secondaryButton}
-                      style={{ padding: "4px 9px", fontSize: "13px" }}
+                      style={{ padding: "4px 9px", fontSize: "13px", display: "inline-flex", alignItems: "center", gap: 4 }}
                       onClick={() => { void openSubstackModal(source); }}
                     >
-                      Ver publicaciones ↗
+                      Ver publicaciones <ExternalLink size={12} aria-hidden="true" />
                     </button>
                   )}
-                  <a href={source.url} target="_blank" rel="noreferrer">
-                    Abrir ↗
+                  <a href={source.url} target="_blank" rel="noreferrer" style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                    Abrir <ExternalLink size={12} aria-hidden="true" />
                   </a>
                 </div>
               </div>
@@ -806,8 +809,8 @@ export function SourceSettings({ accounts, sources, persistent, onSourcesChange,
                         </p>
                       )}
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                        <a href={post.url} target="_blank" rel="noreferrer" style={{ fontSize: "13px" }}>
-                          Leer en Substack ↗
+                        <a href={post.url} target="_blank" rel="noreferrer" style={{ fontSize: "13px", display: "inline-flex", alignItems: "center", gap: 4 }}>
+                          Leer en Substack <ExternalLink size={12} aria-hidden="true" />
                         </a>
                         <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
                           {post.alreadyImported && (
