@@ -5,6 +5,7 @@ import { statusLabels } from "../workspace-types";
 import { dayKey } from "../workspace-calendar-dates";
 import { ChevronLeft, ChevronRight, Plus, Sparkles, CheckCircle2, ArrowRight } from "lucide-react";
 import { NetworkIcon } from "@/components/ui/network-icon";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 interface CalendarViewProps {
   persistent: boolean;
@@ -95,18 +96,19 @@ export function CalendarView({
           </button>
           <h2>{monthLabel}</h2>
         </div>
-        <div className={styles.viewToggle}>
-          {RANGES.map((opt) => (
-            <button
-              key={opt}
-              onClick={() => setRange(opt)}
-              className={range === opt ? styles.viewSelected : ""}
-              aria-pressed={range === opt}
-            >
-              {opt}
-            </button>
-          ))}
-        </div>
+        <Tabs
+          value={range}
+          onValueChange={(val) => setRange(val as Range)}
+          className={styles.viewToggle}
+        >
+          <TabsList aria-label="Vista del calendario">
+            {RANGES.map((opt) => (
+              <TabsTrigger key={opt} value={opt}>
+                {opt}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </Tabs>
       </div>
 
       <div className={styles.calendar}>

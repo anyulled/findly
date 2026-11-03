@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Table,
   TableHeader,
@@ -234,27 +235,16 @@ export function StatsView({ posts }: StatsViewProps) {
           <p>Supervisa el volumen de respuestas, fiabilidad, latencia y consumo de cada proveedor.</p>
         </div>
         <div className={styles.statsControls}>
-          <Button
-            variant={filterPeriod === "all" ? "default" : "outline"}
-            size="sm"
-            onClick={() => setFilterPeriod("all")}
+          <Tabs
+            value={filterPeriod}
+            onValueChange={(val) => setFilterPeriod(val as "all" | "30" | "7")}
           >
-            Todo
-          </Button>
-          <Button
-            variant={filterPeriod === "30" ? "default" : "outline"}
-            size="sm"
-            onClick={() => setFilterPeriod("30")}
-          >
-            Últimos 30 días
-          </Button>
-          <Button
-            variant={filterPeriod === "7" ? "default" : "outline"}
-            size="sm"
-            onClick={() => setFilterPeriod("7")}
-          >
-            Últimos 7 días
-          </Button>
+            <TabsList aria-label="Filtrar estadísticas por periodo">
+              <TabsTrigger value="all">Todo</TabsTrigger>
+              <TabsTrigger value="30">Últimos 30 días</TabsTrigger>
+              <TabsTrigger value="7">Últimos 7 días</TabsTrigger>
+            </TabsList>
+          </Tabs>
           <Button
             variant="secondary"
             size="sm"
