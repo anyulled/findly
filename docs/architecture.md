@@ -71,6 +71,7 @@ Findly standardizes its design system components on shadcn/ui patterns backed by
 - **Tooltip (`Tooltip`) & Popover (`Popover`)**: Contextual hover/focus assistants and floating containers for extra metadata without visual clutter.
 - **AlertDialog (`AlertDialog`)**: Dedicated confirmation dialog for irreversible actions (e.g. discarding review drafts).
 - **Select (`Select`) & Accordion (`Accordion`)**: Form select dropdowns and expandable panels for nested account and event settings.
+- **Table (`Table`, `TableHeader`, `TableBody`, `TableFooter`, `TableRow`, `TableHead`, `TableCell`, `TableCaption`)**: Accessible data table with horizontal scrolling container, hover states, and semantic column header cells for metrics and call logs.
 - **DropdownMenu (`DropdownMenu`)**: Accessible floating action menu for contextual operations.
 - **Tabs (`Tabs`) & Sidebar Navigation**: WAI-ARIA compliant tab navigation primitive (`Tabs`) available for multi-view interfaces; the workspace sidebar switches active sections using semantic `Button` elements with aria-pressed state.
 - **Dark Mode**: Automatic system preference matching implemented cleanly via `@media (prefers-color-scheme: dark)` and CSS custom properties (`--bg-canvas`, `--bg-surface`, `--text-primary`, `--border-default`, etc.), avoiding client JavaScript re-renders and preventing flash of unstyled content (FOUC).

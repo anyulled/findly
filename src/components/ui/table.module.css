@@ -1,0 +1,68 @@
+.tableContainer {
+  position: relative;
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.tableRoot {
+  width: 100%;
+  caption-side: bottom;
+  border-collapse: collapse;
+  font-size: 14px;
+  text-align: left;
+}
+
+.tableHeader {
+  border-bottom: 1px solid var(--border-default, #e2e0ed);
+}
+
+.tableHeader tr {
+  border-bottom: 1px solid var(--border-default, #e2e0ed);
+}
+
+.tableBody {
+  vertical-align: middle;
+}
+
+.tableBody tr {
+  border-bottom: 1px solid var(--border-default, #e2e0ed);
+  transition: background-color 150ms ease;
+}
+
+.tableBody tr:hover {
+  background-color: var(--bg-surface-subtle, #f8f7fc);
+}
+
+.tableBody tr:last-child {
+  border-bottom: 0;
+}
+
+.tableFooter {
+  border-top: 1px solid var(--border-default, #e2e0ed);
+  font-weight: 500;
+  background-color: var(--bg-surface-subtle, #f8f7fc);
+}
+
+.tableHead {
+  height: 40px;
+  padding: 10px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-muted, #7a758d);
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.tableCell {
+  padding: 12px 14px;
+  vertical-align: middle;
+  color: var(--text-primary, #1d192b);
+}
+
+.tableCaption {
+  margin-top: 12px;
+  font-size: 13px;
+  color: var(--text-muted, #7a758d);
+  text-align: center;
+}
