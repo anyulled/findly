@@ -9,6 +9,9 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Skeleton } from "@/components/ui/skeleton";
 
 const generationErrors: Record<string, string> = {
   not_configured: "Falta configurar la clave de API o modelo de IA en el servidor.",
@@ -116,18 +119,27 @@ export function PostDetailModal({
             · {selected.time} · Europe/Madrid
           </div>
         )}
-        <div className={styles.channelChip}>
-          {selected.network} <span>·</span> {selected.account}
+        <div style={{ margin: "10px 0" }}>
+          <Badge variant="outline">
+            {selected.network} · {selected.account}
+          </Badge>
         </div>
-        <label className={styles.postEditor}>
-          TEXTO DE LA PUBLICACIÓN
-          <textarea
-            value={editing}
-            disabled={!isEditable}
-            onChange={(e) => setEditing(e.target.value)}
-            rows={8}
-          />
-        </label>
+        {regeneratingAi ? (
+          <div style={{ display: "flex", flexDirection: "column", gap: "8px", margin: "16px 0" }}>
+            <span style={{ fontSize: "12px", color: "var(--text-muted)" }}>Regenerando texto con IA…</span>
+            <Skeleton style={{ height: "140px", width: "100%", borderRadius: "8px" }} />
+          </div>
+        ) : (
+          <label className={styles.postEditor}>
+            TEXTO DE LA PUBLICACIÓN
+            <textarea
+              value={editing}
+              disabled={!isEditable}
+              onChange={(e) => setEditing(e.target.value)}
+              rows={8}
+            />
+          </label>
+        )}
         <div className={styles.characterCount}>
           {postValidation?.message} <span>Validación local por red.</span>
         </div>
@@ -172,13 +184,12 @@ export function PostDetailModal({
             </Button>
             {selected.status === "needs_reconciliation" && (
               <>
-                <label className={styles.absenceConfirm}>
-                  <input
-                    type="checkbox"
+                <label className={styles.absenceConfirm} style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                  <Checkbox
                     checked={absenceConfirmed}
-                    onChange={(event) => setAbsenceConfirmed(event.target.checked)}
-                  />{" "}
-                  He revisado el canal y no aparece ningún post coincidente.
+                    onCheckedChange={(checked) => setAbsenceConfirmed(Boolean(checked))}
+                  />
+                  <span>He revisado el canal y no aparece ningún post coincidente.</span>
                 </label>
                 <Button
                   variant="secondary"

@@ -1,0 +1,35 @@
+.alertPopup {
+  position: fixed;
+  inset: 0;
+  margin: auto;
+  height: fit-content;
+  max-width: 440px;
+  padding: 20px 22px;
+  border-radius: 14px;
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-strong);
+  color: var(--text-primary);
+  box-shadow: var(--shadow-lg, 0 12px 36px rgba(0, 0, 0, 0.22));
+  z-index: 10001;
+  outline: none;
+}
+
+.alertTitle {
+  font-size: 18px;
+  font-weight: 700;
+  margin: 0;
+  color: var(--text-primary, #202229);
+}
+
+.alertDescription {
+  font-size: 14px;
+  color: var(--text-secondary, #747581);
+  margin: 8px 0 20px;
+  line-height: 1.5;
+}
+
+.alertFooter {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}

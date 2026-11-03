@@ -10,6 +10,8 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Skeleton } from "@/components/ui/skeleton";
 
 interface AddEventFormState {
   title: string;
@@ -91,6 +93,12 @@ export function AddEventModal({
             {extractionMessage}
           </p>
         )}
+        {extractingEvent && (
+          <div style={{ margin: "12px 0", display: "flex", flexDirection: "column", gap: "8px" }}>
+            <Skeleton style={{ height: "20px", width: "70%" }} />
+            <Skeleton style={{ height: "36px", width: "100%" }} />
+          </div>
+        )}
         <div className={styles.formDivider}>
           <span>revisa o completa los datos</span>
         </div>
@@ -147,19 +155,18 @@ export function AddEventModal({
             if (!account.id || account.enabled === false) return [];
             const accountId = account.id;
             return [
-              <label key={accountId}>
-                <input
-                  type="checkbox"
+              <label key={accountId} style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
+                <Checkbox
                   checked={selectedAccountIds.includes(accountId)}
-                  onChange={() =>
+                  onCheckedChange={(checked) =>
                     setSelectedAccountIds((current) =>
-                      current.includes(accountId)
-                        ? current.filter((id) => id !== accountId)
-                        : [...current, accountId]
+                      checked
+                        ? [...current, accountId]
+                        : current.filter((id) => id !== accountId)
                     )
                   }
                 />
-                {account.name}
+                <span>{account.name}</span>
               </label>,
             ];
           })}

@@ -110,7 +110,6 @@ export function useWorkspace() {
   const addFormOpen = useRef(false);
   const [hydrated, setHydrated] = useState(false);
   const [syncingWorkspace, setSyncingWorkspace] = useState(false);
-  const [feedback, setFeedback] = useState("");
   const persistent = isSupabaseConfigured();
 
   const notify = useCallback(
@@ -119,7 +118,6 @@ export function useWorkspace() {
       type: NotificationType = "info",
       action?: NotificationAction,
     ) => {
-      setFeedback(message);
       if (!message) return;
       toast[type](message, { action });
     },
@@ -756,7 +754,6 @@ export function useWorkspace() {
     setExtractionMessage,
     hydrated,
     syncingWorkspace,
-    feedback,
     persistent,
     reviewCount,
     pendingReviewCount,

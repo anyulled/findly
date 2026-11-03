@@ -2,6 +2,11 @@
 
 import { useEffect, useState, useMemo } from "react";
 import styles from "../../page.module.css";
+import { Card } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Progress } from "@/components/ui/progress";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Button } from "@/components/ui/button";
 import {
   loadWorkspaceStats,
   type WorkspaceStats,
@@ -29,14 +34,17 @@ interface ProviderCardProps {
 
 function ProviderCard({ title, badgeLabel, badgeClass, metrics, calendarPosts }: ProviderCardProps) {
   return (
-    <div className={styles.kpiCard}>
+    <Card className={styles.kpiCard}>
       <div className={styles.kpiHeader}>
         <span className={styles.kpiTitle}>{title}</span>
-        <span className={`${styles.kpiBadge} ${badgeClass}`}>{badgeLabel}</span>
+        <Badge variant="outline" className={badgeClass}>{badgeLabel}</Badge>
       </div>
       <div className={styles.kpiMainValue}>{metrics.total}</div>
       <div className={styles.kpiSub}>
         {metrics.pct}% de las llamadas ({calendarPosts} posts en el calendario)
+      </div>
+      <div style={{ marginTop: "12px", marginBottom: "8px" }}>
+        <Progress value={metrics.successRate} />
       </div>
       <div className={styles.kpiDetails}>
         <div className={styles.kpiDetailItem}>
@@ -56,7 +64,7 @@ function ProviderCard({ title, badgeLabel, badgeClass, metrics, calendarPosts }:
           <span>Éxitos</span>
         </div>
       </div>
-    </div>
+    </Card>
   );
 }
 
@@ -217,99 +225,115 @@ export function StatsView({ posts }: StatsViewProps) {
           <p>Supervisa el volumen de respuestas, fiabilidad, latencia y consumo de cada proveedor.</p>
         </div>
         <div className={styles.statsControls}>
-          <button
-            type="button"
-            className={`${styles.filterBtn} ${filterPeriod === "all" ? styles.filterBtnActive : ""}`}
+          <Button
+            variant={filterPeriod === "all" ? "default" : "outline"}
+            size="sm"
             onClick={() => setFilterPeriod("all")}
           >
             Todo
-          </button>
-          <button
-            type="button"
-            className={`${styles.filterBtn} ${filterPeriod === "30" ? styles.filterBtnActive : ""}`}
+          </Button>
+          <Button
+            variant={filterPeriod === "30" ? "default" : "outline"}
+            size="sm"
             onClick={() => setFilterPeriod("30")}
           >
             Últimos 30 días
-          </button>
-          <button
-            type="button"
-            className={`${styles.filterBtn} ${filterPeriod === "7" ? styles.filterBtnActive : ""}`}
+          </Button>
+          <Button
+            variant={filterPeriod === "7" ? "default" : "outline"}
+            size="sm"
             onClick={() => setFilterPeriod("7")}
           >
             Últimos 7 días
-          </button>
-          <button
-            type="button"
-            className={styles.refreshBtn}
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
             onClick={() => void fetchStats()}
             disabled={loading}
           >
             {loading ? "Cargando…" : "⟳ Actualizar"}
-          </button>
+          </Button>
         </div>
       </div>
 
       {error && (
-        <p
+        <div
           role="alert"
           style={{
-            color: "#a43a32",
-            background: "#fff1f0",
+            color: "var(--destructive, #ef4444)",
+            backgroundColor: "var(--destructive-subtle, #fef2f2)",
+            border: "1px solid var(--destructive, #ef4444)",
             borderRadius: 8,
             padding: "10px 14px",
             margin: 0,
           }}
         >
           {error}
-        </p>
+        </div>
       )}
 
       {/* KPI Cards */}
       <div className={styles.statsGrid}>
-        <ProviderCard
-          title="Proveedor Principal"
-          badgeLabel="Groq"
-          badgeClass={styles.badgeGroq}
-          metrics={callMetrics.groq}
-          calendarPosts={postsFromWorkspace.groq}
-        />
-        <ProviderCard
-          title="Proveedor Secundario"
-          badgeLabel="OpenAI"
-          badgeClass={styles.badgeOpenai}
-          metrics={callMetrics.openai}
-          calendarPosts={postsFromWorkspace.openai}
-        />
+        {loading && !stats ? (
+          [1, 2].map((key) => (
+            <Card key={key} className={styles.kpiCard}>
+              <Skeleton style={{ height: "24px", width: "60%", marginBottom: "12px" }} />
+              <Skeleton style={{ height: "48px", width: "40%", marginBottom: "12px" }} />
+              <Skeleton style={{ height: "16px", width: "80%" }} />
+            </Card>
+          ))
+        ) : (
+          <>
+            <ProviderCard
+              title="Proveedor Principal"
+              badgeLabel="Groq"
+              badgeClass={styles.badgeGroq}
+              metrics={callMetrics.groq}
+              calendarPosts={postsFromWorkspace.groq}
+            />
+            <ProviderCard
+              title="Proveedor Secundario"
+              badgeLabel="OpenAI"
+              badgeClass={styles.badgeOpenai}
+              metrics={callMetrics.openai}
+              calendarPosts={postsFromWorkspace.openai}
+            />
 
-        {/* Fallback / Plantillas Card */}
-        <div className={styles.kpiCard}>
-          <div className={styles.kpiHeader}>
-            <span className={styles.kpiTitle}>Respaldo y Seguridad</span>
-            <span className={`${styles.kpiBadge} ${styles.badgeFallback}`}>Plantilla</span>
-          </div>
-          <div className={styles.kpiMainValue}>{postsFromWorkspace.fallback}</div>
-          <div className={styles.kpiSub}>
-            {postsFromWorkspace.fallbackPct}% posts generados con respaldo determinista
-          </div>
-          <div className={styles.kpiDetails}>
-            <div className={styles.kpiDetailItem}>
-              <b>{callMetrics.fallback.total}</b>
-              <span>Fallbacks en llamadas</span>
-            </div>
-            <div className={styles.kpiDetailItem}>
-              <b>{postsFromWorkspace.total}</b>
-              <span>Total posts creados</span>
-            </div>
-            <div className={styles.kpiDetailItem}>
-              <b>{100 - postsFromWorkspace.fallbackPct}%</b>
-              <span>Generación IA efectiva</span>
-            </div>
-            <div className={styles.kpiDetailItem}>
-              <b>0 ms</b>
-              <span>Latencia plantilla</span>
-            </div>
-          </div>
-        </div>
+            {/* Fallback / Plantillas Card */}
+            <Card className={styles.kpiCard}>
+              <div className={styles.kpiHeader}>
+                <span className={styles.kpiTitle}>Respaldo y Seguridad</span>
+                <Badge variant="secondary" className={styles.badgeFallback}>Plantilla</Badge>
+              </div>
+              <div className={styles.kpiMainValue}>{postsFromWorkspace.fallback}</div>
+              <div className={styles.kpiSub}>
+                {postsFromWorkspace.fallbackPct}% posts generados con respaldo determinista
+              </div>
+              <div style={{ marginTop: "12px", marginBottom: "8px" }}>
+                <Progress value={100 - postsFromWorkspace.fallbackPct} />
+              </div>
+              <div className={styles.kpiDetails}>
+                <div className={styles.kpiDetailItem}>
+                  <b>{callMetrics.fallback.total}</b>
+                  <span>Fallbacks en llamadas</span>
+                </div>
+                <div className={styles.kpiDetailItem}>
+                  <b>{postsFromWorkspace.total}</b>
+                  <span>Total posts creados</span>
+                </div>
+                <div className={styles.kpiDetailItem}>
+                  <b>{100 - postsFromWorkspace.fallbackPct}%</b>
+                  <span>Generación IA efectiva</span>
+                </div>
+                <div className={styles.kpiDetailItem}>
+                  <b>0 ms</b>
+                  <span>Latencia plantilla</span>
+                </div>
+              </div>
+            </Card>
+          </>
+        )}
       </div>
 
       {/* Distribution Ratio Bar */}

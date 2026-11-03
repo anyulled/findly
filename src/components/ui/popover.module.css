@@ -1,0 +1,19 @@
+.popoverPositioner {
+  z-index: 10050;
+  outline: none;
+}
+
+.popoverPopup {
+  border-radius: 10px;
+  border: 1px solid var(--border-default, #ececf0);
+  background: var(--bg-surface, #ffffff);
+  color: var(--text-primary, #202229);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.12);
+  padding: 14px 16px;
+  outline: none;
+  max-width: 320px;
+}
+
+.popoverArrow {
+  fill: var(--bg-surface, #ffffff);
+}

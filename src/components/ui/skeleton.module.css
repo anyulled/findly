@@ -1,0 +1,14 @@
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+.skeletonBlock {
+  background: var(--bg-surface-subtle, #eae9f2);
+  border-radius: 6px;
+  animation: pulse 1.8s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}

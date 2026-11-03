@@ -2,6 +2,8 @@ import Image from "next/image";
 import styles from "../../page.module.css";
 import type { Account, Network, Post } from "../workspace-types";
 import { matchesAccount } from "../workspace-types";
+import { Card } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 
 interface AccountSettingsProps {
   accountList: Account[];
@@ -31,7 +33,7 @@ export function AccountSettings({
       </div>
       <div className={styles.accountsGrid}>
         {accountList.map((account) => (
-          <article className={styles.accountCard} key={account.id ?? account.name}>
+          <Card className={styles.accountCard} key={account.id ?? account.name}>
             <div className={styles.accountTop}>
               <Image
                 className={styles.accountLogo}
@@ -44,18 +46,22 @@ export function AccountSettings({
                 <b>{account.name}</b>
                 <small>{account.kind}</small>
               </div>
-              <span className={styles.connected}>{persistent ? "● Supabase" : "● Demo"}</span>
+              <Badge variant={persistent ? "success" : "secondary"}>
+                {persistent ? "● Supabase" : "● Demo"}
+              </Badge>
             </div>
-            <div className={styles.keyStatus}>
-              {account.bufferApiKeyConfigured
-                ? "API key configurada"
-                : `Falta ${account.bufferApiKeyEnv}`}
+            <div style={{ marginTop: "10px", marginBottom: "8px" }}>
+              <Badge variant={account.bufferApiKeyConfigured ? "outline" : "warning"}>
+                {account.bufferApiKeyConfigured
+                  ? "API key configurada"
+                  : `Falta ${account.bufferApiKeyEnv}`}
+              </Badge>
             </div>
             <div className={styles.accountNetworks}>
               {account.networks.map((network) => (
-                <span key={network}>
+                <Badge variant="outline" key={network}>
                   {network === "LinkedIn" ? "in" : network === "X" ? "𝕏" : "◉"} &nbsp;{network}
-                </span>
+                </Badge>
               ))}
             </div>
             <div className={styles.bufferChannels}>
@@ -119,7 +125,7 @@ export function AccountSettings({
                 <small>Las publicaciones aprobadas ayudan a mantener tu estilo.</small>
               </div>
             </div>
-          </article>
+          </Card>
         ))}
       </div>
     </>

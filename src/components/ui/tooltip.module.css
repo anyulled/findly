@@ -1,0 +1,29 @@
+.tooltipPositioner {
+  z-index: 11000;
+  outline: none;
+}
+
+.tooltipPopup {
+  border-radius: 6px;
+  background: var(--text-primary, #1e1e24);
+  color: var(--bg-surface, #ffffff);
+  padding: 5px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.35;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
+  max-width: 280px;
+  word-wrap: break-word;
+  pointer-events: none;
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+
+.tooltipPopup[data-starting-style],
+.tooltipPopup[data-ending-style] {
+  opacity: 0;
+  transform: scale(0.96);
+}
+
+.tooltipArrow {
+  fill: var(--text-primary, #1e1e24);
+}
