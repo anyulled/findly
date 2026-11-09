@@ -5,6 +5,7 @@ import {
   paginateItems,
   getEventPlannedPosts,
   canGenerateEventDrafts,
+  isPostDeletable,
 } from "@/lib/event-pagination";
 import type { SourceView } from "../../workspace-actions";
 import type { Account, EventItem, Post, Status } from "../workspace-types";
@@ -57,6 +58,21 @@ const statusLabels: Record<Status, string> = {
   discarded: "Descartada",
 };
 
+/**
+ * Calculates a sliding window of visible page numbers for responsive pagination controls.
+ *
+ * @param current - The 1-based active page index.
+ * @param total - The total number of pages available.
+ * @returns An array of page numbers to display.
+ */
+function getVisiblePageNumbers(current: number, total: number): number[] {
+  if (total <= 5) {
+    return Array.from({ length: total }, (_, i) => i + 1);
+  }
+  const start = Math.max(1, Math.min(current - 2, total - 4));
+  return Array.from({ length: 5 }, (_, i) => start + i);
+}
+
 interface EventListProps {
   events: EventItem[];
   posts: Post[];
@@ -71,6 +87,13 @@ interface EventListProps {
   onRemoveDraft?: (post: Post) => void | Promise<void>;
 }
 
+/**
+ * Responsive compact event list view with expandable planned publications,
+ * publication editing, draft deletion, generation CTAs, and pagination.
+ *
+ * @param props - Event list configuration, datasets, and action handlers.
+ * @returns The rendered events view.
+ */
 export function EventList({
   events,
   posts,
@@ -146,6 +169,7 @@ export function EventList({
         <>
           <div className={styles.eventsGrid}>
             {pagination.items.map((event) => {
+              const allEventPosts = posts.filter((p) => p.eventId === event.id);
               const eventPosts = getEventPlannedPosts(posts, event.id);
               const links = sources.flatMap((source) =>
                 source.accountIds.map((accountId) => ({ sourceId: source.id, accountId })),
@@ -156,7 +180,7 @@ export function EventList({
                   ? ([1] as const)
                   : scheduleDates(event.date).map(({ leadDays }) => leadDays);
               const missing = hasMissingReminders(eligibleAccounts, expectedLeadDays, eventPosts);
-              const hasZeroPosts = canGenerateEventDrafts(eventPosts);
+              const hasZeroPosts = canGenerateEventDrafts(allEventPosts);
               const isExpanded = expandedEventIds.has(event.id);
               const isGenerating = generatingEventIds.has(event.id);
 
@@ -234,7 +258,7 @@ export function EventList({
                           <span
                             className={[
                               styles.plannedCountBadge,
-                              hasZeroPosts ? styles.plannedCountZero : "",
+                              eventPosts.length === 0 ? styles.plannedCountZero : "",
                             ]
                               .filter(Boolean)
                               .join(" ")}
@@ -304,14 +328,25 @@ export function EventList({
                           </div>
                         )}
 
+                        {!hasZeroPosts && eventPosts.length === 0 && (
+                          <div className={styles.createPublicationsNotice}>
+                            <span className={styles.createNoticeText}>
+                              Todas las publicaciones previstas fueron descartadas.
+                            </span>
+                          </div>
+                        )}
+
                         {isExpanded && eventPosts.length > 0 && (
                           <div className={styles.postsList}>
                             {eventPosts.map((post) => (
-                              <div key={post.id} className={styles.postItem}>
+                              <div key={post.id} className={styles.postItem} data-testid="planned-post-item">
                                 <div className={styles.postItemHeader}>
                                   <div className={styles.postItemMeta}>
                                     <NetworkIcon network={post.network} size={14} />
                                     <span className={styles.postAccountBadge}>{post.account}</span>
+                                    <Badge variant="outline" style={{ fontSize: 11, padding: "1px 6px" }}>
+                                      {post.network}
+                                    </Badge>
                                     <span className={styles.postDate}>
                                       <Calendar size={11} style={{ display: "inline", marginRight: 3 }} />
                                       {post.date} · {post.time}
@@ -342,21 +377,20 @@ export function EventList({
                                     </Button>
                                   )}
 
-                                  {onRemoveDraft &&
-                                    (post.status === "review" || post.status === "failed" || !persistent) && (
-                                      <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        onClick={() => {
-                                          void onRemoveDraft(post);
-                                        }}
-                                        style={{ height: 26, fontSize: 11.5, padding: "0 8px", color: "var(--destructive)" }}
-                                        title="Eliminar publicación"
-                                      >
-                                        <Trash2 size={11} aria-hidden="true" />
-                                        Eliminar
-                                      </Button>
-                                    )}
+                                  {onRemoveDraft && isPostDeletable(post.status) && (
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => {
+                                        void onRemoveDraft(post);
+                                      }}
+                                      style={{ height: 26, fontSize: 11.5, padding: "0 8px", color: "var(--destructive)" }}
+                                      title="Eliminar publicación"
+                                    >
+                                      <Trash2 size={11} aria-hidden="true" />
+                                      Eliminar
+                                    </Button>
+                                  )}
                                 </div>
                               </div>
                             ))}
@@ -380,11 +414,11 @@ export function EventList({
                   <PaginationItem>
                     <PaginationPrevious
                       disabled={!pagination.hasPreviousPage}
-                      onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                      onClick={() => setCurrentPage(Math.max(1, pagination.page - 1))}
                     />
                   </PaginationItem>
 
-                  {Array.from({ length: pagination.totalPages }, (_, i) => i + 1).map((pageNum) => (
+                  {getVisiblePageNumbers(pagination.page, pagination.totalPages).map((pageNum) => (
                     <PaginationItem key={pageNum}>
                       <PaginationLink
                         isActive={pageNum === pagination.page}
@@ -398,7 +432,7 @@ export function EventList({
                   <PaginationItem>
                     <PaginationNext
                       disabled={!pagination.hasNextPage}
-                      onClick={() => setCurrentPage((p) => Math.min(pagination.totalPages, p + 1))}
+                      onClick={() => setCurrentPage(Math.min(pagination.totalPages, pagination.page + 1))}
                     />
                   </PaginationItem>
                 </PaginationContent>

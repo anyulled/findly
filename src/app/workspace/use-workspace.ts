@@ -448,7 +448,18 @@ export function useWorkspace() {
 
   async function retryDrafts(event: EventItem) {
     try {
-      if (!persistent) return;
+      if (!persistent) {
+        const generated = starterPosts([event], accountList);
+        const existingEventPosts = posts.filter((p) => p.eventId === event.id);
+        const toAdd = generated.filter((g) => !existingEventPosts.some((p) => p.network === g.network && p.account === g.account && p.leadDays === g.leadDays));
+        if (toAdd.length === 0) {
+          notify("Este evento no tiene recordatorios futuros que se puedan crear.", "info");
+          return;
+        }
+        setPosts((all) => [...all, ...toAdd]);
+        notify("Se han generado las publicaciones previstas en modo demo.", "success");
+        return;
+      }
       const result = await generateReviewPosts(event.id);
       if (!result.success) {
         notify(result.error, "error");

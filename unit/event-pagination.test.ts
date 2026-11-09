@@ -4,6 +4,7 @@ import {
   paginateItems,
   getEventPlannedPosts,
   canGenerateEventDrafts,
+  isPostDeletable,
 } from "../src/lib/event-pagination";
 import type { PostView } from "../src/app/workspace-actions";
 
@@ -117,7 +118,7 @@ test("getEventPlannedPosts filters by eventId and excludes discarded posts", () 
   );
 });
 
-test("canGenerateEventDrafts returns true when no planned posts exist", () => {
+test("canGenerateEventDrafts returns true only when no posts or tombstones exist", () => {
   assert.equal(canGenerateEventDrafts([]), true);
   assert.equal(
     canGenerateEventDrafts([
@@ -132,7 +133,7 @@ test("canGenerateEventDrafts returns true when no planned posts exist", () => {
         status: "discarded",
       },
     ]),
-    true,
+    false,
   );
   assert.equal(
     canGenerateEventDrafts([
@@ -149,4 +150,15 @@ test("canGenerateEventDrafts returns true when no planned posts exist", () => {
     ]),
     false,
   );
+});
+
+test("isPostDeletable allows deletion only for review and failed publications", () => {
+  assert.equal(isPostDeletable("review"), true);
+  assert.equal(isPostDeletable("failed"), true);
+  assert.equal(isPostDeletable("scheduled"), false);
+  assert.equal(isPostDeletable("approved"), false);
+  assert.equal(isPostDeletable("published"), false);
+  assert.equal(isPostDeletable("scheduling"), false);
+  assert.equal(isPostDeletable("needs_reconciliation"), false);
+  assert.equal(isPostDeletable("discarded"), false);
 });
