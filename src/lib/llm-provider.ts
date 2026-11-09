@@ -6,7 +6,29 @@ import { managedAccount } from "./managed-accounts";
 
 const REQUEST_TIMEOUT_MS = 20_000;
 const MAX_COMPLETION_TOKENS = 1500;
+const REASONING_MAX_COMPLETION_TOKENS = 4096;
 const MAX_STYLE_EXAMPLES = 3;
+const MAX_MODEL_CANDIDATES = 3;
+const MIN_CHAT_CONTEXT_WINDOW = 8192;
+const MIN_CHAT_COMPLETION_TOKENS = 4096;
+const DEFAULT_GROQ_MODEL = "openai/gpt-oss-20b";
+
+export const GROQ_MODELS_URL = "https://api.groq.com/openai/v1/models";
+export const GROQ_CHAT_COMPLETIONS_URL = "https://api.groq.com/openai/v1/chat/completions";
+
+export type GroqModelEntry = {
+  id: string;
+  active?: boolean;
+  context_window?: number;
+  max_completion_tokens?: number;
+  input_modalities?: string[];
+  output_modalities?: string[];
+  pricing?: {
+    prompt?: string;
+    completion?: string;
+  };
+  supported_features?: string[];
+};
 
 export type ApprovedStyleExample = {
   text: string;
@@ -76,6 +98,8 @@ export class PostGenerationError extends Error {
       | "over_limit"
       | "output_truncated",
     readonly validation?: ReturnType<typeof validatePost>,
+    readonly model?: string,
+    readonly usage?: TokenUsage,
   ) {
     super(message);
     this.name = "PostGenerationError";
@@ -297,11 +321,165 @@ export interface LLMProvider {
   generate(input: PostGenerationInput, fetchImpl?: typeof fetch): Promise<GeneratedPost>;
 }
 
-function parseChatResponseContent(payload: unknown, providerName: string): string {
+function isExcludedGroqModelId(id: string): boolean {
+  return /guard|safeguard|whisper|orpheus|embed|tts|vision-preview/iu.test(id);
+}
+
+function hasValidTextModalities(model: GroqModelEntry): boolean {
+  const inputs = model.input_modalities;
+  if (Array.isArray(inputs) && !inputs.includes("text")) return false;
+  const outputs = model.output_modalities;
+  if (!Array.isArray(outputs)) return true;
+  return outputs.length === 1 && outputs[0] === "text";
+}
+
+function hasSufficientTokenCapacity(model: GroqModelEntry): boolean {
+  const contextWindow = model.context_window ?? MIN_CHAT_CONTEXT_WINDOW;
+  const maxCompletion = model.max_completion_tokens ?? contextWindow;
+  return contextWindow >= MIN_CHAT_CONTEXT_WINDOW && maxCompletion >= MIN_CHAT_COMPLETION_TOKENS;
+}
+
+export function isEligibleGroqChatModel(model: GroqModelEntry): boolean {
+  if (!model.id.trim() || model.active === false) return false;
+  if (isExcludedGroqModelId(model.id)) return false;
+  return hasValidTextModalities(model) && hasSufficientTokenCapacity(model);
+}
+
+export function computeGroqModelCostScore(model: GroqModelEntry): number {
+  const promptCost = Number(model.pricing?.prompt);
+  const completionCost = Number(model.pricing?.completion);
+  if (!Number.isFinite(promptCost) || !Number.isFinite(completionCost)) {
+    return Number.POSITIVE_INFINITY;
+  }
+  const total = promptCost + completionCost;
+  return total > 0 ? total : Number.POSITIVE_INFINITY;
+}
+
+export function selectGroqCandidateModels(models: GroqModelEntry[]): GroqModelEntry[] {
+  return models
+    .filter(isEligibleGroqChatModel)
+    .sort((a, b) => {
+      const costDiff = computeGroqModelCostScore(a) - computeGroqModelCostScore(b);
+      return costDiff !== 0 ? costDiff : a.id.localeCompare(b.id);
+    })
+    .slice(0, MAX_MODEL_CANDIDATES);
+}
+
+export function isReasoningModel(model: GroqModelEntry): boolean {
+  if (Array.isArray(model.supported_features) && model.supported_features.includes("reasoning")) {
+    return true;
+  }
+  return /gpt-oss|qwen3|deepseek-r1/iu.test(model.id);
+}
+
+function resolveCompletionMaxTokens(model: GroqModelEntry, reasoning: boolean): number {
+  if (!reasoning) return MAX_COMPLETION_TOKENS;
+  const modelLimit = model.max_completion_tokens ?? REASONING_MAX_COMPLETION_TOKENS;
+  return Math.min(modelLimit, REASONING_MAX_COMPLETION_TOKENS);
+}
+
+function buildChatRequestBody(model: GroqModelEntry, input: PostGenerationInput): Record<string, unknown> {
+  const reasoning = isReasoningModel(model);
+  return {
+    model: model.id,
+    messages: buildMessages(input),
+    max_completion_tokens: resolveCompletionMaxTokens(model, reasoning),
+    ...(reasoning ? { reasoning_effort: "low" } : {}),
+  };
+}
+
+function classifyHttpErrorCode(status: number): PostGenerationError["code"] {
+  if (status === 401 || status === 403) return "provider_auth";
+  if (status === 429) return "rate_limited";
+  return "provider_error";
+}
+
+function isGroqModelRecord(entry: unknown): entry is GroqModelEntry {
+  return Boolean(entry && typeof entry === "object" && typeof (entry as { id?: unknown }).id === "string");
+}
+
+function extractGroqModelsFromPayload(payload: unknown): GroqModelEntry[] {
+  if (!payload || typeof payload !== "object") return [];
+  const data = (payload as { data?: unknown }).data;
+  if (!Array.isArray(data)) return [];
+  return selectGroqCandidateModels(data.filter(isGroqModelRecord));
+}
+
+async function fetchModelsPayload(
+  modelsUrl: string,
+  providerName: string,
+  apiKey: string,
+  fetchImpl: typeof fetch,
+): Promise<unknown> {
+  let response: Response;
+  try {
+    response = await fetchImpl(modelsUrl, {
+      method: "GET",
+      headers: { Authorization: `Bearer ${apiKey}` },
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+  } catch {
+    throw new PostGenerationError(
+      `${providerName} could not be reached. The draft was not created.`,
+      "provider_error",
+    );
+  }
+  if (!response.ok) {
+    throw new PostGenerationError(
+      `${providerName} returned HTTP ${response.status}. The draft was not created.`,
+      classifyHttpErrorCode(response.status),
+    );
+  }
+  try {
+    return await response.json();
+  } catch {
+    return null;
+  }
+}
+
+async function resolveProviderModels(
+  modelsUrl: string | undefined,
+  providerName: string,
+  apiKey: string,
+  fallbackModel: string | undefined,
+  fetchImpl: typeof fetch,
+): Promise<GroqModelEntry[]> {
+  const trimmedFallback = fallbackModel?.trim();
+  if (!modelsUrl) {
+    return trimmedFallback ? [{ id: trimmedFallback }] : [];
+  }
+  const payload = await fetchModelsPayload(modelsUrl, providerName, apiKey, fetchImpl);
+  const discovered = extractGroqModelsFromPayload(payload);
+  if (discovered.length > 0) return discovered;
+  return [{ id: trimmedFallback || DEFAULT_GROQ_MODEL }];
+}
+
+const RETRYABLE_MODEL_ERROR_CODES = new Set<PostGenerationError["code"]>([
+  "output_truncated",
+  "over_limit",
+  "empty_response",
+]);
+
+function shouldRetryNextModel(error: unknown, index: number, totalCandidates: number): boolean {
+  return (
+    error instanceof PostGenerationError &&
+    RETRYABLE_MODEL_ERROR_CODES.has(error.code) &&
+    index < totalCandidates - 1
+  );
+}
+
+function parseChatResponseContent(
+  payload: unknown,
+  providerName: string,
+  modelId: string,
+  usage?: TokenUsage,
+): string {
   if (!payload || typeof payload !== "object") {
     throw new PostGenerationError(
       `${providerName} returned an unreadable response. The draft was not created.`,
       "provider_error",
+      undefined,
+      modelId,
     );
   }
   const choice = (
@@ -311,6 +489,9 @@ function parseChatResponseContent(payload: unknown, providerName: string): strin
     throw new PostGenerationError(
       `${providerName} stopped before the text was complete.`,
       "output_truncated",
+      undefined,
+      modelId,
+      usage,
     );
   }
   const content = choice?.message?.content;
@@ -318,6 +499,9 @@ function parseChatResponseContent(payload: unknown, providerName: string): strin
     throw new PostGenerationError(
       `${providerName} returned no post text. The draft was not created.`,
       "empty_response",
+      undefined,
+      modelId,
+      usage,
     );
   }
   return content.trim();
@@ -344,7 +528,7 @@ async function callChatCompletionsApi(
   url: string,
   providerName: string,
   apiKey: string,
-  model: string,
+  model: GroqModelEntry,
   input: PostGenerationInput,
   fetchImpl: typeof fetch,
 ): Promise<ChatApiResult> {
@@ -357,30 +541,24 @@ async function callChatCompletionsApi(
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        model,
-        messages: buildMessages(input),
-        max_completion_tokens: MAX_COMPLETION_TOKENS,
-      }),
+      body: JSON.stringify(buildChatRequestBody(model, input)),
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
   } catch {
     throw new PostGenerationError(
       `${providerName} could not be reached. The draft was not created.`,
       "provider_error",
+      undefined,
+      model.id,
     );
   }
 
   if (!response.ok) {
-    const code =
-      response.status === 401 || response.status === 403
-        ? "provider_auth"
-        : response.status === 429
-          ? "rate_limited"
-          : "provider_error";
     throw new PostGenerationError(
       `${providerName} returned HTTP ${response.status}. The draft was not created.`,
-      code,
+      classifyHttpErrorCode(response.status),
+      undefined,
+      model.id,
     );
   }
 
@@ -391,10 +569,12 @@ async function callChatCompletionsApi(
     throw new PostGenerationError(
       `${providerName} returned an unreadable response. The draft was not created.`,
       "provider_error",
+      undefined,
+      model.id,
     );
   }
-  const text = parseChatResponseContent(payload, providerName);
   const usage = parseChatResponseUsage(payload);
+  const text = parseChatResponseContent(payload, providerName, model.id, usage);
   const latencyMs = Date.now() - startTime;
   return { text, usage, latencyMs };
 }
@@ -406,14 +586,17 @@ export class OpenAICompatibleProvider implements LLMProvider {
     private readonly endpointUrl: string,
     private readonly apiKeyGetter: () => string | undefined,
     private readonly modelGetter: () => string | undefined,
+    private readonly modelsEndpointUrl?: string,
   ) {}
 
   isConfigured(): boolean {
-    return Boolean(this.apiKeyGetter()?.trim() && this.modelGetter()?.trim());
+    const hasKey = Boolean(this.apiKeyGetter()?.trim());
+    if (this.modelsEndpointUrl) return hasKey;
+    return hasKey && Boolean(this.modelGetter()?.trim());
   }
 
   getModelName(): string {
-    return this.modelGetter()?.trim() ?? this.id;
+    return this.modelGetter()?.trim() || this.id;
   }
 
   async generate(
@@ -421,30 +604,70 @@ export class OpenAICompatibleProvider implements LLMProvider {
     fetchImpl: typeof fetch = fetch,
   ): Promise<GeneratedPost> {
     const apiKey = this.apiKeyGetter()?.trim();
-    const model = this.modelGetter()?.trim();
-    if (!apiKey || !model) {
+    const configuredModel = this.modelGetter()?.trim();
+    if (!apiKey || (!this.modelsEndpointUrl && !configuredModel)) {
       throw new PostGenerationError(
         `${this.name} API key and model must be configured on the server.`,
         "not_configured",
       );
     }
 
+    const candidates = await resolveProviderModels(
+      this.modelsEndpointUrl,
+      this.name,
+      apiKey,
+      configuredModel,
+      fetchImpl,
+    );
+
+    return this.generateWithCandidates(candidates, apiKey, input, fetchImpl);
+  }
+
+  private async generateWithCandidates(
+    candidates: GroqModelEntry[],
+    apiKey: string,
+    input: PostGenerationInput,
+    fetchImpl: typeof fetch,
+  ): Promise<GeneratedPost> {
+    let lastError: unknown;
+    for (let i = 0; i < candidates.length; i++) {
+      const candidate = candidates[i];
+      try {
+        return await this.generateSingleCandidate(candidate, apiKey, input, fetchImpl);
+      } catch (error) {
+        lastError = error;
+        if (!shouldRetryNextModel(error, i, candidates.length)) break;
+        logger.warn(
+          `Model '${candidate.id}' returned output_truncated; retrying with '${candidates[i + 1].id}'.`,
+          { provider: this.id, failedModel: candidate.id, nextModel: candidates[i + 1].id },
+        );
+      }
+    }
+    throw lastError;
+  }
+
+  private async generateSingleCandidate(
+    candidate: GroqModelEntry,
+    apiKey: string,
+    input: PostGenerationInput,
+    fetchImpl: typeof fetch,
+  ): Promise<GeneratedPost> {
     const result = await callChatCompletionsApi(
       this.endpointUrl,
       this.name,
       apiKey,
-      model,
+      candidate,
       input,
       fetchImpl,
     );
     const validation = validatePost(input.network, result.text);
     if (!validation.valid) {
-      throw new PostGenerationError(validation.message, "over_limit", validation);
+      throw new PostGenerationError(validation.message, "over_limit", validation, candidate.id, result.usage);
     }
 
     return {
       text: result.text,
-      model,
+      model: candidate.id,
       provider: this.id as "groq" | "openai",
       validation,
       latencyMs: result.latencyMs,
@@ -490,16 +713,34 @@ function buildSuccessAttempt(provider: LLMProvider, result: GeneratedPost, elaps
   };
 }
 
-function buildErrorAttempt(provider: LLMProvider, errorCode: PostGenerationError["code"], latencyMs: number): LLMAttemptRecord {
-  const modelName = "getModelName" in provider && typeof (provider as { getModelName: () => string }).getModelName === "function"
-    ? (provider as { getModelName: () => string }).getModelName()
-    : provider.id;
+function resolveErrorModelName(provider: LLMProvider, error: unknown): string {
+  if (error instanceof PostGenerationError && error.model) {
+    return error.model;
+  }
+  if ("getModelName" in provider && typeof (provider as { getModelName: () => string }).getModelName === "function") {
+    return (provider as { getModelName: () => string }).getModelName();
+  }
+  return provider.id;
+}
+
+function buildErrorAttempt(
+  provider: LLMProvider,
+  error: unknown,
+  errorCode: PostGenerationError["code"],
+  latencyMs: number,
+): LLMAttemptRecord {
+  const usage = error instanceof PostGenerationError ? error.usage : undefined;
   return {
     provider: (provider.id as "groq" | "openai" | "fallback") ?? "fallback",
-    model: modelName,
+    model: resolveErrorModelName(provider, error),
     status: "error",
     errorCode,
     latencyMs,
+    ...(usage ? {
+      promptTokens: usage.promptTokens,
+      completionTokens: usage.completionTokens,
+      totalTokens: usage.totalTokens,
+    } : {}),
   };
 }
 
@@ -533,7 +774,7 @@ export class LLMFallbackChain {
         return result;
       } catch (error) {
         lastErrorCode = resolveErrorCode(error);
-        await this.onAttempt?.(buildErrorAttempt(provider, lastErrorCode, Date.now() - startTime));
+        await this.onAttempt?.(buildErrorAttempt(provider, error, lastErrorCode, Date.now() - startTime));
 
         const remaining = this.providers.slice(i + 1).find((p) => p.isConfigured());
         logger.warn(
@@ -575,9 +816,10 @@ export function createDefaultLLMChain(
   const groq = new OpenAICompatibleProvider(
     "groq",
     "Groq",
-    "https://api.groq.com/openai/v1/chat/completions",
+    GROQ_CHAT_COMPLETIONS_URL,
     () => overrides?.groqApiKey ?? process.env.GROQ_API_KEY,
     () => overrides?.groqModel ?? process.env.GROQ_MODEL,
+    GROQ_MODELS_URL,
   );
   const openAi = new OpenAICompatibleProvider(
     "openai",

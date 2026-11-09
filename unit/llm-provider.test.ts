@@ -7,7 +7,13 @@ import {
   createDefaultLLMChain,
   buildMessages,
   buildFallbackDraftText,
+  isEligibleGroqChatModel,
+  computeGroqModelCostScore,
+  selectGroqCandidateModels,
+  isReasoningModel,
+  GROQ_MODELS_URL,
   type LLMProvider,
+  type GroqModelEntry,
 } from "../src/lib/llm-provider";
 import { PostGenerationError, type PostGenerationInput } from "../src/lib/groq";
 import { validatePost } from "../src/lib/social-validation";
@@ -432,5 +438,214 @@ describe("LLMFallbackChain", () => {
     assert.match(assocFallback, /12\/11\/2026/);
     assert.match(assocFallback, /19:00/);
     assert.doesNotMatch(assocFallback, /🍺🍕/);
+  });
+
+  it("filters and orders Groq models by lowest cost while excluding non-chat and low-capacity models", () => {
+    const models: GroqModelEntry[] = [
+      { id: "whisper-large-v3", active: true, input_modalities: ["audio"], output_modalities: ["transcription"] },
+      { id: "canopylabs/orpheus-v1-english", active: true, input_modalities: ["text"], output_modalities: ["speech"] },
+      { id: "meta-llama/llama-prompt-guard-2-86m", active: true, context_window: 512, max_completion_tokens: 512 },
+      { id: "openai/gpt-oss-safeguard-20b", active: true, context_window: 131072, max_completion_tokens: 65536 },
+      { id: "allam-2-7b", active: true, context_window: 4096, max_completion_tokens: 4096 },
+      { id: "inactive-model", active: false, context_window: 131072, max_completion_tokens: 16384 },
+      { id: "audio-only-input", active: true, input_modalities: ["audio"], output_modalities: ["text"], context_window: 16384 },
+      {
+        id: "qwen/qwen3.8-27b",
+        active: true,
+        context_window: 131072,
+        max_completion_tokens: 16384,
+        input_modalities: ["text", "image"],
+        output_modalities: ["text"],
+        pricing: { prompt: "0.0000008", completion: "0.000004" },
+        supported_features: ["reasoning"],
+      },
+      {
+        id: "openai/gpt-oss-120b",
+        active: true,
+        context_window: 131072,
+        max_completion_tokens: 65536,
+        input_modalities: ["text"],
+        output_modalities: ["text"],
+        pricing: { prompt: "0.00000015", completion: "0.0000006" },
+        supported_features: ["reasoning"],
+      },
+      {
+        id: "openai/gpt-oss-20b",
+        active: true,
+        context_window: 131072,
+        max_completion_tokens: 65536,
+        input_modalities: ["text"],
+        output_modalities: ["text"],
+        pricing: { prompt: "0.000000075", completion: "0.0000003" },
+        supported_features: ["reasoning"],
+      },
+      {
+        id: "unpriced-chat-model",
+        active: true,
+        context_window: 32768,
+        max_completion_tokens: 8192,
+      },
+    ];
+
+    assert.equal(isEligibleGroqChatModel(models[0]), false);
+    assert.equal(isEligibleGroqChatModel(models[1]), false);
+    assert.equal(isEligibleGroqChatModel(models[2]), false);
+    assert.equal(isEligibleGroqChatModel(models[3]), false);
+    assert.equal(isEligibleGroqChatModel(models[4]), false);
+    assert.equal(isEligibleGroqChatModel(models[5]), false);
+    assert.equal(isEligibleGroqChatModel(models[6]), false);
+    assert.equal(computeGroqModelCostScore({ id: "zero-cost", pricing: { prompt: "0", completion: "0" } }), Number.POSITIVE_INFINITY);
+
+    const selected = selectGroqCandidateModels(models);
+    assert.deepEqual(
+      selected.map((m) => m.id),
+      ["openai/gpt-oss-20b", "openai/gpt-oss-120b", "qwen/qwen3.8-27b"],
+    );
+    assert.equal(isReasoningModel(selected[0]), true);
+    assert.equal(isReasoningModel({ id: "openai/gpt-oss-20b" }), true);
+    assert.equal(isReasoningModel({ id: "llama-3.1-8b-instant" }), false);
+  });
+
+  it("discovers Groq models from /openai/v1/models and retries next candidate on output_truncated", async () => {
+    const calledModels: Array<{ model: string; reasoning_effort?: string; max_completion_tokens?: number }> = [];
+    const attempts: Array<{ provider: string; model: string; status: string; errorCode?: string; completionTokens?: number }> = [];
+
+    const fetchImpl: typeof fetch = async (url, init) => {
+      if (String(url) === GROQ_MODELS_URL) {
+        return new Response(
+          JSON.stringify({
+            object: "list",
+            data: [
+              {
+                id: "openai/gpt-oss-20b",
+                active: true,
+                context_window: 131072,
+                max_completion_tokens: 65536,
+                input_modalities: ["text"],
+                output_modalities: ["text"],
+                pricing: { prompt: "0.000000075", completion: "0.0000003" },
+                supported_features: ["reasoning"],
+              },
+              {
+                id: "qwen/qwen3.8-27b",
+                active: true,
+                context_window: 131072,
+                max_completion_tokens: 16384,
+                input_modalities: ["text"],
+                output_modalities: ["text"],
+                pricing: { prompt: "0.0000008", completion: "0.000004" },
+                supported_features: ["reasoning"],
+              },
+            ],
+          }),
+          { status: 200 },
+        );
+      }
+
+      const body = JSON.parse(String(init?.body)) as {
+        model: string;
+        reasoning_effort?: string;
+        max_completion_tokens?: number;
+      };
+      calledModels.push(body);
+
+      if (body.model === "openai/gpt-oss-20b") {
+        return new Response(
+          JSON.stringify({
+            choices: [{ finish_reason: "length", message: { content: "" } }],
+            usage: { prompt_tokens: 400, completion_tokens: 4096, total_tokens: 4496 },
+          }),
+          { status: 200 },
+        );
+      }
+
+      return new Response(
+        JSON.stringify({
+          choices: [{ finish_reason: "stop", message: { content: "Recovered with second Groq model!" } }],
+          usage: { prompt_tokens: 400, completion_tokens: 80, total_tokens: 480 },
+        }),
+        { status: 200 },
+      );
+    };
+
+    const chain = createDefaultLLMChain(
+      { groqApiKey: "gsk-key", groqModel: "" },
+      (attempt) => {
+        attempts.push({
+          provider: attempt.provider,
+          model: attempt.model,
+          status: attempt.status,
+          errorCode: attempt.errorCode,
+          completionTokens: attempt.completionTokens,
+        });
+      },
+    );
+
+    const result = await chain.generate(mockInput, fetchImpl);
+    assert.equal(result.text, "Recovered with second Groq model!");
+    assert.equal(result.model, "qwen/qwen3.8-27b");
+    assert.equal(result.provider, "groq");
+    assert.equal(calledModels.length, 2);
+    assert.equal(calledModels[0].model, "openai/gpt-oss-20b");
+    assert.equal(calledModels[0].reasoning_effort, "low");
+    assert.equal(calledModels[0].max_completion_tokens, 4096);
+    assert.equal(calledModels[1].model, "qwen/qwen3.8-27b");
+    assert.equal(calledModels[1].reasoning_effort, "low");
+    assert.equal(calledModels[1].max_completion_tokens, 4096);
+    assert.equal(attempts.length, 1);
+    assert.equal(attempts[0].model, "qwen/qwen3.8-27b");
+    assert.equal(attempts[0].status, "success");
+  });
+
+  it("preserves model name and token usage in error attempt when all Groq candidates truncate", async () => {
+    const attempts: Array<{ provider: string; model: string; status: string; errorCode?: string; completionTokens?: number }> = [];
+    const fetchImpl: typeof fetch = async (url) => {
+      if (String(url) === GROQ_MODELS_URL) {
+        return new Response(
+          JSON.stringify({
+            object: "list",
+            data: [
+              {
+                id: "openai/gpt-oss-20b",
+                active: true,
+                context_window: 131072,
+                max_completion_tokens: 65536,
+                pricing: { prompt: "0.000000075", completion: "0.0000003" },
+                supported_features: ["reasoning"],
+              },
+            ],
+          }),
+          { status: 200 },
+        );
+      }
+      return new Response(
+        JSON.stringify({
+          choices: [{ finish_reason: "length", message: { content: "" } }],
+          usage: { prompt_tokens: 450, completion_tokens: 4096, total_tokens: 4546 },
+        }),
+        { status: 200 },
+      );
+    };
+
+    const chain = createDefaultLLMChain(
+      { groqApiKey: "gsk-key", groqModel: "", openAiApiKey: "" },
+      (attempt) => {
+        attempts.push({
+          provider: attempt.provider,
+          model: attempt.model,
+          status: attempt.status,
+          errorCode: attempt.errorCode,
+          completionTokens: attempt.completionTokens,
+        });
+      },
+    );
+
+    const result = await chain.generate(mockInput, fetchImpl);
+    assert.equal(result.provider, "fallback");
+    assert.equal(result.generationError, "output_truncated");
+    assert.equal(attempts[0].provider, "groq");
+    assert.equal(attempts[0].model, "openai/gpt-oss-20b");
+    assert.equal(attempts[0].errorCode, "output_truncated");
+    assert.equal(attempts[0].completionTokens, 4096);
   });
 });
