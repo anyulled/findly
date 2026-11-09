@@ -198,42 +198,31 @@ describe("draft-repository", () => {
   });
 
   it("listApprovedExamples filters by valid networks and languages", async () => {
+    const fakeRows = [
+      { content: "Example 1", account_id: "acc-1", network: "X", language: "es" },
+      { content: "Example 2", account_id: "acc-1", network: "TikTok", language: "es" },
+      { content: "Example 3", account_id: "acc-1", network: "X", language: "de" },
+    ];
     const supabase: SupabaseClientLike = {
       from<T>(table: string): SupabaseTableBuilder<T> {
         assert.equal(table, "style_examples");
-        return mockTable<T>({
-          select() {
-            return {
-              eq() {
-                return {
-                  in() {
-                    return {
-                      order() {
-                        return {
-                          limit() {
-                            return {
-                              data: [
-                                { content: "Example 1", account_id: "acc-1", network: "X", language: "es" },
-                                { content: "Example 2", account_id: "acc-1", network: "TikTok", language: "es" },
-                                { content: "Example 3", account_id: "acc-1", network: "X", language: "de" },
-                              ],
-                              error: null,
-                            };
-                          },
-                        };
-                      },
-                    };
-                  },
-                };
-              },
-            };
+        const builder = {
+          select() { return builder; },
+          eq() { return builder; },
+          order() { return builder; },
+          async limit() {
+            return { data: fakeRows, error: null };
           },
-        });
+        };
+        return builder as unknown as SupabaseTableBuilder<T>;
       },
     };
 
     const repo = createSupabaseDraftRepository(supabase, "owner-1");
-    const examples = await repo.listApprovedExamples("owner-1", ["acc-1"]);
+    const examples = await repo.listApprovedExamples("owner-1", ["acc-1"], {
+      segments: [{ accountId: "acc-1", network: "X", language: "es" }],
+      language: "es",
+    });
     assert.equal(examples.length, 1);
     assert.deepEqual(examples[0], { text: "Example 1", accountId: "acc-1", network: "X", language: "es" });
 

@@ -2,7 +2,7 @@
 
 ## Current behavior
 
-`src/lib/groq.ts` contains a server-side adapter for one platform-specific post. It sends event facts, the account voice and up to three approved style examples to Groq's Chat Completions endpoint. Examples are filtered by account, social network and language before being included in the request. Event fields are serialized as data and explicitly treated as untrusted content in the prompt.
+`src/lib/groq.ts` contains a server-side adapter for one platform-specific post. It sends event facts, the account voice and up to three approved style examples to Groq's Chat Completions endpoint. Examples are filtered by account, social network and language before being included in the request. Retrieval queries approved style examples per segment `(account, network, language)` using the compound index on `(owner_id, account_id, network, language, created_at desc)`, retrieving up to three examples per segment independently so high-activity segments never displace examples of another account, network, or language. Event fields are serialized as data and explicitly treated as untrusted content in the prompt.
 
 When a manually entered event is saved with Supabase enabled, `generateReviewPosts` reads the event, enabled accounts and approved examples on the server. It generates only future reminders at 14, 7 and 1 day before the event, at 13:00 Europe/Madrid. Up to four requests run concurrently. Existing event/account/network/reminder combinations are skipped before calling Groq, so retrying after a partial failure does not regenerate drafts already stored.
 

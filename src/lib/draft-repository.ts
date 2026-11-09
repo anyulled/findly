@@ -2,11 +2,11 @@ import type { LumaDraftRepository, LumaDraftRow, LLMLogRow } from "./luma-drafts
 import type { GenerationAccount, ExistingReminder } from "./groq-workflow";
 import type { ApprovedStyleExample } from "./groq";
 import { NETWORKS, type SocialNetwork } from "./social-validation";
-import type { PostLanguage } from "./language";
 import { selectEventAccounts } from "./event-targets";
 import { managedAccount } from "./managed-accounts";
 import { dispatchApprovedPostsWithSupabase, type DispatchBudget } from "./approved-dispatch";
 import { logger } from "./logger";
+import { fetchApprovedStyleExamples, type StyleExampleQueryContext } from "./style-examples";
 
 export interface SupabaseDraftRepositoryOptions {
   deliveryBudget?: DispatchBudget;
@@ -105,26 +105,17 @@ export function createSupabaseDraftRepository(
       );
     },
 
-    async listApprovedExamples(_ownerId: string, accountIds: string[]): Promise<ApprovedStyleExample[]> {
+    async listApprovedExamples(
+      _ownerId: string,
+      accountIds: string[],
+      context?: StyleExampleQueryContext,
+    ): Promise<ApprovedStyleExample[]> {
       if (accountIds.length === 0) return [];
-      const { data, error } = await client
-        .from<{ content: string; account_id: string; network: string; language: string }[]>("style_examples")
-        .select("content,account_id,network,language")
-        .eq("owner_id", ownerId)
-        .in("account_id", accountIds)
-        .order("created_at", { ascending: false })
-        .limit(72);
-      if (error) throw new Error("Unable to read approved style examples");
-      return (data ?? []).flatMap((example) => {
-        if (!NETWORKS.includes(example.network as SocialNetwork) || !["en", "es", "ca"].includes(example.language)) {
-          return [];
-        }
-        return [{
-          text: example.content,
-          accountId: example.account_id,
-          network: example.network as SocialNetwork,
-          language: example.language as PostLanguage,
-        }];
+      return fetchApprovedStyleExamples(client, {
+        ownerId,
+        accountIds,
+        segments: context?.segments,
+        languages: context?.language ? [context.language] : undefined,
       });
     },
 

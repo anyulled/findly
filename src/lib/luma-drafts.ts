@@ -3,6 +3,7 @@ import { generateEventDrafts, type ExistingReminder, type GenerationAccount } fr
 import { formatMadridDateTime, madridDateTimeToIso } from "./madrid-time";
 import { validatePost, NETWORKS, type SocialNetwork } from "./social-validation";
 import type { PostLanguage } from "./language";
+import { buildStyleExampleSegments, type StyleExampleQueryContext } from "./style-examples";
 import { isSubstackUrl, unpackLocationAndImage } from "./substack";
 import { fetchNextChannelSlotsForAccount } from "./buffer-sync";
 import { bufferCredentialForAccount } from "./buffer-account-credentials";
@@ -53,7 +54,11 @@ export type LumaDraftRow = {
 export type LumaDraftRepository = {
   listLinkedAccounts(ownerId: string, sourceId?: string | null, selectedAccountIds?: string[] | null): Promise<GenerationAccount[]>;
   listExistingReminders(ownerId: string, eventId: string): Promise<ExistingReminder[]>;
-  listApprovedExamples(ownerId: string, accountIds: string[]): Promise<ApprovedStyleExample[]>;
+  listApprovedExamples(
+    ownerId: string,
+    accountIds: string[],
+    context?: StyleExampleQueryContext,
+  ): Promise<ApprovedStyleExample[]>;
   insertDrafts(rows: LumaDraftRow[]): Promise<number>;
   insertLLMLogs?(rows: LLMLogRow[]): Promise<void>;
   getPublishingMode?(ownerId: string): Promise<"review" | "automatic">;
@@ -148,9 +153,19 @@ export async function generateLumaEventDrafts(
   const accounts = await repository.listLinkedAccounts(event.owner_id, event.source_id, event.target_account_ids);
   if (accounts.length === 0) return 0;
   const accountIds = accounts.map((account) => account.id);
+  const segments = buildStyleExampleSegments(
+    accounts.map((account) => ({
+      id: account.id,
+      networks: account.networks.filter((network): network is SocialNetwork => NETWORKS.includes(network)),
+    })),
+    [event.detected_language],
+  );
   const [existing, approvedExamples] = await Promise.all([
     repository.listExistingReminders(event.owner_id, event.id),
-    repository.listApprovedExamples(event.owner_id, accountIds),
+    repository.listApprovedExamples(event.owner_id, accountIds, {
+      language: event.detected_language,
+      segments,
+    }),
   ]);
   const publishingMode = await repository.getPublishingMode?.(event.owner_id) ?? "review";
   const eventTime = formatMadridDateTime(event.starts_at);
