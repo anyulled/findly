@@ -93,3 +93,38 @@ export async function regeneratePostContent(
     lastError,
   };
 }
+
+export type RegeneratedPostRecordUpdate = {
+  content: string;
+  generation_origin: "groq" | "openai" | "fallback";
+  generation_error_code: string | null;
+  last_error: string | null;
+  status: "review";
+  approved_at: null;
+  buffer_post_id: null;
+  scheduling_attempt_id: null;
+  updated_at: string;
+};
+
+/**
+ * Builds the database update payload for transitioning a post (from review or failed)
+ * into a fresh review draft, explicitly resetting approval and dispatch metadata
+ * so that it can be safely discarded or re-approved.
+ */
+export function buildRegeneratedPostUpdate(
+  result: PostRegenerationResult,
+  nowIso = new Date().toISOString(),
+): RegeneratedPostRecordUpdate {
+  return {
+    content: result.text,
+    generation_origin: result.generationOrigin,
+    generation_error_code: result.generationErrorCode,
+    last_error: result.lastError,
+    status: "review",
+    approved_at: null,
+    buffer_post_id: null,
+    scheduling_attempt_id: null,
+    updated_at: nowIso,
+  };
+}
+
