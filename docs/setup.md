@@ -34,8 +34,8 @@ Supabase free projects may pause after a week of sufficiently low activity. This
 
 ### Groq and OpenAI Fallback
 
-1. Configure `GROQ_API_KEY` and `GROQ_MODEL` as the primary draft generation provider.
-2. Configure `OPENAI_API_KEY` and `OPENAI_MODEL` (e.g. `gpt-6-luna`) as the secondary fallback provider. If Groq is unavailable, rate-limited (HTTP 429), or fails, Findly automatically falls back to OpenAI with structured logging before using local deterministic templates.
+1. Configure `GROQ_API_KEY` as the primary draft generation provider (`GROQ_MODEL` is optional; Findly queries `GET /openai/v1/models` to select the lowest-cost active chat model automatically and handles reasoning models with `reasoning_effort: "low"`).
+2. Configure `OPENAI_API_KEY` and `OPENAI_MODEL` (e.g. `gpt-6-luna`) as the secondary fallback provider. If Groq is unavailable, rate-limited (HTTP 429), or fails across candidate models, Findly automatically falls back to OpenAI with structured logging before using local deterministic templates.
 3. Configure production model IDs explicitly rather than relying on implicit defaults.
 4. Expect account-specific rate limits. A throttled or failed request should leave a visible retryable item and must not create a partial schedule.
 5. Account voice instructions belong to the per-account system prompt. Only final texts approved in review mode are added as style examples; generated text must still pass deterministic length checks.

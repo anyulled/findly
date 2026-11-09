@@ -1,6 +1,8 @@
 import {
   OpenAICompatibleProvider,
   createDefaultLLMChain,
+  GROQ_CHAT_COMPLETIONS_URL,
+  GROQ_MODELS_URL,
   type PostGenerationInput,
   type GeneratedPost,
   type LLMAttemptHandler,
@@ -13,12 +15,15 @@ export {
   type LLMAttemptRecord,
   type LLMAttemptHandler,
   type TokenUsage,
+  type GroqModelEntry,
   PostGenerationError,
   buildFallbackDraftText,
   buildMessages,
+  isEligibleGroqChatModel,
+  computeGroqModelCostScore,
+  selectGroqCandidateModels,
+  isReasoningModel,
 } from "./llm-provider";
-
-const GROQ_CHAT_COMPLETIONS_URL = "https://api.groq.com/openai/v1/chat/completions";
 
 export type GroqGenerationConfig = {
   apiKey?: string;
@@ -40,6 +45,7 @@ export async function generateSocialPost(
     GROQ_CHAT_COMPLETIONS_URL,
     () => config.apiKey ?? process.env.GROQ_API_KEY,
     () => config.model ?? process.env.GROQ_MODEL,
+    GROQ_MODELS_URL,
   );
   return provider.generate(input, config.fetchImpl ?? fetch);
 }
