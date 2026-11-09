@@ -70,4 +70,15 @@ describe("documentation sync PR checklist", () => {
     const completedTemplate = templateContent.replace(/- \[ \]/g, "- [x]");
     assert.deepEqual(documentationSyncIssues(completedTemplate), []);
   });
+
+  it("configures CI workflow to trigger pull_request only on code changes (opened, reopened, synchronize)", () => {
+    const ciWorkflowPath = resolve(import.meta.dirname, "../.github/workflows/ci.yml");
+    const ciWorkflowContent = readFileSync(ciWorkflowPath, "utf8");
+
+    assert.match(
+      ciWorkflowContent,
+      /pull_request:\s+branches:\s*\[main\]\s+types:\s*\[opened,\s*reopened,\s*synchronize\]/mu
+    );
+    assert.equal(ciWorkflowContent.includes("edited"), false);
+  });
 });
