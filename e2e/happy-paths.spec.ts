@@ -550,3 +550,79 @@ test("allows changing publication date and retrying AI generation in detail moda
   // Modal closes and changes are saved
   await expect(page.getByText("DETALLE DE PUBLICACIÓN")).not.toBeVisible();
 });
+
+test("views planned publications list, edits/reschedules and deletes a post, and paginates compact events", async ({ page }) => {
+  await page.getByRole("button", { name: "Eventos" }).click();
+
+  const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Madrid", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date());
+  const values = Object.fromEntries(parts.map(({ type, value }) => [type, value]));
+  const eventDate = new Date(Date.UTC(Number(values.year), Number(values.month) - 1, Number(values.day) + 10)).toISOString().slice(0, 10);
+
+  await page.getByRole("button", { name: "Añadir evento" }).first().click();
+  await page.getByLabel("TÍTULO").fill("Compact UX Event");
+  await page.getByLabel("FECHA").fill(eventDate);
+  await page.getByLabel("HORA").fill("17:00");
+  await page.getByRole("button", { name: "Crear evento" }).click();
+
+  const eventArticle = page.getByRole("article").filter({ hasText: "Compact UX Event" });
+  await expect(eventArticle).toBeVisible();
+  await expect(eventArticle.getByText("publicaciones previstas")).toBeVisible();
+
+  // Expand the planned publications list
+  const toggleBtn = eventArticle.getByRole("button", { name: /Ver \(/ });
+  await expect(toggleBtn).toBeVisible();
+  await toggleBtn.click();
+
+  // Verify planned publications are listed with edit action
+  const editBtn = eventArticle.getByRole("button", { name: "Editar / Reprogramar" }).first();
+  await expect(editBtn).toBeVisible();
+  await editBtn.click();
+
+  // Verify PostDetailModal opens with "DETALLE DE PUBLICACIÓN"
+  await expect(page.getByText("DETALLE DE PUBLICACIÓN")).toBeVisible();
+  await page.getByRole("button", { name: "Cerrar", exact: true }).click();
+  await expect(page.getByText("DETALLE DE PUBLICACIÓN")).not.toBeVisible();
+
+  // Delete a post from inside the expanded list
+  page.once("dialog", (dialog) => {
+    void dialog.accept();
+  });
+  await eventArticle.getByRole("button", { name: "Eliminar" }).last().click();
+  await expect(page.getByText("Borrador eliminado.")).toBeVisible();
+
+  // Verify pagination and 0 publications notice when more than 6 events exist
+  await page.evaluate((date) => {
+    const events = Array.from({ length: 7 }, (_, i) => ({
+      id: `mock-event-${i + 1}`,
+      title: `Event Number ${i + 1}`,
+      date: date,
+      time: "10:00",
+      place: "Barcelona",
+      description: `Description for event ${i + 1}`,
+      source: "Manual",
+    }));
+    const state = JSON.parse(localStorage.getItem("findly-state-v1") ?? "{}");
+    state.events = events;
+    state.posts = [];
+    localStorage.setItem("findly-state-v1", JSON.stringify(state));
+  }, eventDate);
+
+  await page.reload();
+  await page.getByRole("button", { name: "Eventos" }).click();
+
+  // Notice for 0 planned publications should be visible on mock events
+  await expect(page.getByText("Este evento no tiene publicaciones programadas.").first()).toBeVisible();
+  await expect(page.getByRole("button", { name: "Generar publicaciones" }).first()).toBeVisible();
+
+  // Pagination should be displayed
+  await expect(page.getByRole("navigation", { name: "Paginación" })).toBeVisible();
+  await expect(page.getByText(/Mostrando 1 - 6 de 7 eventos/)).toBeVisible();
+
+  // Click next page
+  await page.getByRole("button", { name: "Ir a la página siguiente" }).click();
+  await expect(page.getByText(/Mostrando 7 - 7 de 7 eventos/)).toBeVisible();
+
+  // Click previous page
+  await page.getByRole("button", { name: "Ir a la página anterior" }).click();
+  await expect(page.getByText(/Mostrando 1 - 6 de 7 eventos/)).toBeVisible();
+});

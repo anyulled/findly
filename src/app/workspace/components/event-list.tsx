@@ -1,10 +1,61 @@
-import { useMemo } from "react";
-import styles from "../../page.module.css";
+import { useMemo, useState } from "react";
+import styles from "./event-list.module.css";
 import { selectEventAccounts, hasMissingReminders } from "@/lib/event-targets";
+import {
+  paginateItems,
+  getEventPlannedPosts,
+  canGenerateEventDrafts,
+} from "@/lib/event-pagination";
 import type { SourceView } from "../../workspace-actions";
-import type { Account, EventItem, Post } from "../workspace-types";
+import type { Account, EventItem, Post, Status } from "../workspace-types";
 import { dateAt, scheduleDates, sortEventsReverseChronological } from "../workspace-calendar-dates";
-import { Plus, ExternalLink, Trash2 } from "lucide-react";
+import {
+  Plus,
+  ExternalLink,
+  Trash2,
+  Sparkles,
+  ChevronDown,
+  ChevronUp,
+  Pencil,
+  RefreshCw,
+  Calendar,
+} from "lucide-react";
+import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
+import { Badge, type BadgeVariant } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { NetworkIcon } from "@/components/ui/network-icon";
+import {
+  Pagination,
+  PaginationContent,
+  PaginationItem,
+  PaginationLink,
+  PaginationNext,
+  PaginationPrevious,
+} from "@/components/ui/pagination";
+
+const EVENTS_PER_PAGE = 6;
+
+const statusVariants: Record<Status, BadgeVariant> = {
+  review: "warning",
+  approved: "secondary",
+  scheduling: "secondary",
+  scheduled: "default",
+  published: "success",
+  failed: "destructive",
+  needs_reconciliation: "warning",
+  discarded: "secondary",
+};
+
+const statusLabels: Record<Status, string> = {
+  review: "Pendiente",
+  approved: "Aprobada",
+  scheduling: "Enviando",
+  scheduled: "Programada",
+  published: "Publicada",
+  failed: "Fallida",
+  needs_reconciliation: "Conciliación",
+  discarded: "Descartada",
+};
 
 interface EventListProps {
   events: EventItem[];
@@ -14,8 +65,10 @@ interface EventListProps {
   persistent: boolean;
   deletingEventId?: string | null;
   openAddForm: () => void;
-  onRetryDrafts: (event: EventItem) => void;
-  onRemoveEvent: (eventId: string) => void;
+  onRetryDrafts: (event: EventItem) => void | Promise<void>;
+  onRemoveEvent: (eventId: string) => void | Promise<void>;
+  onSelectPost?: (post: Post) => void;
+  onRemoveDraft?: (post: Post) => void | Promise<void>;
 }
 
 export function EventList({
@@ -28,109 +81,331 @@ export function EventList({
   openAddForm,
   onRetryDrafts,
   onRemoveEvent,
+  onSelectPost,
+  onRemoveDraft,
 }: EventListProps) {
+  const [currentPage, setCurrentPage] = useState(1);
+  const [expandedEventIds, setExpandedEventIds] = useState<Set<string>>(() => new Set());
+  const [generatingEventIds, setGeneratingEventIds] = useState<Set<string>>(() => new Set());
+
   const sortedEvents = useMemo(() => sortEventsReverseChronological(events), [events]);
+  const pagination = useMemo(
+    () => paginateItems(sortedEvents, currentPage, EVENTS_PER_PAGE),
+    [sortedEvents, currentPage],
+  );
+
+  function toggleEventExpand(eventId: string) {
+    setExpandedEventIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(eventId)) {
+        next.delete(eventId);
+      } else {
+        next.add(eventId);
+      }
+      return next;
+    });
+  }
+
+  async function handleGeneratePosts(event: EventItem) {
+    if (generatingEventIds.has(event.id)) return;
+    setGeneratingEventIds((prev) => new Set(prev).add(event.id));
+    try {
+      await onRetryDrafts(event);
+      // Auto-expand the event so the user sees the newly generated publications
+      setExpandedEventIds((prev) => new Set(prev).add(event.id));
+    } finally {
+      setGeneratingEventIds((prev) => {
+        const next = new Set(prev);
+        next.delete(event.id);
+        return next;
+      });
+    }
+  }
 
   return (
     <>
       <div className={styles.pageHeading}>
         <div>
           <div className={styles.eyebrow}>EVENTOS DETECTADOS Y MANUALES</div>
-          <h1>Eventos</h1>
-          <p>Gestiona los eventos y las publicaciones que generan.</p>
+          <h1 className={styles.title}>Eventos</h1>
+          <p className={styles.subtitle}>Gestiona los eventos y las publicaciones que generan.</p>
         </div>
-        <button className={styles.addButton} onClick={openAddForm}>
-          <Plus size={16} aria-hidden="true" style={{ marginRight: 6 }} /> Añadir evento
-        </button>
+        <Button className={styles.addButton} onClick={openAddForm}>
+          <Plus size={16} aria-hidden="true" /> Añadir evento
+        </Button>
       </div>
 
       {sortedEvents.length === 0 ? (
-        <p className={styles.emptyNotice}>Aún no hay eventos registrados.</p>
-      ) : (
-        <div className={styles.eventsList}>
-          {sortedEvents.map((event) => {
-            const eventPosts = posts.filter((post) => post.eventId === event.id);
-            const links = sources.flatMap((source) =>
-              source.accountIds.map((accountId) => ({ sourceId: source.id, accountId })),
-            );
-            const eligibleAccounts = selectEventAccounts(accountList, event.sourceId, links, event.accountIds);
-            const expectedLeadDays =
-              event.source === "Substack"
-                ? ([1] as const)
-                : scheduleDates(event.date).map(({ leadDays }) => leadDays);
-            const missing = hasMissingReminders(eligibleAccounts, expectedLeadDays, eventPosts);
-
-            return (
-              <article key={event.id} className={styles.eventCard}>
-                <div className={styles.eventDate}>
-                  <b>{dateAt(event.date).toLocaleDateString("es-ES", { day: "2-digit" })}</b>
-                  <span>{dateAt(event.date).toLocaleDateString("es-ES", { month: "short" })}</span>
-                </div>
-                <div className={styles.eventInfo}>
-                  <div className={styles.eventMeta}>
-                    <span className={styles.sourceTag}>{event.source}</span>
-                    <span>
-                      {event.source === "Substack" && !event.place
-                        ? "Artículo"
-                        : `${event.time} · ${event.place}`}
-                    </span>
-                  </div>
-                  <h3>{event.title}</h3>
-                  <p>{event.description}</p>
-                  <div className={styles.eventFoot}>
-                    {eventPosts.filter((post) => post.status !== "discarded").length} publicaciones previstas{" "}
-                    {persistent && missing && (
-                      <button
-                        className={styles.morePosts}
-                        onClick={() => {
-                          onRetryDrafts(event);
-                        }}
-                      >
-                        Completar recordatorios
-                      </button>
-                    )}{" "}
-                    <a
-                      href={
-                        event.url ??
-                        (event.source === "Luma"
-                          ? "https://lu.ma"
-                          : event.source === "Meetup"
-                            ? "https://meetup.com"
-                            : "#")
-                      }
-                      target={event.url ? "_blank" : undefined}
-                      rel="noreferrer"
-                      style={{ display: "inline-flex", alignItems: "center", gap: 4 }}
-                    >
-                      {event.source === "Manual" ? (
-                        "Añadido manualmente"
-                      ) : (
-                        <>
-                          Abrir evento <ExternalLink size={13} aria-hidden="true" />
-                        </>
-                      )}
-                    </a>
-                  </div>
-                </div>
-                <div className={styles.eventActions}>
-                  <button
-                    type="button"
-                    className={styles.secondaryButton}
-                    disabled={deletingEventId === event.id}
-                    onClick={() => {
-                      onRemoveEvent(event.id);
-                    }}
-                    aria-label={`Eliminar evento ${event.title}`}
-                    style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
-                  >
-                    <Trash2 size={14} aria-hidden="true" />
-                    {deletingEventId === event.id ? "Eliminando…" : "Eliminar"}
-                  </button>
-                </div>
-              </article>
-            );
-          })}
+        <div className={styles.emptyNotice}>
+          <p>Aún no hay eventos registrados.</p>
+          <Button variant="outline" onClick={openAddForm} style={{ marginTop: 12 }}>
+            <Plus size={15} style={{ marginRight: 6 }} /> Añadir primer evento
+          </Button>
         </div>
+      ) : (
+        <>
+          <div className={styles.eventsGrid}>
+            {pagination.items.map((event) => {
+              const eventPosts = getEventPlannedPosts(posts, event.id);
+              const links = sources.flatMap((source) =>
+                source.accountIds.map((accountId) => ({ sourceId: source.id, accountId })),
+              );
+              const eligibleAccounts = selectEventAccounts(accountList, event.sourceId, links, event.accountIds);
+              const expectedLeadDays =
+                event.source === "Substack"
+                  ? ([1] as const)
+                  : scheduleDates(event.date).map(({ leadDays }) => leadDays);
+              const missing = hasMissingReminders(eligibleAccounts, expectedLeadDays, eventPosts);
+              const hasZeroPosts = canGenerateEventDrafts(eventPosts);
+              const isExpanded = expandedEventIds.has(event.id);
+              const isGenerating = generatingEventIds.has(event.id);
+
+              return (
+                <article key={event.id} className={styles.eventCard}>
+                  <Card style={{ border: "none", boxShadow: "none", background: "transparent" }}>
+                    <CardHeader style={{ padding: "16px 16px 8px" }}>
+                      <div className={styles.cardTop}>
+                        <div className={styles.dateAndMeta}>
+                          <div className={styles.eventDate}>
+                            <b>{dateAt(event.date).toLocaleDateString("es-ES", { day: "2-digit" })}</b>
+                            <span>{dateAt(event.date).toLocaleDateString("es-ES", { month: "short" })}</span>
+                          </div>
+                          <div className={styles.metaInfo}>
+                            <div className={styles.metaBadges}>
+                              <Badge variant="secondary">{event.source}</Badge>
+                            </div>
+                            <span className={styles.metaDetails} title={`${event.time} · ${event.place}`}>
+                              {event.source === "Substack" && !event.place
+                                ? "Artículo"
+                                : `${event.time} · ${event.place}`}
+                            </span>
+                          </div>
+                        </div>
+
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          disabled={deletingEventId === event.id}
+                          onClick={() => {
+                            void onRemoveEvent(event.id);
+                          }}
+                          aria-label={`Eliminar evento ${event.title}`}
+                          style={{ color: "var(--text-muted)" }}
+                        >
+                          <Trash2 size={14} aria-hidden="true" style={{ marginRight: 4 }} />
+                          {deletingEventId === event.id ? "Eliminando…" : "Eliminar"}
+                        </Button>
+                      </div>
+
+                      <CardTitle className={styles.eventTitle}>{event.title}</CardTitle>
+                      {event.description && (
+                        <CardDescription className={styles.eventDescription}>
+                          {event.description}
+                        </CardDescription>
+                      )}
+
+                      <a
+                        href={
+                          event.url ??
+                          (event.source === "Luma"
+                            ? "https://lu.ma"
+                            : event.source === "Meetup"
+                              ? "https://meetup.com"
+                              : "#")
+                        }
+                        target={event.url ? "_blank" : undefined}
+                        rel="noreferrer"
+                        className={styles.eventLink}
+                      >
+                        {event.source === "Manual" ? (
+                          "Añadido manualmente"
+                        ) : (
+                          <>
+                            Abrir evento <ExternalLink size={13} aria-hidden="true" />
+                          </>
+                        )}
+                      </a>
+                    </CardHeader>
+
+                    <CardContent style={{ padding: "8px 16px 16px" }}>
+                      <div className={styles.publicationsSection}>
+                        <div className={styles.publicationsHeader}>
+                          <span
+                            className={[
+                              styles.plannedCountBadge,
+                              hasZeroPosts ? styles.plannedCountZero : "",
+                            ]
+                              .filter(Boolean)
+                              .join(" ")}
+                          >
+                            {eventPosts.length} publicaciones previstas
+                          </span>
+
+                          <div style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                            {persistent && missing && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                disabled={isGenerating}
+                                onClick={() => {
+                                  void handleGeneratePosts(event);
+                                }}
+                                style={{ fontSize: 12, height: 28, padding: "0 8px" }}
+                              >
+                                <RefreshCw
+                                  size={12}
+                                  className={isGenerating ? "animate-spin" : ""}
+                                  style={{ marginRight: 4 }}
+                                />
+                                Completar recordatorios
+                              </Button>
+                            )}
+
+                            {eventPosts.length > 0 && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => toggleEventExpand(event.id)}
+                                aria-expanded={isExpanded}
+                                style={{ fontSize: 12, height: 28, padding: "0 8px", gap: 4 }}
+                              >
+                                {isExpanded ? (
+                                  <>
+                                    Ocultar <ChevronUp size={13} />
+                                  </>
+                                ) : (
+                                  <>
+                                    Ver ({eventPosts.length}) <ChevronDown size={13} />
+                                  </>
+                                )}
+                              </Button>
+                            )}
+                          </div>
+                        </div>
+
+                        {hasZeroPosts && (
+                          <div className={styles.createPublicationsNotice}>
+                            <span className={styles.createNoticeText}>
+                              Este evento no tiene publicaciones programadas.
+                            </span>
+                            <Button
+                              variant="default"
+                              size="sm"
+                              disabled={isGenerating}
+                              onClick={() => {
+                                void handleGeneratePosts(event);
+                              }}
+                              style={{ gap: 6 }}
+                            >
+                              <Sparkles size={14} aria-hidden="true" />
+                              {isGenerating ? "Generando…" : "Generar publicaciones"}
+                            </Button>
+                          </div>
+                        )}
+
+                        {isExpanded && eventPosts.length > 0 && (
+                          <div className={styles.postsList}>
+                            {eventPosts.map((post) => (
+                              <div key={post.id} className={styles.postItem}>
+                                <div className={styles.postItemHeader}>
+                                  <div className={styles.postItemMeta}>
+                                    <NetworkIcon network={post.network} size={14} />
+                                    <span className={styles.postAccountBadge}>{post.account}</span>
+                                    <span className={styles.postDate}>
+                                      <Calendar size={11} style={{ display: "inline", marginRight: 3 }} />
+                                      {post.date} · {post.time}
+                                    </span>
+                                  </div>
+                                  <Badge variant={statusVariants[post.status] ?? "secondary"} style={{ fontSize: 11, padding: "2px 6px" }}>
+                                    {statusLabels[post.status] ?? post.status}
+                                  </Badge>
+                                </div>
+
+                                {post.text && (
+                                  <p className={styles.postSnippet} title={post.text}>
+                                    {post.text}
+                                  </p>
+                                )}
+
+                                <div className={styles.postItemActions}>
+                                  {onSelectPost && (
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      onClick={() => onSelectPost(post)}
+                                      style={{ height: 26, fontSize: 11.5, padding: "0 8px", gap: 4 }}
+                                      title="Editar texto o reprogramar fecha y hora"
+                                    >
+                                      <Pencil size={11} aria-hidden="true" />
+                                      Editar / Reprogramar
+                                    </Button>
+                                  )}
+
+                                  {onRemoveDraft &&
+                                    (post.status === "review" || post.status === "failed" || !persistent) && (
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={() => {
+                                          void onRemoveDraft(post);
+                                        }}
+                                        style={{ height: 26, fontSize: 11.5, padding: "0 8px", color: "var(--destructive)" }}
+                                        title="Eliminar publicación"
+                                      >
+                                        <Trash2 size={11} aria-hidden="true" />
+                                        Eliminar
+                                      </Button>
+                                    )}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </CardContent>
+                  </Card>
+                </article>
+              );
+            })}
+          </div>
+
+          {pagination.totalPages > 1 && (
+            <div className={styles.paginationFooter}>
+              <span className={styles.paginationSummary}>
+                Mostrando {pagination.startIndex + 1} - {pagination.endIndex} de {pagination.totalCount} eventos
+              </span>
+              <Pagination>
+                <PaginationContent>
+                  <PaginationItem>
+                    <PaginationPrevious
+                      disabled={!pagination.hasPreviousPage}
+                      onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                    />
+                  </PaginationItem>
+
+                  {Array.from({ length: pagination.totalPages }, (_, i) => i + 1).map((pageNum) => (
+                    <PaginationItem key={pageNum}>
+                      <PaginationLink
+                        isActive={pageNum === pagination.page}
+                        onClick={() => setCurrentPage(pageNum)}
+                      >
+                        {pageNum}
+                      </PaginationLink>
+                    </PaginationItem>
+                  ))}
+
+                  <PaginationItem>
+                    <PaginationNext
+                      disabled={!pagination.hasNextPage}
+                      onClick={() => setCurrentPage((p) => Math.min(pagination.totalPages, p + 1))}
+                    />
+                  </PaginationItem>
+                </PaginationContent>
+              </Pagination>
+            </div>
+          )}
+        </>
       )}
     </>
   );

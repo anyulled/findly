@@ -23,5 +23,7 @@ La validación determinista muestra límites iniciales para LinkedIn (3000), X (
 
 El calendario empieza en la quincena que contiene la semana actual y la siguiente, con semanas de lunes a domingo. Para cada evento se preparan las fechas de 14, 7 y 1 día antes que aún no hayan pasado, a las 13:00 de Madrid. El calendario tiene controles de semana, quincena y mes.
 
+La vista de eventos dispone de una cuadrícula compacta responsiva (de 2 a 3 eventos por fila en pantallas medianas y grandes) con paginación integrada de 6 eventos por página. Cada tarjeta de evento muestra sus datos clave, el total de publicaciones previstas y permite desplegar el listado detallado de publicaciones programadas con acciones para editarlas, reprogramarlas (abriendo el panel de detalle con selector de fecha y hora) o eliminarlas. Cuando un evento no tiene publicaciones previstas, se ofrece un botón directo para lanzar la generación de borradores.
+
 
 Para habilitar el acceso se configura Supabase Google OAuth, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` y `OWNER_EMAIL`; después hay que aplicar las migraciones de `supabase/migrations/`. Si estas variables faltan en desarrollo local, el modo demo conserva sus datos en el navegador. `JEV_API_KEY` puede dejarse vacío: la app no lo utiliza.
