@@ -23,6 +23,7 @@ export {
   computeGroqModelCostScore,
   selectGroqCandidateModels,
   isReasoningModel,
+  supportsLowReasoningEffort,
 } from "./llm-provider";
 
 export type GroqGenerationConfig = {

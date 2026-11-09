@@ -318,13 +318,28 @@ export interface LLMProvider {
   readonly id: string;
   readonly name: string;
   isConfigured(): boolean;
-  generate(input: PostGenerationInput, fetchImpl?: typeof fetch): Promise<GeneratedPost>;
+  generate(
+    input: PostGenerationInput,
+    fetchImpl?: typeof fetch,
+    onAttempt?: LLMAttemptHandler,
+  ): Promise<GeneratedPost>;
 }
 
+const KNOWN_GROQ_MODEL_COSTS: Record<string, number> = {
+  "llama-3.1-8b-instant": 0.00000013,
+  "openai/gpt-oss-20b": 0.000000375,
+  "gemma2-9b-it": 0.0000004,
+  "openai/gpt-oss-120b": 0.00000075,
+  "llama-3.3-70b-versatile": 0.00000138,
+  "qwen/qwen3.8-27b": 0.0000048,
+};
+
+/** Checks whether a Groq model ID belongs to a non-chat or safety/audio family. */
 function isExcludedGroqModelId(id: string): boolean {
   return /guard|safeguard|whisper|orpheus|embed|tts|vision-preview/iu.test(id);
 }
 
+/** Validates that a Groq model accepts text input and produces text-only output. */
 function hasValidTextModalities(model: GroqModelEntry): boolean {
   const inputs = model.input_modalities;
   if (Array.isArray(inputs) && !inputs.includes("text")) return false;
@@ -333,38 +348,43 @@ function hasValidTextModalities(model: GroqModelEntry): boolean {
   return outputs.length === 1 && outputs[0] === "text";
 }
 
+/** Validates that a Groq model meets minimum context window and completion token thresholds. */
 function hasSufficientTokenCapacity(model: GroqModelEntry): boolean {
   const contextWindow = model.context_window ?? MIN_CHAT_CONTEXT_WINDOW;
   const maxCompletion = model.max_completion_tokens ?? contextWindow;
   return contextWindow >= MIN_CHAT_CONTEXT_WINDOW && maxCompletion >= MIN_CHAT_COMPLETION_TOKENS;
 }
 
+/** Determines whether a Groq model entry is an active, general-purpose text chat model. */
 export function isEligibleGroqChatModel(model: GroqModelEntry): boolean {
   if (!model.id.trim() || model.active === false) return false;
   if (isExcludedGroqModelId(model.id)) return false;
   return hasValidTextModalities(model) && hasSufficientTokenCapacity(model);
 }
 
+/** Computes the combined prompt + completion per-token cost score for ranking Groq models. */
 export function computeGroqModelCostScore(model: GroqModelEntry): number {
   const promptCost = Number(model.pricing?.prompt);
   const completionCost = Number(model.pricing?.completion);
-  if (!Number.isFinite(promptCost) || !Number.isFinite(completionCost)) {
-    return Number.POSITIVE_INFINITY;
-  }
   const total = promptCost + completionCost;
-  return total > 0 ? total : Number.POSITIVE_INFINITY;
+  if (Number.isFinite(total) && total > 0) {
+    return total;
+  }
+  return KNOWN_GROQ_MODEL_COSTS[model.id] ?? Number.POSITIVE_INFINITY;
 }
 
+/** Filters eligible Groq chat models and ranks up to three candidates by lowest token cost. */
 export function selectGroqCandidateModels(models: GroqModelEntry[]): GroqModelEntry[] {
   return models
     .filter(isEligibleGroqChatModel)
     .sort((a, b) => {
       const costDiff = computeGroqModelCostScore(a) - computeGroqModelCostScore(b);
-      return costDiff !== 0 ? costDiff : a.id.localeCompare(b.id);
+      return costDiff || a.id.localeCompare(b.id);
     })
     .slice(0, MAX_MODEL_CANDIDATES);
 }
 
+/** Checks whether a model uses chain-of-thought reasoning tokens during completion. */
 export function isReasoningModel(model: GroqModelEntry): boolean {
   if (Array.isArray(model.supported_features) && model.supported_features.includes("reasoning")) {
     return true;
@@ -372,32 +392,43 @@ export function isReasoningModel(model: GroqModelEntry): boolean {
   return /gpt-oss|qwen3|deepseek-r1/iu.test(model.id);
 }
 
+/** Checks whether a Groq reasoning model supports the `reasoning_effort: "low"` parameter. */
+export function supportsLowReasoningEffort(model: GroqModelEntry): boolean {
+  return /gpt-oss/iu.test(model.id);
+}
+
+/** Resolves the `max_completion_tokens` budget for a given model and reasoning mode. */
 function resolveCompletionMaxTokens(model: GroqModelEntry, reasoning: boolean): number {
   if (!reasoning) return MAX_COMPLETION_TOKENS;
   const modelLimit = model.max_completion_tokens ?? REASONING_MAX_COMPLETION_TOKENS;
   return Math.min(modelLimit, REASONING_MAX_COMPLETION_TOKENS);
 }
 
+/** Builds the OpenAI-compatible chat completion request body with model-specific parameters. */
 function buildChatRequestBody(model: GroqModelEntry, input: PostGenerationInput): Record<string, unknown> {
   const reasoning = isReasoningModel(model);
+  const lowEffort = supportsLowReasoningEffort(model);
   return {
     model: model.id,
     messages: buildMessages(input),
     max_completion_tokens: resolveCompletionMaxTokens(model, reasoning),
-    ...(reasoning ? { reasoning_effort: "low" } : {}),
+    ...(lowEffort ? { reasoning_effort: "low" } : {}),
   };
 }
 
+/** Maps an HTTP error status code to a safe `PostGenerationError` code. */
 function classifyHttpErrorCode(status: number): PostGenerationError["code"] {
   if (status === 401 || status === 403) return "provider_auth";
   if (status === 429) return "rate_limited";
   return "provider_error";
 }
 
+/** Type guard verifying that an unknown value is a model object with a string `id`. */
 function isGroqModelRecord(entry: unknown): entry is GroqModelEntry {
   return Boolean(entry && typeof entry === "object" && typeof (entry as { id?: unknown }).id === "string");
 }
 
+/** Extracts and ranks eligible Groq chat models from a `/openai/v1/models` response payload. */
 function extractGroqModelsFromPayload(payload: unknown): GroqModelEntry[] {
   if (!payload || typeof payload !== "object") return [];
   const data = (payload as { data?: unknown }).data;
@@ -405,6 +436,7 @@ function extractGroqModelsFromPayload(payload: unknown): GroqModelEntry[] {
   return selectGroqCandidateModels(data.filter(isGroqModelRecord));
 }
 
+/** Fetches the raw JSON payload from the provider's models listing endpoint. */
 async function fetchModelsPayload(
   modelsUrl: string,
   providerName: string,
@@ -437,6 +469,37 @@ async function fetchModelsPayload(
   }
 }
 
+/** Fetches discovered Groq models while degrading gracefully on transient discovery errors. */
+async function fetchDiscoveredModelsOrEmpty(
+  modelsUrl: string,
+  providerName: string,
+  apiKey: string,
+  fetchImpl: typeof fetch,
+): Promise<GroqModelEntry[]> {
+  try {
+    const payload = await fetchModelsPayload(modelsUrl, providerName, apiKey, fetchImpl);
+    return extractGroqModelsFromPayload(payload);
+  } catch (error) {
+    if (error instanceof PostGenerationError && error.code === "provider_error") {
+      return [];
+    }
+    throw error;
+  }
+}
+
+/** Places an explicitly configured model first while retaining discovered metadata and fallback candidates. */
+function prioritizeConfiguredModel(
+  configuredModel: string | undefined,
+  discovered: GroqModelEntry[],
+): GroqModelEntry[] {
+  if (!configuredModel) return discovered;
+  const match = discovered.find((m) => m.id === configuredModel);
+  const primary: GroqModelEntry = match ?? { id: configuredModel };
+  const remaining = discovered.filter((m) => m.id !== configuredModel);
+  return [primary, ...remaining].slice(0, MAX_MODEL_CANDIDATES);
+}
+
+/** Resolves the ordered list of candidate models to attempt for a provider generation call. */
 async function resolveProviderModels(
   modelsUrl: string | undefined,
   providerName: string,
@@ -448,10 +511,9 @@ async function resolveProviderModels(
   if (!modelsUrl) {
     return trimmedFallback ? [{ id: trimmedFallback }] : [];
   }
-  const payload = await fetchModelsPayload(modelsUrl, providerName, apiKey, fetchImpl);
-  const discovered = extractGroqModelsFromPayload(payload);
-  if (discovered.length > 0) return discovered;
-  return [{ id: trimmedFallback || DEFAULT_GROQ_MODEL }];
+  const discovered = await fetchDiscoveredModelsOrEmpty(modelsUrl, providerName, apiKey, fetchImpl);
+  const candidates = prioritizeConfiguredModel(trimmedFallback, discovered);
+  return candidates.length > 0 ? candidates : [{ id: DEFAULT_GROQ_MODEL }];
 }
 
 const RETRYABLE_MODEL_ERROR_CODES = new Set<PostGenerationError["code"]>([
@@ -460,6 +522,7 @@ const RETRYABLE_MODEL_ERROR_CODES = new Set<PostGenerationError["code"]>([
   "empty_response",
 ]);
 
+/** Determines whether a failed model attempt should retry with the next discovered candidate. */
 function shouldRetryNextModel(error: unknown, index: number, totalCandidates: number): boolean {
   return (
     error instanceof PostGenerationError &&
@@ -468,6 +531,7 @@ function shouldRetryNextModel(error: unknown, index: number, totalCandidates: nu
   );
 }
 
+/** Extracts and validates the generated post text from a Chat Completions response payload. */
 function parseChatResponseContent(
   payload: unknown,
   providerName: string,
@@ -507,6 +571,7 @@ function parseChatResponseContent(
   return content.trim();
 }
 
+/** Extracts token usage counters from a Chat Completions response payload. */
 function parseChatResponseUsage(payload: unknown): TokenUsage | undefined {
   if (!payload || typeof payload !== "object") return undefined;
   const usage = (payload as { usage?: { prompt_tokens?: unknown; completion_tokens?: unknown; total_tokens?: unknown } }).usage;
@@ -524,6 +589,7 @@ type ChatApiResult = {
   latencyMs: number;
 };
 
+/** Executes a single HTTP request to an OpenAI-compatible Chat Completions endpoint. */
 async function callChatCompletionsApi(
   url: string,
   providerName: string,
@@ -589,19 +655,23 @@ export class OpenAICompatibleProvider implements LLMProvider {
     private readonly modelsEndpointUrl?: string,
   ) {}
 
+  /** Checks whether the provider has the required credentials and model configuration. */
   isConfigured(): boolean {
     const hasKey = Boolean(this.apiKeyGetter()?.trim());
     if (this.modelsEndpointUrl) return hasKey;
     return hasKey && Boolean(this.modelGetter()?.trim());
   }
 
+  /** Returns the configured model name or falls back to the provider identifier. */
   getModelName(): string {
     return this.modelGetter()?.trim() || this.id;
   }
 
+  /** Generates a validated social media post using discovered or configured models. */
   async generate(
     input: PostGenerationInput,
     fetchImpl: typeof fetch = fetch,
+    onAttempt?: LLMAttemptHandler,
   ): Promise<GeneratedPost> {
     const apiKey = this.apiKeyGetter()?.trim();
     const configuredModel = this.modelGetter()?.trim();
@@ -620,32 +690,55 @@ export class OpenAICompatibleProvider implements LLMProvider {
       fetchImpl,
     );
 
-    return this.generateWithCandidates(candidates, apiKey, input, fetchImpl);
+    return this.generateWithCandidates(candidates, apiKey, input, fetchImpl, onAttempt);
   }
 
+  /** Iterates over candidate models, retrying on recoverable output errors. */
   private async generateWithCandidates(
     candidates: GroqModelEntry[],
     apiKey: string,
     input: PostGenerationInput,
     fetchImpl: typeof fetch,
+    onAttempt?: LLMAttemptHandler,
   ): Promise<GeneratedPost> {
     let lastError: unknown;
     for (let i = 0; i < candidates.length; i++) {
       const candidate = candidates[i];
+      const startTime = Date.now();
       try {
         return await this.generateSingleCandidate(candidate, apiKey, input, fetchImpl);
       } catch (error) {
         lastError = error;
         if (!shouldRetryNextModel(error, i, candidates.length)) break;
-        logger.warn(
-          `Model '${candidate.id}' returned output_truncated; retrying with '${candidates[i + 1].id}'.`,
-          { provider: this.id, failedModel: candidate.id, nextModel: candidates[i + 1].id },
+        await this.recordIntermediateCandidateFailure(
+          error,
+          candidate,
+          candidates[i + 1],
+          Date.now() - startTime,
+          onAttempt,
         );
       }
     }
     throw lastError;
   }
 
+  /** Records metrics and logs a warning before retrying with the next candidate model. */
+  private async recordIntermediateCandidateFailure(
+    error: unknown,
+    candidate: GroqModelEntry,
+    nextCandidate: GroqModelEntry,
+    elapsedMs: number,
+    onAttempt?: LLMAttemptHandler,
+  ): Promise<void> {
+    const errorCode = resolveErrorCode(error);
+    await onAttempt?.(buildErrorAttempt(this, error, errorCode, elapsedMs));
+    logger.warn(
+      `Model '${candidate.id}' returned ${errorCode}; retrying with '${nextCandidate.id}'.`,
+      { provider: this.id, failedModel: candidate.id, nextModel: nextCandidate.id, errorCode },
+    );
+  }
+
+  /** Generates and validates a post using a single candidate model. */
   private async generateSingleCandidate(
     candidate: GroqModelEntry,
     apiKey: string,
@@ -680,14 +773,17 @@ export class DeterministicFallbackProvider implements LLMProvider {
   readonly id = "fallback";
   readonly name = "Deterministic Fallback";
 
+  /** Always returns true as local fallback templates require no external configuration. */
   isConfigured(): boolean {
     return true;
   }
 
+  /** Returns the identifier for the deterministic fallback model. */
   getModelName(): string {
     return "fallback";
   }
 
+  /** Generates a post deterministically using local platform-validated templates. */
   async generate(input: PostGenerationInput): Promise<GeneratedPost> {
     const text = buildFallbackDraftText(input);
     return {
@@ -701,6 +797,7 @@ export class DeterministicFallbackProvider implements LLMProvider {
   }
 }
 
+/** Builds a success attempt telemetry record from a completed generation result. */
 function buildSuccessAttempt(provider: LLMProvider, result: GeneratedPost, elapsed: number): LLMAttemptRecord {
   return {
     provider: (provider.id as "groq" | "openai" | "fallback") ?? "fallback",
@@ -713,6 +810,7 @@ function buildSuccessAttempt(provider: LLMProvider, result: GeneratedPost, elaps
   };
 }
 
+/** Resolves the specific model name associated with a failed generation attempt. */
 function resolveErrorModelName(provider: LLMProvider, error: unknown): string {
   if (error instanceof PostGenerationError && error.model) {
     return error.model;
@@ -723,6 +821,7 @@ function resolveErrorModelName(provider: LLMProvider, error: unknown): string {
   return provider.id;
 }
 
+/** Builds an error attempt telemetry record preserving model identity and token usage. */
 function buildErrorAttempt(
   provider: LLMProvider,
   error: unknown,
@@ -744,6 +843,7 @@ function buildErrorAttempt(
   };
 }
 
+/** Extracts the typed `PostGenerationError` code from an unknown thrown value. */
 function resolveErrorCode(error: unknown): PostGenerationError["code"] {
   return error instanceof PostGenerationError ? error.code : "provider_error";
 }
@@ -754,6 +854,7 @@ export class LLMFallbackChain {
     private readonly onAttempt?: LLMAttemptHandler,
   ) {}
 
+  /** Executes the provider chain in order until a valid post is generated. */
   async generate(
     input: PostGenerationInput,
     fetchImpl: typeof fetch = fetch,
@@ -766,7 +867,7 @@ export class LLMFallbackChain {
       }
       const startTime = Date.now();
       try {
-        const result = await provider.generate(input, fetchImpl);
+        const result = await provider.generate(input, fetchImpl, this.onAttempt);
         await this.onAttempt?.(buildSuccessAttempt(provider, result, Date.now() - startTime));
         if (provider.id === "fallback") {
           return { ...result, generationError: lastErrorCode };
@@ -804,6 +905,7 @@ export class LLMFallbackChain {
   }
 }
 
+/** Creates the default LLM fallback chain (Groq -> OpenAI -> Deterministic Fallback). */
 export function createDefaultLLMChain(
   overrides?: {
     groqApiKey?: string;

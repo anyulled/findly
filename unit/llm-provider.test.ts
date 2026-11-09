@@ -11,6 +11,7 @@ import {
   computeGroqModelCostScore,
   selectGroqCandidateModels,
   isReasoningModel,
+  supportsLowReasoningEffort,
   GROQ_MODELS_URL,
   type LLMProvider,
   type GroqModelEntry,
@@ -504,6 +505,19 @@ describe("LLMFallbackChain", () => {
     assert.equal(isReasoningModel(selected[0]), true);
     assert.equal(isReasoningModel({ id: "openai/gpt-oss-20b" }), true);
     assert.equal(isReasoningModel({ id: "llama-3.1-8b-instant" }), false);
+    assert.equal(supportsLowReasoningEffort({ id: "openai/gpt-oss-20b" }), true);
+    assert.equal(supportsLowReasoningEffort({ id: "qwen/qwen3.8-27b" }), false);
+
+    // Fallback to known pricing when API omits pricing, and tie-break unpriced models by ID
+    const unpricedOrdered = selectGroqCandidateModels([
+      { id: "z-unknown-model", active: true, context_window: 32768, max_completion_tokens: 8192 },
+      { id: "a-unknown-model", active: true, context_window: 32768, max_completion_tokens: 8192 },
+      { id: "openai/gpt-oss-20b", active: true, context_window: 131072, max_completion_tokens: 65536 },
+    ]);
+    assert.deepEqual(
+      unpricedOrdered.map((m) => m.id),
+      ["openai/gpt-oss-20b", "a-unknown-model", "z-unknown-model"],
+    );
   });
 
   it("discovers Groq models from /openai/v1/models and retries next candidate on output_truncated", async () => {
@@ -590,11 +604,43 @@ describe("LLMFallbackChain", () => {
     assert.equal(calledModels[0].reasoning_effort, "low");
     assert.equal(calledModels[0].max_completion_tokens, 4096);
     assert.equal(calledModels[1].model, "qwen/qwen3.8-27b");
-    assert.equal(calledModels[1].reasoning_effort, "low");
+    assert.equal(calledModels[1].reasoning_effort, undefined);
     assert.equal(calledModels[1].max_completion_tokens, 4096);
-    assert.equal(attempts.length, 1);
-    assert.equal(attempts[0].model, "qwen/qwen3.8-27b");
-    assert.equal(attempts[0].status, "success");
+    assert.equal(attempts.length, 2);
+    assert.deepEqual(attempts[0], {
+      provider: "groq",
+      model: "openai/gpt-oss-20b",
+      status: "error",
+      errorCode: "output_truncated",
+      completionTokens: 4096,
+    });
+    assert.deepEqual(attempts[1], {
+      provider: "groq",
+      model: "qwen/qwen3.8-27b",
+      status: "success",
+      errorCode: undefined,
+      completionTokens: 80,
+    });
+  });
+
+  it("falls back to configured or default model when /openai/v1/models fails transiently", async () => {
+    const fetchImpl: typeof fetch = async (url) => {
+      if (String(url) === GROQ_MODELS_URL) {
+        return new Response("Models endpoint down", { status: 503 });
+      }
+      return new Response(
+        JSON.stringify({
+          choices: [{ finish_reason: "stop", message: { content: "Generated via fallback model after discovery 503" } }],
+        }),
+        { status: 200 },
+      );
+    };
+
+    const chain = createDefaultLLMChain({ groqApiKey: "gsk-key", groqModel: "" });
+    const result = await chain.generate(mockInput, fetchImpl);
+    assert.equal(result.provider, "groq");
+    assert.equal(result.model, "openai/gpt-oss-20b");
+    assert.equal(result.text, "Generated via fallback model after discovery 503");
   });
 
   it("preserves model name and token usage in error attempt when all Groq candidates truncate", async () => {
