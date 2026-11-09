@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { regeneratePostContent, type PostRegenerationInput } from "../src/lib/post-regeneration";
+import { regeneratePostContent, buildRegeneratedPostUpdate, type PostRegenerationInput } from "../src/lib/post-regeneration";
 import type { GeneratedPost, LLMAttemptRecord } from "../src/lib/llm-provider";
 
 const sampleInput: PostRegenerationInput = {
@@ -94,3 +94,28 @@ test("regeneratePostContent throws when generated text fails deterministic valid
     /límite|caracteres/i,
   );
 });
+
+test("buildRegeneratedPostUpdate explicitly resets approval and dispatch metadata for review transition", () => {
+  const fixedIso = "2026-11-09T16:30:00.000Z";
+  const result = {
+    text: "Nuevo borrador regenerado",
+    generationOrigin: "groq" as const,
+    generationErrorCode: null,
+    lastError: null,
+  };
+
+  const update = buildRegeneratedPostUpdate(result, fixedIso);
+
+  assert.deepEqual(update, {
+    content: "Nuevo borrador regenerado",
+    generation_origin: "groq",
+    generation_error_code: null,
+    last_error: null,
+    status: "review",
+    approved_at: null,
+    buffer_post_id: null,
+    scheduling_attempt_id: null,
+    updated_at: fixedIso,
+  });
+});
+

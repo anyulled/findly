@@ -114,6 +114,7 @@ These provider notes were checked on 2026-10-31 and may change. Re-check account
 - Reject or hold an event when required date/title data cannot be confirmed.
 - Do not schedule a reminder whose 13:00 Madrid time has passed.
 - Keep invalid-length copy out of Buffer and show validation feedback so the owner can edit or regenerate it.
+- Regenerating a failed post transitions it cleanly back to a review draft by resetting its approval and dispatch metadata (`approved_at`, `buffer_post_id`, `scheduling_attempt_id`), allowing it to be discarded or re-approved safely without state collisions.
 - Make sync safe to invoke repeatedly and concurrently with database uniqueness/locking.
 - Preserve the intended post and provider response state when Buffer/Groq requests fail; do not silently mark work published.
 - Treat date changes and cancellations as manual operations in this first phase. Existing scheduled posts may need manual cancellation or edits in Buffer.

@@ -23,7 +23,7 @@ import { fetchLumaFeed, extractSourceEvents, filterUpcomingEvents, type Persista
 import { parseSubstackFeed, sortSubstackPostsReverseChronological } from "@/lib/substack";
 import { dispatchApprovedPostsWithSupabase } from "@/lib/approved-dispatch";
 import { toAttemptLogRow, type LumaDraftRepository, type ImportedLumaEvent, type LLMLogRow } from "@/lib/luma-drafts";
-import { regeneratePostContent } from "@/lib/post-regeneration";
+import { buildRegeneratedPostUpdate, regeneratePostContent } from "@/lib/post-regeneration";
 import type { LLMAttemptHandler } from "@/lib/llm-provider";
 
 export type { UserProfile } from "@/lib/user-profile";
@@ -766,14 +766,7 @@ export async function regeneratePostAction(postId: string): Promise<ActionResult
 
     const { data: updatedRows, error: updateErr } = await supabase
       .from("posts")
-      .update({
-        content: result.text,
-        generation_origin: result.generationOrigin,
-        generation_error_code: result.generationErrorCode,
-        last_error: result.lastError,
-        status: "review",
-        updated_at: new Date().toISOString(),
-      })
+      .update(buildRegeneratedPostUpdate(result))
       .eq("id", postId)
       .eq("owner_id", ownerId)
       .in("status", ["review", "failed"])
@@ -781,6 +774,16 @@ export async function regeneratePostAction(postId: string): Promise<ActionResult
 
     if (updateErr || !updatedRows?.length) {
       throw new UserFacingError("No se pudo actualizar la publicación en la base de datos.");
+    }
+
+    try {
+      await supabase
+        .from("style_examples")
+        .delete()
+        .eq("post_id", postId)
+        .eq("owner_id", ownerId);
+    } catch (err) {
+      logger.warn("Unable to remove prior style example during post regeneration", { postId }, err);
     }
 
     return {
