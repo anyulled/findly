@@ -115,6 +115,10 @@ function Dashboard() {
                 onRemoveEvent={(eventId) => {
                   void ws.removeEvent(eventId);
                 }}
+                onSelectPost={ws.openPost}
+                onRemoveDraft={async (post) => {
+                  await ws.removeDraft(post);
+                }}
               />
             </WorkspaceErrorBoundary>
           )}
