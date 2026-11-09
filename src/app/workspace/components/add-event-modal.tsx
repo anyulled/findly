@@ -62,7 +62,7 @@ export function AddEventModal({
         <DialogHeader>
           <div className={styles.eyebrow}>NUEVO EVENTO</div>
           <DialogTitle>Añade un evento</DialogTitle>
-          <DialogDescription className={styles.modalDesc}>
+          <DialogDescription>
             Pega la URL pública de cualquier evento para extraer los datos automáticamente.
             Podrás revisarlos y corregirlos antes de guardar.
           </DialogDescription>
@@ -171,7 +171,7 @@ export function AddEventModal({
             ];
           })}
         </fieldset>
-        <DialogFooter className={styles.modalActions}>
+        <DialogFooter>
           <Button variant="secondary" onClick={onClose}>
             Cancelar
           </Button>

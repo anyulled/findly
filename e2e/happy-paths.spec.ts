@@ -679,3 +679,52 @@ test("views planned publications list, edits/reschedules and deletes a post, and
   await expect(page.getByText(/Mostrando 1 - 6 de 7 eventos/)).toBeVisible();
   await expectEvents([7, 6, 5, 4, 3, 2]);
 });
+
+test("opens Substack publications dialog with dark mode contrast and allows generating posts", async ({ page }) => {
+  await page.getByRole("button", { name: "Ajustes" }).click();
+  await page.getByRole("tab", { name: "Fuentes de eventos y publicaciones" }).click();
+
+  // Create Substack source
+  await page.getByLabel("Tipo de fuente").selectOption("substack");
+  await page.getByLabel("Nombre de la fuente").fill("Etsi Deus non daretur");
+  await page.getByLabel("URL de Substack").fill("https://etsideus.substack.com/feed");
+  await page.getByRole("checkbox", { name: "Personal" }).check();
+  await page.getByRole("button", { name: "Guardar fuente" }).click();
+
+  const sourceCard = page.getByRole("article").filter({ hasText: "Etsi Deus non daretur" });
+  await expect(sourceCard).toBeVisible();
+  await expect(sourceCard).toContainText("Substack");
+
+  // Emulate dark mode to ensure dark mode contrast and styling
+  await page.emulateMedia({ colorScheme: "dark" });
+
+  // Open the Substack publications dialog
+  await sourceCard.getByRole("button", { name: "Ver publicaciones" }).click();
+
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole("heading", { name: "Publicaciones de Etsi Deus non daretur" })).toBeVisible();
+
+  // Verify modal article content
+  await expect(dialog.getByText("Publicación de demostración en Substack")).toBeVisible();
+  await expect(dialog.getByText("Leer en Substack")).toBeVisible();
+
+  // Generate posts
+  const generateBtn = dialog.getByRole("button", { name: "Generar posts" });
+  await expect(generateBtn).toBeVisible();
+  await generateBtn.click();
+
+  await expect(dialog.getByText("Borradores creados")).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "Regenerar posts" })).toBeVisible();
+
+  // Close dialog via footer button
+  await dialog.getByRole("button", { name: "Cerrar" }).first().click();
+  await expect(dialog).not.toBeVisible();
+
+  // Re-open and verify closing via shadcn dialog X close button
+  await sourceCard.getByRole("button", { name: "Ver publicaciones" }).click();
+  await expect(dialog).toBeVisible();
+  await dialog.getByLabel("Cerrar").click();
+  await expect(dialog).not.toBeVisible();
+});
+
