@@ -24,6 +24,7 @@ import { parseSubstackFeed, sortSubstackPostsReverseChronological } from "@/lib/
 import { dispatchApprovedPostsWithSupabase } from "@/lib/approved-dispatch";
 import { toAttemptLogRow, type LumaDraftRepository, type ImportedLumaEvent, type LLMLogRow } from "@/lib/luma-drafts";
 import { buildRegeneratedPostUpdate, regeneratePostContent } from "@/lib/post-regeneration";
+import { fetchApprovedStyleExamples } from "@/lib/style-examples";
 import type { LLMAttemptHandler } from "@/lib/llm-provider";
 
 export type { UserProfile } from "@/lib/user-profile";
@@ -710,14 +711,15 @@ export async function regeneratePostAction(postId: string): Promise<ActionResult
       .single();
     if (accErr || !account) throw new UserFacingError("No se encontró la cuenta asociada.");
 
-    const { data: examples } = await supabase
-      .from("style_examples")
-      .select("content, language, network, account_id")
-      .eq("owner_id", ownerId)
-      .eq("account_id", post.account_id)
-      .eq("network", post.network)
-      .eq("language", post.language)
-      .limit(3);
+    const approvedExamples = await fetchApprovedStyleExamples(supabase, {
+      ownerId,
+      segments: [{
+        accountId: post.account_id,
+        network: post.network as SocialNetwork,
+        language: post.language as PostLanguage,
+      }],
+      limitPerSegment: 3,
+    });
 
     const attemptLogs: LLMLogRow[] = [];
     const trackingHandler: LLMAttemptHandler = (attempt) => {
@@ -745,12 +747,7 @@ export async function regeneratePostAction(postId: string): Promise<ActionResult
           voicePrompt: account.voice_prompt,
           accountType: account.account_type,
         },
-        approvedExamples: (examples ?? []).map((ex) => ({
-          text: ex.content,
-          accountId: ex.account_id,
-          network: ex.network as SocialNetwork,
-          language: ex.language as PostLanguage,
-        })),
+        approvedExamples,
       },
       generateSocialPostOrFallback,
       trackingHandler,
