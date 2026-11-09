@@ -578,8 +578,25 @@ test("views planned publications list, edits/reschedules and deletes a post, and
   await expect(editBtn).toBeVisible();
   await editBtn.click();
 
-  // Verify PostDetailModal opens with "DETALLE DE PUBLICACIÓN"
+  // Verify PostDetailModal opens with "DETALLE DE PUBLICACIÓN", edit text and schedule, and save
   await expect(page.getByText("DETALLE DE PUBLICACIÓN")).toBeVisible();
+  const textInput = page.getByLabel("TEXTO DE LA PUBLICACIÓN");
+  await textInput.fill("Updated text from event list");
+  const timeInput = page.getByLabel("Hora programada");
+  await timeInput.fill("16:45");
+  await page.getByRole("button", { name: "Guardar cambios" }).click();
+  await expect(page.getByText("DETALLE DE PUBLICACIÓN")).not.toBeVisible();
+
+  // Verify the updated text is visible in the event's planned publication item
+  const updatedPostItem = eventArticle.getByTestId("planned-post-item").filter({ hasText: "Updated text from event list" });
+  await expect(updatedPostItem).toBeVisible();
+  await expect(updatedPostItem).toContainText("16:45");
+
+  // Re-open via that publication item and verify the saved text and schedule persisted
+  await updatedPostItem.getByRole("button", { name: "Editar / Reprogramar" }).click();
+  await expect(page.getByText("DETALLE DE PUBLICACIÓN")).toBeVisible();
+  await expect(textInput).toHaveValue("Updated text from event list");
+  await expect(timeInput).toHaveValue("16:45");
   await page.getByRole("button", { name: "Cerrar", exact: true }).click();
   await expect(page.getByText("DETALLE DE PUBLICACIÓN")).not.toBeVisible();
 
@@ -590,12 +607,28 @@ test("views planned publications list, edits/reschedules and deletes a post, and
   await eventArticle.getByRole("button", { name: "Eliminar" }).last().click();
   await expect(page.getByText("Borrador eliminado.")).toBeVisible();
 
-  // Verify pagination and 0 publications notice when more than 6 events exist
-  await page.evaluate((date) => {
+  // Verify scheduled posts cannot be deleted without external synchronization
+  await page.evaluate(() => {
+    const state = JSON.parse(localStorage.getItem("findly-state-v1") ?? "{}");
+    const reviewPost = state.posts.find((p: { status: string }) => p.status === "review");
+    if (reviewPost) {
+      reviewPost.status = "scheduled";
+      localStorage.setItem("findly-state-v1", JSON.stringify(state));
+    }
+  });
+  await page.reload();
+  await page.getByRole("button", { name: "Eventos" }).click();
+  const reloadedArticle = page.getByRole("article").filter({ hasText: "Compact UX Event" });
+  await reloadedArticle.getByRole("button", { name: /Ver \(/ }).click();
+  const scheduledItem = reloadedArticle.getByTestId("planned-post-item").filter({ hasText: "Programada" });
+  await expect(scheduledItem.getByRole("button", { name: "Eliminar" })).toHaveCount(0);
+
+  // Verify pagination, event cards on each page, and empty-event generation CTA
+  await page.evaluate(() => {
     const events = Array.from({ length: 7 }, (_, i) => ({
       id: `mock-event-${i + 1}`,
       title: `Event Number ${i + 1}`,
-      date: date,
+      date: `2026-12-${String(10 + i).padStart(2, "0")}`,
       time: "10:00",
       place: "Barcelona",
       description: `Description for event ${i + 1}`,
@@ -605,24 +638,44 @@ test("views planned publications list, edits/reschedules and deletes a post, and
     state.events = events;
     state.posts = [];
     localStorage.setItem("findly-state-v1", JSON.stringify(state));
-  }, eventDate);
+  });
 
   await page.reload();
   await page.getByRole("button", { name: "Eventos" }).click();
 
   // Notice for 0 planned publications should be visible on mock events
   await expect(page.getByText("Este evento no tiene publicaciones programadas.").first()).toBeVisible();
-  await expect(page.getByRole("button", { name: "Generar publicaciones" }).first()).toBeVisible();
+  const generateBtn = page.getByRole("button", { name: "Generar publicaciones" }).first();
+  await expect(generateBtn).toBeVisible();
+
+  // Generate publications from the empty-event CTA and verify they appear for that event
+  await generateBtn.click();
+  const generatedEventArticle = page.getByRole("article").filter({ hasText: "Event Number 7" });
+  await expect(generatedEventArticle.getByText("publicaciones previstas")).toBeVisible();
+  await expect(generatedEventArticle.getByRole("button", { name: /Ocultar/ })).toBeVisible();
 
   // Pagination should be displayed
   await expect(page.getByRole("navigation", { name: "Paginación" })).toBeVisible();
   await expect(page.getByText(/Mostrando 1 - 6 de 7 eventos/)).toBeVisible();
 
+  const eventCards = page.getByRole("article").filter({ hasText: /Event Number [1-7]/ });
+  const expectEvents = async (visible: number[]) => {
+    await expect(eventCards).toHaveCount(visible.length);
+    for (let i = 1; i <= 7; i++) {
+      const title = page.getByText(`Event Number ${i}`, { exact: true });
+      if (visible.includes(i)) await expect(title).toBeVisible();
+      else await expect(title).toHaveCount(0);
+    }
+  };
+  await expectEvents([7, 6, 5, 4, 3, 2]);
+
   // Click next page
   await page.getByRole("button", { name: "Ir a la página siguiente" }).click();
   await expect(page.getByText(/Mostrando 7 - 7 de 7 eventos/)).toBeVisible();
+  await expectEvents([1]);
 
   // Click previous page
   await page.getByRole("button", { name: "Ir a la página anterior" }).click();
   await expect(page.getByText(/Mostrando 1 - 6 de 7 eventos/)).toBeVisible();
+  await expectEvents([7, 6, 5, 4, 3, 2]);
 });

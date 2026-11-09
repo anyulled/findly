@@ -8,12 +8,14 @@ import {
 } from "../src/lib/post-publishing";
 import { BufferClient } from "../src/lib/buffer";
 
+const futureDueAt = new Date(Date.now() + 14 * 86400000).toISOString();
+
 const post: PostToSchedule = {
   id: "post-uuid",
   attempt_id: "attempt-uuid",
   account_id: "account-uuid",
   network: "LinkedIn",
-  due_at: "2026-11-20T12:00:00+00:00",
+  due_at: futureDueAt,
   content: "Join us next week!",
 };
 
@@ -99,7 +101,7 @@ test("review approval records approval before Buffer scheduling and stores confi
       assert.equal(request?.headers && new Headers(request.headers).get("Authorization"), "Bearer mock-buffer-key");
       const body = JSON.parse(String(request?.body)) as { variables: { input: { channelId: string; dueAt: string; mode: string; text: string } } };
       assert.equal(body.variables.input.channelId, "buffer-channel-1");
-      assert.equal(body.variables.input.dueAt, "2026-11-20T12:00:00.000Z");
+      assert.equal(body.variables.input.dueAt, futureDueAt);
       assert.equal(body.variables.input.mode, "customScheduled");
       assert.equal(body.variables.input.text, post.content);
       return bufferResponse({ data: { createPost: { __typename: "PostActionSuccess", post: { id: "buffer-post-1", text: post.content } } } });

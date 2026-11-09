@@ -109,8 +109,8 @@ function Dashboard() {
                 persistent={ws.persistent}
                 deletingEventId={ws.deletingEventId}
                 openAddForm={ws.openAddForm}
-                onRetryDrafts={(event) => {
-                  void ws.retryDrafts(event);
+                onRetryDrafts={async (event) => {
+                  await ws.retryDrafts(event);
                 }}
                 onRemoveEvent={(eventId) => {
                   void ws.removeEvent(eventId);
