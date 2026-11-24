@@ -1,4 +1,4 @@
-import { schedulePostWithSupabase, type PostPublishingOutcome } from "./post-publishing";
+import { createSupabasePostScheduler, type PostPublishingOutcome } from "./post-publishing";
 import { logger } from "./logger";
 
 export type ApprovedDispatchResult = {
@@ -93,5 +93,5 @@ export async function dispatchApprovedPostsWithSupabase(
     });
     if (error) throw new Error("No se pudieron cargar las publicaciones aprobadas pendientes.");
     return (data ?? []).map((row) => row.id);
-  }, (postId) => schedulePostWithSupabase(postId, supabase, ownerId, fetchImpl), options);
+  }, createSupabasePostScheduler(supabase, ownerId, fetchImpl), options);
 }
