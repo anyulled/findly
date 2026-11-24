@@ -7,6 +7,7 @@ import {
 } from "@/lib/buffer";
 import type { SocialNetwork } from "@/lib/social-validation";
 import { validatePost } from "@/lib/social-validation";
+import { discoverBufferChannel } from "@/lib/buffer-sync";
 import { bufferCredentialForAccount } from "@/lib/buffer-account-credentials";
 import { isSubstackUrl, unpackLocationAndImage } from "@/lib/substack";
 import { fetchOpenGraphImage } from "@/lib/opengraph";
@@ -122,7 +123,15 @@ export class SupabasePostPublishingRepository implements PostPublishingRepositor
       .eq("network", network)
       .maybeSingle();
     if (error) throw new Error(`No se pudo cargar el canal de Buffer: ${error.message}`);
-    return data?.buffer_channel_id ?? null;
+    return data?.buffer_channel_id || discoverBufferChannel(await this.bufferApiKey(accountId), network, this.fetchImpl);
+  }
+
+  async bufferApiKey(accountId: string): Promise<string> {
+    const name = await this.accountName(accountId);
+    if (!name) throw new Error("No se encontró la cuenta asociada a la publicación.");
+    const credential = bufferCredentialForAccount(name);
+    if (!credential.apiKey) throw new Error(`Falta configurar ${credential.environmentVariable ?? "la API key de Buffer"} para ${name}.`);
+    return credential.apiKey;
   }
 
   async accountName(accountId: string): Promise<string | null> {
@@ -210,7 +219,7 @@ async function validatePostAndChannel(
   if (!validation.valid) return { failure: validation.message };
   try {
     const channelId = await repository.bufferChannelId(post.account_id, network);
-    if (!channelId) return { failure: `Configura el ID del canal de Buffer para ${network} en esta cuenta.` };
+    if (!channelId) return { failure: `No se encontró un canal de ${network} en Buffer para esta cuenta.` };
     return { channelId, network };
   } catch (error) {
     return { failure: errorMessage(error) };
@@ -287,13 +296,9 @@ export async function schedulePostWithSupabase(
   fetchImpl?: typeof fetch,
 ): Promise<PostPublishingOutcome> {
   const repository = new SupabasePostPublishingRepository(supabase as SupabasePublisherClient, ownerId, fetchImpl);
-  return schedulePostWithBuffer(postId, repository, async (accountId) => {
-    const name = await repository.accountName(accountId);
-    if (!name) throw new Error("No se encontró la cuenta asociada a la publicación.");
-    const credential = bufferCredentialForAccount(name);
-    if (!credential.apiKey) throw new Error(`Falta configurar ${credential.environmentVariable ?? "la API key de Buffer"} para ${name}.`);
-    return new BufferClient({ apiKey: credential.apiKey, fetchImpl });
-  });
+  return schedulePostWithBuffer(postId, repository, async (accountId) =>
+    new BufferClient({ apiKey: await repository.bufferApiKey(accountId), fetchImpl }),
+  );
 }
 
 export async function approveAndSchedulePost(
