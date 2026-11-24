@@ -42,6 +42,13 @@ test("switches between settings tabs using shadcn accessible tabs component", as
   await expect(page.getByRole("heading", { name: "Modo de publicación" })).toBeVisible();
 });
 
+test("offers X for the Software Crafters Barcelona source account", async ({ page }) => {
+  await page.getByRole("button", { name: "Ajustes" }).click();
+  await page.getByRole("tab", { name: "Fuentes de eventos y publicaciones" }).click();
+  await page.getByRole("checkbox", { name: "Software Crafters Barcelona" }).check();
+  await expect(page.getByRole("checkbox", { name: "X", exact: true })).toBeChecked();
+});
+
 test("switches between period tabs in AI statistics view using shadcn tabs component", async ({ page }) => {
   await page.getByRole("button", { name: "Estadísticas" }).click();
   await expect(page.getByRole("heading", { name: /Estadísticas de IA/ })).toBeVisible();

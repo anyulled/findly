@@ -30,6 +30,8 @@ Si el proceso se interrumpe después de guardar publicaciones `approved`, la sig
 
 El repositorio no incluye credenciales de proveedor ni un despliegue de producción. En un espacio conectado, **Ajustes → Fuentes de eventos y publicaciones** permite gestionar fuentes, elegir canales por cuenta, iniciar la sincronización manual y explorar publicaciones de Substack; cron-job.org puede invocar el mismo endpoint cada seis horas con `CRON_SECRET`. La demo no consulta feeds. Las fuentes con eventos importados se retiran (archivan) en lugar de eliminarse, para conservar eventos, publicaciones y ejemplos; la migración `202610310012` añade `archived_at` y `retire_source()`, y `202611020002` añade soporte de canales por cuenta y fuentes Substack nativas. La programación está implementada con pruebas mock; antes de usarla en producción, configura los canales y valida el resultado con cuentas reales. La sincronización de cambios de fecha y cancelaciones queda fuera de la primera fase.
 
+Software Crafters Barcelona tiene destinos para LinkedIn, Bluesky y X.
+
 ## Desarrollo local
 
 Requiere la versión de Node.js indicada por el entorno de CI (Node.js 22).
