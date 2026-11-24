@@ -6,7 +6,7 @@ export type SourceInput = {
   name: string;
   type: SourceType;
   url: string;
-  enabled?: boolean;
+  enabled: boolean;
   accountIds: string[];
   accountNetworks?: Record<string, SocialNetwork[]>;
 };
@@ -63,6 +63,7 @@ function validateAccountNetworks(
 
 export function validateSource(input: SourceInput): SourceInput {
   validateSourceStructure(input);
+  if (typeof input.enabled !== "boolean") throw new Error("El estado de la fuente no es válido.");
   const name = input.name.trim();
   if (!name || name.length > 120) throw new Error("El nombre de la fuente debe tener entre 1 y 120 caracteres.");
   if (!VALID_SOURCE_TYPES.has(input.type)) throw new Error("El tipo de fuente no es válido.");
