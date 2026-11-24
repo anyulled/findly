@@ -517,6 +517,7 @@ async function resolveProviderModels(
 }
 
 const RETRYABLE_MODEL_ERROR_CODES = new Set<PostGenerationError["code"]>([
+  "rate_limited",
   "output_truncated",
   "over_limit",
   "empty_response",
@@ -693,7 +694,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
     return this.generateWithCandidates(candidates, apiKey, input, fetchImpl, onAttempt);
   }
 
-  /** Iterates over candidate models, retrying on recoverable output errors. */
+  /** Iterates over candidate models, retrying on rate limits and recoverable output errors. */
   private async generateWithCandidates(
     candidates: GroqModelEntry[],
     apiKey: string,
