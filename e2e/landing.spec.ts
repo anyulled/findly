@@ -16,6 +16,25 @@ test("the public landing shows access at the top right and opens the workspace",
   await expect(page.getByText("Modo demostración")).toBeVisible();
 });
 
+test("serves the favicon and Apple touch icon from App Router metadata", async ({ page, request }) => {
+  await page.goto("/");
+  const favicon = page.locator('head link[rel="icon"][href^="/favicon.ico"]');
+  const svgIcon = page.locator('head link[rel="icon"][type="image/svg+xml"]');
+  const appleIcon = page.locator('head link[rel="apple-touch-icon"]');
+
+  await expect(favicon).toHaveCount(1);
+  await expect(svgIcon).toHaveCount(1);
+  await expect(appleIcon).toHaveAttribute("sizes", "180x180");
+
+  for (const icon of [favicon, svgIcon, appleIcon]) {
+    const href = await icon.getAttribute("href");
+    expect(href).toBeTruthy();
+    const response = await request.get(href!);
+    expect(response.ok()).toBe(true);
+    expect(response.headers()["content-type"]).toMatch(/^image\//u);
+  }
+});
+
 test("the landing remains usable on a narrow mobile screen", async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 812 });
   await page.goto("/");
