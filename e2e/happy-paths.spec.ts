@@ -151,7 +151,7 @@ test("creates an event, prepares only timely reminders, and saves approval as a 
   await page.getByRole("button", { name: "Crear evento" }).click();
 
   await expect(page.getByRole("heading", { name: "Playwright Happy Path Event" })).toBeVisible();
-  await expect(page.getByText("14 publicaciones previstas")).toBeVisible();
+  await expect(page.getByText("16 publicaciones previstas")).toBeVisible();
 
   await page.getByRole("button", { name: "Calendario" }).click();
   const eventPost = page.getByRole("button", { name: /Playwright Happy Path Event/ }).first();
@@ -168,7 +168,7 @@ test("creates an event, prepares only timely reminders, and saves approval as a 
 });
 
 test("expands a crowded day and opens every account's publication, including an uncertain one", async ({ page }) => {
-  // Start without demo fixtures so the seven posts on the reminder day are unambiguous.
+  // Start without demo fixtures so the eight posts on the reminder day are unambiguous.
   await page.evaluate(() => localStorage.setItem("findly-state-v1", JSON.stringify({ events: [], posts: [], mode: "review" })));
   await page.reload();
   const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Madrid", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date());
@@ -177,7 +177,7 @@ test("expands a crowded day and opens every account's publication, including an 
   const reminderDate = dateFromToday(1);
 
   await page.getByRole("button", { name: "Añadir evento" }).first().click();
-  await page.getByLabel("TÍTULO").fill("Seven channel event");
+  await page.getByLabel("TÍTULO").fill("Eight channel event");
   await page.getByLabel("FECHA").fill(dateFromToday(8));
   await page.getByLabel("HORA").fill("19:30");
   await page.getByRole("button", { name: "Crear evento" }).click();
@@ -187,37 +187,37 @@ test("expands a crowded day and opens every account's publication, including an 
   const periodHeading = page.getByRole("heading", { level: 2 }).first();
   const period = await periodHeading.textContent();
   expect(period).not.toBeNull();
-  const expand = reminderDay.getByRole("button", { name: `Mostrar 4 publicaciones más del ${reminderDate}` });
+  const expand = reminderDay.getByRole("button", { name: `Mostrar 5 publicaciones más del ${reminderDate}` });
   await expect(expand).toHaveAttribute("aria-expanded", "false");
   await expand.focus();
   await page.keyboard.press("Enter");
   await expect(reminderDay.getByRole("button", { name: `Mostrar menos publicaciones del ${reminderDate}` })).toHaveAttribute("aria-expanded", "true");
   await expect(page.getByRole("tab", { name: "Quincena" })).toHaveAttribute("aria-selected", "true");
   await expect(periodHeading).toHaveText(period!);
-  await expect(reminderDay.getByRole("button", { name: "Seven channel event · Barcelona JUG · LinkedIn · Pendiente de revisión" })).toBeFocused();
+  await expect(reminderDay.getByRole("button", { name: "Eight channel event · Barcelona JUG · LinkedIn · Pendiente de revisión" })).toBeFocused();
   await page.keyboard.press("Tab");
-  await expect(reminderDay.getByRole("button", { name: "Seven channel event · Barcelona JUG · X · Pendiente de revisión" })).toBeFocused();
+  await expect(reminderDay.getByRole("button", { name: "Eight channel event · Barcelona JUG · X · Pendiente de revisión" })).toBeFocused();
 
   const channels = [
     ["Personal", "LinkedIn"], ["Personal", "X"], ["Personal", "Bluesky"],
     ["Barcelona JUG", "LinkedIn"], ["Barcelona JUG", "X"],
-    ["Software Crafters Barcelona", "LinkedIn"], ["Software Crafters Barcelona", "Bluesky"],
+    ["Software Crafters Barcelona", "LinkedIn"], ["Software Crafters Barcelona", "Bluesky"], ["Software Crafters Barcelona", "X"],
   ];
   for (const [account, network] of channels) {
-    const post = reminderDay.getByRole("button", { name: `Seven channel event · ${account} · ${network} · Pendiente de revisión` });
+    const post = reminderDay.getByRole("button", { name: `Eight channel event · ${account} · ${network} · Pendiente de revisión` });
     await expect(post).toContainText(`${account} · ${network}`);
     await post.focus();
     await page.keyboard.press("Enter");
     await expect(periodHeading).toHaveText(period!);
     await page.getByRole("button", { name: /Aprobar y guardar ejemplo/ }).click();
-    await expect(reminderDay.getByRole("button", { name: `Seven channel event · ${account} · ${network} · Aprobada` })).toBeVisible();
+    await expect(reminderDay.getByRole("button", { name: `Eight channel event · ${account} · ${network} · Aprobada` })).toBeVisible();
   }
 
   // Simulate an uncertain provider result on a formerly hidden post; no Buffer call is made in demo mode.
   await expect.poll(() => page.evaluate((date) => {
     const state = JSON.parse(localStorage.getItem("findly-state-v1")!);
     return state.posts.filter((item: { date: string; status: string }) => item.date === date && item.status === "approved").length;
-  }, reminderDate)).toBe(7);
+  }, reminderDate)).toBe(8);
   await page.evaluate((date) => {
     const state = JSON.parse(localStorage.getItem("findly-state-v1")!);
     const post = state.posts.find((item: { date: string; account: string; network: string }) => item.date === date && item.account === "Software Crafters Barcelona" && item.network === "Bluesky");
@@ -226,8 +226,8 @@ test("expands a crowded day and opens every account's publication, including an 
     localStorage.setItem("findly-state-v1", JSON.stringify(state));
   }, reminderDate);
   await page.reload();
-  await reminderDay.getByRole("button", { name: `Mostrar 4 publicaciones más del ${reminderDate}` }).click();
-  await reminderDay.getByRole("button", { name: "Seven channel event · Software Crafters Barcelona · Bluesky · Pendiente de conciliación" }).click();
+  await reminderDay.getByRole("button", { name: `Mostrar 5 publicaciones más del ${reminderDate}` }).click();
+  await reminderDay.getByRole("button", { name: "Eight channel event · Software Crafters Barcelona · Bluesky · Pendiente de conciliación" }).click();
   await expect(page.getByText("Resultado incierto simulado")).toBeVisible();
   await expect(page.getByLabel("ID confirmado del post de Buffer")).toBeVisible();
 });
