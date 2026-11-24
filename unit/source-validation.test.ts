@@ -10,6 +10,7 @@ test("validateSource accepts valid luma_ical source with valid UUIDs", () => {
     name: " Barcelona JUG ",
     type: "luma_ical",
     url: "https://api.luma.com/ics/get?entity=calendar&id=cal-lIVEhrTJyvHLBAG",
+    enabled: true,
     accountIds: [validAccountId, validAccountId2],
   };
 
@@ -25,6 +26,7 @@ test("validateSource accepts valid meetup source on meetup.com", () => {
     name: "Meetup Group",
     type: "meetup",
     url: "https://www.meetup.com/barcelonajug/events/",
+    enabled: true,
     accountIds: [validAccountId],
   };
 
@@ -40,6 +42,7 @@ test("validateSource accepts valid substack source", () => {
     name: "Etsi Deus Non Daretur",
     type: "substack",
     url: "https://etsideusnondaretur.substack.com/feed",
+    enabled: true,
     accountIds: [validAccountId],
   };
 
@@ -59,47 +62,47 @@ test("validateSource rejects null, non-object or missing name/url/accountIds", (
 
 test("validateSource rejects empty or overlong names", () => {
   assert.throws(
-    () => validateSource({ name: "   ", type: "luma_ical", url: "https://example.com/cal.ics", accountIds: [validAccountId] }),
+    () => validateSource({ name: "   ", type: "luma_ical", url: "https://example.com/cal.ics", enabled: true, accountIds: [validAccountId] }),
     /El nombre de la fuente debe tener entre 1 y 120 caracteres/
   );
   assert.throws(
-    () => validateSource({ name: "x".repeat(121), type: "luma_ical", url: "https://example.com/cal.ics", accountIds: [validAccountId] }),
+    () => validateSource({ name: "x".repeat(121), type: "luma_ical", url: "https://example.com/cal.ics", enabled: true, accountIds: [validAccountId] }),
     /El nombre de la fuente debe tener entre 1 y 120 caracteres/
   );
 });
 
 test("validateSource rejects unsupported source types", () => {
   assert.throws(
-    () => validateSource({ name: "Name", type: "rss" as unknown as "luma_ical", url: "https://example.com", accountIds: [validAccountId] }),
+    () => validateSource({ name: "Name", type: "rss" as unknown as "luma_ical", url: "https://example.com", enabled: true, accountIds: [validAccountId] }),
     /El tipo de fuente no es válido/
   );
 });
 
 test("validateSource rejects malformed URLs or non-HTTP protocols", () => {
   assert.throws(
-    () => validateSource({ name: "Name", type: "luma_ical", url: "not-a-url", accountIds: [validAccountId] }),
+    () => validateSource({ name: "Name", type: "luma_ical", url: "not-a-url", enabled: true, accountIds: [validAccountId] }),
     /Introduce una URL válida para la fuente/
   );
   assert.throws(
-    () => validateSource({ name: "Name", type: "luma_ical", url: "ftp://example.com/cal.ics", accountIds: [validAccountId] }),
+    () => validateSource({ name: "Name", type: "luma_ical", url: "ftp://example.com/cal.ics", enabled: true, accountIds: [validAccountId] }),
     /La URL debe usar HTTP o HTTPS/
   );
 });
 
 test("validateSource rejects meetup sources outside meetup.com", () => {
   assert.throws(
-    () => validateSource({ name: "Name", type: "meetup", url: "https://otherdomain.com/events", accountIds: [validAccountId] }),
+    () => validateSource({ name: "Name", type: "meetup", url: "https://otherdomain.com/events", enabled: true, accountIds: [validAccountId] }),
     /La URL de Meetup debe pertenecer a meetup.com/
   );
 });
 
 test("validateSource rejects non-UUID account IDs such as acc-personal", () => {
   assert.throws(
-    () => validateSource({ name: "Name", type: "luma_ical", url: "https://example.com/cal.ics", accountIds: ["acc-personal"] }),
+    () => validateSource({ name: "Name", type: "luma_ical", url: "https://example.com/cal.ics", enabled: true, accountIds: ["acc-personal"] }),
     /Asocia la fuente al menos con una cuenta válida/
   );
   assert.throws(
-    () => validateSource({ name: "Name", type: "luma_ical", url: "https://example.com/cal.ics", accountIds: [] }),
+    () => validateSource({ name: "Name", type: "luma_ical", url: "https://example.com/cal.ics", enabled: true, accountIds: [] }),
     /Asocia la fuente al menos con una cuenta válida/
   );
   assert.throws(
@@ -108,6 +111,7 @@ test("validateSource rejects non-UUID account IDs such as acc-personal", () => {
         name: "Name",
         type: "luma_ical",
         url: "https://example.com/cal.ics",
+        enabled: true,
         accountIds: Array.from({ length: 21 }, (_, i) => validAccountId.slice(0, -2) + String(i).padStart(2, "0")),
       }),
     /Asocia la fuente al menos con una cuenta válida/
@@ -119,6 +123,7 @@ test("validateSource handles valid and invalid accountNetworks configuration", (
     name: "Valid Source",
     type: "luma_ical",
     url: "https://example.com/cal.ics",
+    enabled: true,
     accountIds: [validAccountId, validAccountId2],
     accountNetworks: {
       [validAccountId]: ["X", "Bluesky"],
@@ -137,6 +142,7 @@ test("validateSource handles valid and invalid accountNetworks configuration", (
         name: "Source",
         type: "luma_ical",
         url: "https://example.com/cal.ics",
+        enabled: true,
         accountIds: [validAccountId],
         accountNetworks: "not-an-object" as unknown as Record<string, ("LinkedIn" | "X" | "Bluesky")[]>,
       }),
@@ -149,9 +155,30 @@ test("validateSource handles valid and invalid accountNetworks configuration", (
         name: "Source",
         type: "luma_ical",
         url: "https://example.com/cal.ics",
+        enabled: true,
         accountIds: [validAccountId],
         accountNetworks: { [validAccountId]: "not-an-array" as unknown as ("LinkedIn" | "X" | "Bluesky")[] },
       }),
     /La configuración de canales no es válida/
   );
+});
+
+test("validateSource requires an explicit enabled flag for the save_source RPC", () => {
+  const formInput: Omit<SourceInput, "enabled"> = {
+    name: "Meetup Group",
+    type: "meetup",
+    url: "https://www.meetup.com/example/events/rss/",
+    accountIds: [validAccountId],
+    accountNetworks: { [validAccountId]: ["LinkedIn", "Bluesky"] },
+  };
+
+  assert.throws(
+    () => validateSource(formInput as SourceInput),
+    /El estado de la fuente no es válido/,
+  );
+
+  for (const enabled of [true, false]) {
+    const source = validateSource({ ...formInput, enabled });
+    assert.equal(source.enabled, enabled);
+  }
 });

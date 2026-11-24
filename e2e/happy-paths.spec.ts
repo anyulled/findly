@@ -270,7 +270,12 @@ test("stores a Luma iCal source linked to multiple accounts", async ({ page }) =
   await expect(page.getByText("La demo guarda las fuentes en este navegador, pero no consulta feeds. Conecta Supabase para importar eventos.")).toBeVisible();
   await expect(page.getByRole("button", { name: "Sincronizar ahora" })).toBeDisabled();
 
+  await expect(source.getByRole("checkbox", { name: "Activa" })).toBeChecked();
   await source.getByRole("checkbox", { name: "Activa" }).uncheck();
+  await source.getByRole("button", { name: "Editar fuente BarcelonaJS Luma" }).click();
+  await page.getByLabel("URL de suscripción iCal").fill("https://calendar.example.com/updated.ics");
+  await page.getByRole("button", { name: "Guardar cambios" }).click();
+  await expect(page.getByRole("status")).toHaveText("Fuente actualizada en el navegador.");
   await page.reload();
   await page.getByRole("button", { name: "Ajustes" }).click();
   await page.getByRole("tab", { name: "Fuentes de eventos y publicaciones" }).click();
