@@ -100,6 +100,8 @@ function isUncertain(error: unknown): boolean {
 }
 
 export class SupabasePostPublishingRepository implements PostPublishingRepository {
+  private readonly discoveredChannels = new Map<string, string>();
+
   constructor(
     private readonly supabase: SupabasePublisherClient,
     private readonly ownerId: string,
@@ -123,7 +125,14 @@ export class SupabasePostPublishingRepository implements PostPublishingRepositor
       .eq("network", network)
       .maybeSingle();
     if (error) throw new Error(`No se pudo cargar el canal de Buffer: ${error.message}`);
-    return data?.buffer_channel_id || discoverBufferChannel(await this.bufferApiKey(accountId), network, this.fetchImpl);
+    if (data?.buffer_channel_id) return data.buffer_channel_id;
+
+    const key = `${accountId}:${network}`;
+    const discovered = this.discoveredChannels.get(key);
+    if (discovered) return discovered;
+    const channelId = await discoverBufferChannel(await this.bufferApiKey(accountId), network, this.fetchImpl);
+    this.discoveredChannels.set(key, channelId);
+    return channelId;
   }
 
   async bufferApiKey(accountId: string): Promise<string> {
@@ -289,16 +298,20 @@ export async function schedulePostWithBuffer(
   return dispatchClaimedPostToBuffer(client, post, payload, repository);
 }
 
+export function createSupabasePostScheduler(supabase: unknown, ownerId: string, fetchImpl?: typeof fetch) {
+  const repository = new SupabasePostPublishingRepository(supabase as SupabasePublisherClient, ownerId, fetchImpl);
+  return (postId: string) => schedulePostWithBuffer(postId, repository, async (accountId) =>
+    new BufferClient({ apiKey: await repository.bufferApiKey(accountId), fetchImpl }),
+  );
+}
+
 export async function schedulePostWithSupabase(
   postId: string,
   supabase: unknown,
   ownerId: string,
   fetchImpl?: typeof fetch,
 ): Promise<PostPublishingOutcome> {
-  const repository = new SupabasePostPublishingRepository(supabase as SupabasePublisherClient, ownerId, fetchImpl);
-  return schedulePostWithBuffer(postId, repository, async (accountId) =>
-    new BufferClient({ apiKey: await repository.bufferApiKey(accountId), fetchImpl }),
-  );
+  return createSupabasePostScheduler(supabase, ownerId, fetchImpl)(postId);
 }
 
 export async function approveAndSchedulePost(

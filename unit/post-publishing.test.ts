@@ -4,6 +4,7 @@ import {
   approveAndSchedulePost,
   schedulePostWithBuffer,
   schedulePostWithSupabase,
+  SupabasePostPublishingRepository,
   type PostToSchedule,
 } from "../src/lib/post-publishing";
 import { BufferClient } from "../src/lib/buffer";
@@ -214,6 +215,25 @@ for (const scenario of ["missing", "ambiguous", "unavailable"]) {
     assert.ok(queries.every((query) => !query.includes("createPost")));
   });
 }
+
+test("discovery reuses a channel within a publishing batch and refreshes for the next batch", async () => {
+  const database = fakeSupabase();
+  let lookups = 0;
+  const fetchImpl: typeof fetch = async (_url, request) => {
+    const { query } = JSON.parse(String(request?.body));
+    if (query.includes("organizations")) {
+      lookups += 1;
+      return bufferResponse({ data: { account: { organizations: [{ id: "org-1" }] } } });
+    }
+    return bufferResponse({ data: { channels: [{ id: `channel-${lookups}`, name: "LinkedIn", service: "linkedin" }] } });
+  };
+  const supabase = database.supabase as ConstructorParameters<typeof SupabasePostPublishingRepository>[0];
+  const batch = new SupabasePostPublishingRepository(supabase, "owner-uuid", fetchImpl);
+  const nextBatch = new SupabasePostPublishingRepository(supabase, "owner-uuid", fetchImpl);
+  assert.equal(await batch.bufferChannelId(post.account_id, "LinkedIn"), "channel-1");
+  assert.equal(await batch.bufferChannelId(post.account_id, "LinkedIn"), "channel-1");
+  assert.equal(await nextBatch.bufferChannelId(post.account_id, "LinkedIn"), "channel-2");
+});
 
 test("persisted text is validated deterministically before Buffer is called", async () => {
   const tooLongPost = { ...post, network: "X", content: "x".repeat(281) };
