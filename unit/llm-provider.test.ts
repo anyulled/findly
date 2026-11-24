@@ -520,6 +520,30 @@ describe("LLMFallbackChain", () => {
     );
   });
 
+  it("tries another Groq model on HTTP 429 before falling back to OpenAI", async () => {
+    const attempts: Array<{ model: string; status: string; errorCode?: string }> = [];
+    const chain = createDefaultLLMChain(
+      { groqApiKey: "gsk-key", groqModel: "openai/gpt-oss-20b", openAiApiKey: "openai-key" },
+      ({ model, status, errorCode }) => { attempts.push({ model, status, errorCode }); },
+    );
+
+    const result = await chain.generate(mockInput, async (url, init) => {
+      if (String(url) === GROQ_MODELS_URL) {
+        return Response.json({ data: [{ id: "openai/gpt-oss-20b" }, { id: "openai/gpt-oss-120b" }] });
+      }
+      const { model } = JSON.parse(String(init?.body));
+      if (model === "openai/gpt-oss-20b") return new Response(null, { status: 429 });
+      return Response.json({ choices: [{ finish_reason: "stop", message: { content: "Recovered with a second Groq model." } }] });
+    });
+
+    assert.equal(result.provider, "groq");
+    assert.equal(result.model, "openai/gpt-oss-120b");
+    assert.deepEqual(attempts, [
+      { model: "openai/gpt-oss-20b", status: "error", errorCode: "rate_limited" },
+      { model: "openai/gpt-oss-120b", status: "success", errorCode: undefined },
+    ]);
+  });
+
   it("discovers Groq models from /openai/v1/models and retries next candidate on output_truncated", async () => {
     const calledModels: Array<{ model: string; reasoning_effort?: string; max_completion_tokens?: number }> = [];
     const attempts: Array<{ provider: string; model: string; status: string; errorCode?: string; completionTokens?: number }> = [];
