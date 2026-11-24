@@ -70,7 +70,7 @@ export function AccountSettings({
             </div>
             <div className={styles.bufferChannels}>
               <h4>CANALES DE BUFFER</h4>
-              <p>Introduce el ID del canal de Buffer conectado a cada red.</p>
+              <p>Findly detecta el canal conectado en Buffer. Indica un ID solo si necesitas elegir entre varios canales de la misma red.</p>
               {account.networks.map((network) => (
                 <label key={network}>
                   <span>{network}</span>
@@ -96,7 +96,7 @@ export function AccountSettings({
                     onBlur={(event) => {
                       onChangeBufferChannel(account, network, event.currentTarget.value);
                     }}
-                    placeholder="ID del canal"
+                    placeholder="Detección automática"
                   />
                 </label>
               ))}

@@ -28,7 +28,6 @@ export interface BufferSyncAccount {
   id: string;
   name: string;
   apiKey: string | null;
-  bufferChannels: Partial<Record<SocialNetwork, string>>;
 }
 
 export interface BufferPostView {
@@ -132,7 +131,7 @@ async function queryBufferGraphql<T>(
     });
     if (!response.ok) return null;
     const body = (await response.json()) as { data?: T; errors?: unknown[] };
-    return body.data ?? null;
+    return body.errors?.length ? null : body.data ?? null;
   } catch {
     return null;
   }
@@ -225,6 +224,49 @@ function mapDiscoveredPosts(
   return posts;
 }
 
+function fetchBufferOrganizations(apiKey: string, fetchImpl: typeof fetch) {
+  return queryBufferGraphql<AccountOrgData>(
+    apiKey,
+    "query { account { organizations { id name } } }",
+    undefined,
+    fetchImpl,
+  );
+}
+
+function fetchBufferChannels(apiKey: string, organizationId: string, fetchImpl: typeof fetch) {
+  return queryBufferGraphql<ChannelsData>(
+    apiKey,
+    `query GetChannels($input: ChannelsInput!) {
+      channels(input: $input) { id name service }
+    }`,
+    { input: { organizationId } },
+    fetchImpl,
+  );
+}
+
+export async function discoverBufferChannel(
+  apiKey: string,
+  network: SocialNetwork,
+  fetchImpl: typeof fetch = fetch,
+): Promise<string> {
+  const unavailable = "No se pudieron consultar los canales de Buffer. Inténtalo de nuevo.";
+  const organizations = (await fetchBufferOrganizations(apiKey, fetchImpl))?.account?.organizations;
+  if (!organizations) throw new Error(unavailable);
+
+  const results = await Promise.all(organizations.map(({ id }) => fetchBufferChannels(apiKey, id, fetchImpl)));
+  const matches = new Set<string>();
+  for (const result of results) {
+    if (!result?.channels) throw new Error(unavailable);
+    for (const channel of result.channels) {
+      if (mapServiceToNetwork(channel.service) === network) matches.add(channel.id);
+    }
+  }
+
+  if (matches.size === 0) throw new Error(`Conecta un canal de ${network} en Buffer para esta cuenta y vuelve a intentarlo.`);
+  if (matches.size > 1) throw new Error(`Hay varios canales de ${network} en Buffer para esta cuenta. Indica el canal de destino en Cuentas.`);
+  return [...matches][0];
+}
+
 export async function fetchScheduledPostsForAccount(
   apiKey: string,
   accountName: string,
@@ -237,24 +279,12 @@ export async function fetchScheduledPostsForAccount(
   const cached = readBufferSyncCache(accountId, apiKey, useCache);
   if (cached) return cached;
 
-  const orgData = await queryBufferGraphql<AccountOrgData>(
-    apiKey,
-    "query { account { organizations { id name } } }",
-    undefined,
-    fetchImpl,
-  );
+  const orgData = await fetchBufferOrganizations(apiKey, fetchImpl);
   const orgId = orgData?.account?.organizations?.[0]?.id;
   if (!orgId) return { posts: [], channels: [] };
 
   const [channelsData, postsData] = await Promise.all([
-    queryBufferGraphql<ChannelsData>(
-      apiKey,
-      `query GetChannels($input: ChannelsInput!) {
-      channels(input: $input) { id name service }
-    }`,
-      { input: { organizationId: orgId } },
-      fetchImpl,
-    ),
+    fetchBufferChannels(apiKey, orgId, fetchImpl),
     queryBufferGraphql<PostsData>(
       apiKey,
       `query GetScheduledPosts($input: PostsInput!) {
@@ -287,7 +317,6 @@ export async function syncBufferScheduledPosts(
   accounts: BufferSyncAccount[],
   events: Array<{ id: string; title: string }>,
   existingBufferPostIds: Set<string>,
-  onChannelDiscovered?: (accountId: string, network: SocialNetwork, channelId: string) => Promise<void>,
   fetchImpl: typeof fetch = fetch,
 ): Promise<BufferPostView[]> {
   const resultPosts: BufferPostView[] = [];
@@ -295,13 +324,12 @@ export async function syncBufferScheduledPosts(
     accounts.map(async (account) => {
       if (!account.apiKey?.trim()) return null;
       try {
-        const syncResult = await fetchScheduledPostsForAccount(
+        return await fetchScheduledPostsForAccount(
           account.apiKey,
           account.name,
           account.id,
           fetchImpl,
         );
-        return { account, syncResult };
       } catch (error) {
         logger.warn("Failed to fetch scheduled posts for account during Buffer sync", { accountId: account.id, accountName: account.name }, error);
         return null;
@@ -309,22 +337,8 @@ export async function syncBufferScheduledPosts(
     }),
   );
 
-  for (const entry of syncedAccounts) {
-    if (!entry) continue;
-    const { account, syncResult } = entry;
-
-    for (const channel of syncResult.channels) {
-      if (!account.bufferChannels[channel.network]) {
-        account.bufferChannels[channel.network] = channel.channelId;
-        if (onChannelDiscovered) {
-          try {
-            await onChannelDiscovered(account.id, channel.network, channel.channelId);
-          } catch (error) {
-            logger.warn("Failed to persist discovered Buffer channel for account", { accountId: account.id, network: channel.network, channelId: channel.channelId }, error);
-          }
-        }
-      }
-    }
+  for (const syncResult of syncedAccounts) {
+    if (!syncResult) continue;
 
     for (const p of syncResult.posts) {
       if (existingBufferPostIds.has(p.bufferPostId)) continue;

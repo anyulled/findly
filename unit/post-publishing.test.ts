@@ -172,17 +172,48 @@ test("a transport timeout becomes reconciliation-required and a second dispatch 
   assert.equal(requests, 1);
 });
 
-test("a missing account/network channel fails before calling Buffer", async () => {
+test("publishes to a uniquely connected channel without a stored ID", async () => {
   const database = fakeSupabase();
-  let requests = 0;
-  const result = await schedulePostWithSupabase(post.id, database.supabase, "owner-uuid", async () => {
-    requests += 1;
-    return bufferResponse({});
+  const result = await schedulePostWithSupabase(post.id, database.supabase, "owner-uuid", async (_url, request) => {
+    assert.equal(new Headers(request?.headers).get("Authorization"), "Bearer mock-buffer-key");
+    const body = JSON.parse(String(request?.body));
+    if (body.query.includes("organizations")) {
+      return bufferResponse({ data: { account: { organizations: [{ id: "org-1" }, { id: "org-2" }] } } });
+    }
+    if (body.query.includes("GetChannels")) {
+      const channels = body.variables.input.organizationId === "org-2"
+        ? [{ id: "linkedin-channel", name: "LinkedIn profile", service: "linkedin" }]
+        : [{ id: "other-channel", name: "Bluesky profile", service: "bluesky" }];
+      return bufferResponse({ data: { channels } });
+    }
+    assert.equal(body.variables.input.channelId, "linkedin-channel");
+    return bufferResponse({ data: { createPost: { __typename: "PostActionSuccess", post: { id: "buffer-post", text: post.content } } } });
   });
-  assert.equal(result.kind, "failed");
-  assert.equal(database.state.status, "failed");
-  assert.equal(requests, 0);
+  assert.deepEqual(result, { kind: "scheduled", bufferPostId: "buffer-post" });
 });
+
+for (const scenario of ["missing", "ambiguous", "unavailable"]) {
+  test(`does not publish when channel discovery is ${scenario}`, async () => {
+    const database = fakeSupabase();
+    const queries: string[] = [];
+    const result = await schedulePostWithSupabase(post.id, database.supabase, "owner-uuid", async (_url, request) => {
+      const { query } = JSON.parse(String(request?.body));
+      queries.push(query);
+      if (query.includes("organizations")) {
+        return bufferResponse({ data: { account: { organizations: [{ id: "org-1" }] } } });
+      }
+      if (scenario === "unavailable") return bufferResponse({ errors: [{ message: "Unavailable" }] });
+      const channels = scenario === "ambiguous"
+        ? [{ id: "a", name: "Personal", service: "linkedin" }, { id: "b", name: "Page", service: "linkedin" }]
+        : [];
+      return bufferResponse({ data: { channels } });
+    });
+    assert.equal(result.kind, "failed");
+    assert.equal(database.state.status, "failed");
+    assert.equal(queries.length, 2);
+    assert.ok(queries.every((query) => !query.includes("createPost")));
+  });
+}
 
 test("persisted text is validated deterministically before Buffer is called", async () => {
   const tooLongPost = { ...post, network: "X", content: "x".repeat(281) };

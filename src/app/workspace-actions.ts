@@ -345,20 +345,11 @@ export async function loadWorkspace(): Promise<WorkspaceSnapshot> {
       id: acc.id ?? "",
       name: acc.name,
       apiKey: bufferCredentialForAccount(acc.name).apiKey,
-      bufferChannels: acc.bufferChannels,
     }));
     const bufferScheduledPosts = await syncBufferScheduledPosts(
       syncAccounts,
       events,
       existingBufferPostIds,
-      async (accountId, network, channelId) => {
-        await supabase.from("account_buffer_channels").upsert({
-          owner_id: ownerId,
-          account_id: accountId,
-          network,
-          buffer_channel_id: channelId,
-        }, { onConflict: "owner_id,account_id,network" });
-      },
     );
 
     return { accounts: accountsWithChannels, events, posts: [...posts, ...bufferScheduledPosts], sources, mode: settings?.mode === "automatic" ? "automatic" : "review", profile: extractUserProfile(user) };

@@ -26,7 +26,7 @@ Supabase free projects may pause after a week of sufficiently low activity. This
 ### Buffer
 
 1. Confirm the Buffer API is available on the owner account, create an API key with the required scope, and store it as the server-only `BUFFER_API_KEY_PERSONAL`, `BUFFER_API_KEY_BARCELONA_JUG`, and `BUFFER_API_KEY_SOFTWARE_CRAFTERS_BARCELONA` secrets, one for each managed account.
-2. In **Cuentas**, enter the Buffer channel ID for every configured account/network pair. A feed may target several accounts, but each post is sent to its account's matching network channel.
+2. Connect each social profile in Buffer. Findly discovers a unique channel for the post’s account and network when scheduling. If the account key can see multiple channels on the same network, use **Cuentas** to specify the intended channel. Existing explicit channel IDs take precedence.
 3. In global review mode, approve a post to schedule that one post and save its final text as a style example. Global automatic mode schedules newly generated posts immediately and does not create style examples.
 4. Check the Buffer queue to verify the selected channel and exact Madrid publication time. Findly converts `due_at` to UTC and submits a `customScheduled` time; 13:00 Europe/Madrid changes between UTC offsets with daylight saving time.
 5. Explicit Buffer rejections are marked failed; correct configuration or content and retry them. A timeout, server error or incomplete response is marked as needing reconciliation. Findly never retries that state automatically. Look up the post in Buffer and record its ID in the post detail before treating it as scheduled.
@@ -65,7 +65,7 @@ A connected owner can run **Ajustes → Fuentes → Sincronizar ahora** even wit
 
 ## Secret inventory
 
-Use the names in `.env.example`. Persistent-mode draft generation uses `GROQ_API_KEY` with automatic model discovery from `/openai/v1/models` and optional `GROQ_MODEL` to pin a preferred primary model (plus optional `OPENAI_API_KEY` and `OPENAI_MODEL` as intelligent fallback); the deployment also needs Supabase URL/publishable key and owner email. The Luma sync endpoint needs server-side Supabase service-role and cron secrets. Buffer scheduling needs the three server-only per-account Buffer API keys and a Buffer channel ID for every account/network pair in **Cuentas**. The public Supabase URL and publishable key are configuration values, not privileged credentials; browser database access remains protected by RLS. Never place Buffer/Groq/OpenAI/service-role/cron values in a `NEXT_PUBLIC_` variable. `JEV_API_KEY` is a reserved empty placeholder; the application does not call Jev.
+Use the names in `.env.example`. Persistent-mode draft generation uses `GROQ_API_KEY` with automatic model discovery from `/openai/v1/models` and optional `GROQ_MODEL` to pin a preferred primary model (plus optional `OPENAI_API_KEY` and `OPENAI_MODEL` as intelligent fallback); the deployment also needs Supabase URL/publishable key and owner email. The Luma sync endpoint needs server-side Supabase service-role and cron secrets. Buffer scheduling needs the server-only API key for each active account and a connected channel in Buffer. The public Supabase URL and publishable key are configuration values, not privileged credentials; browser database access remains protected by RLS. Never place Buffer/Groq/OpenAI/service-role/cron values in a `NEXT_PUBLIC_` variable. `JEV_API_KEY` is a reserved empty placeholder; the application does not call Jev.
 
 ## Review and automatic modes
 

@@ -152,8 +152,6 @@ test("fetchScheduledPostsForAccount discovers channels and retrieves scheduled p
 });
 
 test("syncBufferScheduledPosts aggregates posts across accounts and links matching events", async () => {
-  const discovered: Array<{ accountId: string; network: string; channelId: string }> = [];
-
   const mockFetch: typeof fetch = async (_url, init) => {
     const body = JSON.parse(init?.body as string) as { query: string };
     if (body.query.includes("organizations")) {
@@ -200,8 +198,8 @@ test("syncBufferScheduledPosts aggregates posts across accounts and links matchi
   };
 
   const accounts: BufferSyncAccount[] = [
-    { id: "acc-no-key", name: "Empty", apiKey: null, bufferChannels: {} },
-    { id: "acc-with-key", name: "Barcelona JUG", apiKey: "valid-key", bufferChannels: {} },
+    { id: "acc-no-key", name: "Empty", apiKey: null },
+    { id: "acc-with-key", name: "Barcelona JUG", apiKey: "valid-key" },
   ];
   const events = [{ id: "event-java-27", title: "Lightning Talks: Java 27" }];
   const existingBufferPostIds = new Set(["post-existing"]);
@@ -210,16 +208,8 @@ test("syncBufferScheduledPosts aggregates posts across accounts and links matchi
     accounts,
     events,
     existingBufferPostIds,
-    async (accountId, network, channelId) => {
-      discovered.push({ accountId, network, channelId });
-    },
     mockFetch,
   );
-
-  // Channel discovery callback fired
-  assert.equal(discovered.length, 1);
-  assert.deepEqual(discovered[0], { accountId: "acc-with-key", network: "X", channelId: "chan-x" });
-  assert.equal(accounts[1].bufferChannels.X, "chan-x");
 
   // Only post-new was added (post-existing was skipped)
   assert.equal(posts.length, 1);
@@ -232,7 +222,7 @@ test("syncBufferScheduledPosts aggregates posts across accounts and links matchi
   assert.equal(posts[0].status, "scheduled");
 });
 
-test("syncBufferScheduledPosts survives onChannelDiscovered error and fetch error", async () => {
+test("syncBufferScheduledPosts survives a scheduled-post fetch error", async () => {
   const mockFetch: typeof fetch = async (_url, init) => {
     const body = JSON.parse(init?.body as string) as { query: string };
     if (body.query.includes("organizations")) {
@@ -249,21 +239,17 @@ test("syncBufferScheduledPosts survives onChannelDiscovered error and fetch erro
   };
 
   const accounts: BufferSyncAccount[] = [
-    { id: "acc-1", name: "Personal", apiKey: "key", bufferChannels: {} },
+    { id: "acc-1", name: "Personal", apiKey: "key" },
   ];
 
   const posts = await syncBufferScheduledPosts(
     accounts,
     [],
     new Set(),
-    async () => {
-      throw new Error("DB upsert failed");
-    },
     mockFetch,
   );
 
   assert.deepEqual(posts, []);
-  assert.equal(accounts[0].bufferChannels.X, "chan-1");
 });
 
 test("computeNextSlotFromSchedule picks the earliest available slot and skips occupied slots", () => {
