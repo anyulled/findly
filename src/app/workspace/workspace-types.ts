@@ -81,7 +81,7 @@ export const defaultAccounts: Account[] = [
     bufferApiKeyEnv: "BUFFER_API_KEY_SOFTWARE_CRAFTERS_BARCELONA",
     bufferApiKeyConfigured: false,
     prompt: "Tono profesional y acogedor. Destaca la comunidad y el aprendizaje.",
-    networks: ["LinkedIn", "Bluesky"],
+    networks: ["LinkedIn", "Bluesky", "X"],
     bufferChannels: {},
     styleExampleCount: 0,
   },

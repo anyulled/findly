@@ -34,6 +34,15 @@ begin
     raise exception 'Bootstrap overwrote pre-existing account configuration';
   end if;
   if not exists (
+    select 1 from public.accounts
+    where owner_id = '35000000-0000-4000-8000-000000000001'
+      and managed_account_key = 'software_crafters_barcelona'
+      and networks @> array['LinkedIn', 'X', 'Bluesky']
+      and cardinality(networks) = 3
+  ) then
+    raise exception 'Software Crafters bootstrap did not include all three networks';
+  end if;
+  if not exists (
     select 1 from public.account_buffer_channels
     where owner_id = '35000000-0000-4000-8000-000000000001'
       and account_id = '35000000-0000-4000-8000-000000000002'
