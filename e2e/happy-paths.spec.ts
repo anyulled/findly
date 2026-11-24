@@ -276,6 +276,7 @@ test("stores a Luma iCal source linked to multiple accounts", async ({ page }) =
   await page.getByLabel("URL de suscripción iCal").fill("https://calendar.example.com/updated.ics");
   await page.getByRole("button", { name: "Guardar cambios" }).click();
   await expect(page.getByRole("status")).toHaveText("Fuente actualizada en el navegador.");
+  await expect(source.getByRole("checkbox", { name: "Activa" })).not.toBeChecked();
   await page.reload();
   await page.getByRole("button", { name: "Ajustes" }).click();
   await page.getByRole("tab", { name: "Fuentes de eventos y publicaciones" }).click();

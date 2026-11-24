@@ -218,6 +218,7 @@ export function SourceSettings({ accounts, sources, persistent, onSourcesChange,
       return;
     }
 
+    setPending(true);
     try {
       const result = await setSourceEnabled(source.id, nextEnabled);
       if (!result.success) {
@@ -227,6 +228,8 @@ export function SourceSettings({ accounts, sources, persistent, onSourcesChange,
       onSourcesChange(sources.map((s) => (s.id === source.id ? { ...s, enabled: nextEnabled } : s)));
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "No se pudo actualizar el estado de la fuente.");
+    } finally {
+      setPending(false);
     }
   }
 
